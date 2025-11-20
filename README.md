@@ -1,132 +1,630 @@
-# RAJA Project Template
+# OGhidra - AI-Powered Reverse Engineering with Ghidra
 
-This project is a template that demonstrates how to use RAJA and BLT in an
-application project that uses CMake or Make.
+OGhidra bridges Large Language Models (LLMs) via Ollama with the Ghidra reverse engineering platform, enabling AI-driven binary analysis through natural language. Interact with Ghidra using conversational queries and automate complex reverse engineering workflows.
 
-## Quick Start using CMake
+## What is OGhidra?
 
-Clone this repository, and all the submodules:
+OGhidra combines the power of local LLMs with Ghidra's reverse engineering capabilities, allowing you to:
+- **Analyze binaries using natural language** - Ask questions about functions, strings, imports, and more
+- **Automate reverse engineering workflows** - Rename functions, analyze patterns, generate reports
+- **Use local AI models** - Complete privacy with models running on your own hardware
+- **Work with modern GUI or CLI** - Choose the interface that suits your workflow
 
-    git clone --recursive https://github.com/llnl/raja-project-template
+## Use Cases
 
-Before we describe how to build the project, it is important to note that 
-it requires out-of-source builds.
+- **Malware Analysis**: Quickly identify suspicious functions and behavioral patterns
+- **Vulnerability Research**: Analyze imports, strings, and function relationships
+- **Code Understanding**: Get AI-powered explanations of complex decompiled code
+- **Bulk Operations**: Rename hundreds of functions with intelligent AI suggestions
+- **Report Generation**: Create comprehensive security assessments and software reports
 
-To configure and build this project using a default compiler on your system,
-first create a build subdirectory in the top-level directory of this repo and 
-then run CMake and make:
+---
 
-    mkdir build && cd build
-    cmake ../
-    make
+## 📋 Pre-Installation Requirements
 
-This will create the binary `example.exe` in the `./bin` directory. 
+Before installing OGhidra, you need to set up three core components: **Ghidra**, **GhidraMCP**, and **Ollama**.
 
-When you run the executable, you will see that it runs a sequential CPU kernel.
-You can also run an OpenMP multithreaded CPU kernel or a CUDA GPU kernel by 
-enabling those features when you run CMake, specifically, passing the following
-options to CMake:
+### System Requirements
 
-- `-DENABLE_OPENMP=On` will enable the OpenMP back-end (RAJA default: `On`)
-- `-DENABLE_CUDA=On` will enable the CUDA back-end (RAJA default: `Off`)
+**Python Version**:
+- **Minimum**: Python 3.10 or later
+- **Recommended**: Python 3.12 or Python 3.13 
+- **Check your version**: Run `python --version` or `python3 --version`
 
-If you want to experiment with RAJA before trying it in your application, 
-you can modify the file `./src/example.cpp`, and rebuild the code by running 
-`make` in the `build` directory you created earlier.
+**Hardware Requirements**:
+- **RAM**: 
+  - Minimum 8GB (for lightweight models like `gemma3:27b`)
+  - 32GB+ recommended for large models (`gpt-oss:120b`)
+- **Storage**: 50GB+ free space (for models and analysis data)
+- **OS**: Windows 10+, Linux (Ubuntu 20.04+), or macOS 11+
 
-## Using CMake and an Installed Version of RAJA
+### Step 1: Install Ghidra
 
-This project can also be configured to use a pre-installed version of RAJA. 
-This is the recommended method for using RAJA in most applications. Please 
-see the [RAJA documentation]() for details on building and installing RAJA.
+Ghidra is the NSA's reverse engineering platform that OGhidra enhances with AI capabilities.
 
-Once you have RAJA installed, configure the project by specifying the RAJA
-location using the CMake option `RAJA_DIR`:
+1. **Download Ghidra 11.3 or later** from the official repository:
+   - [Ghidra Releases](https://github.com/NationalSecurityAgency/ghidra/releases)
+   - Recommended: [Ghidra 11.3.2](https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_11.3.2_build/ghidra_11.3.2_PUBLIC_20250415.zip)
 
-    cmake -DRAJA_DIR=<path to RAJA install directory>/share/raja/cmake ../
+2. **Extract the downloaded archive** to your desired installation directory
 
-Then build as before:
+3. **Install Java Development Kit (JDK) 17 or later** if not already installed:
+   - Download from [Oracle](https://www.oracle.com/java/technologies/downloads/) or use OpenJDK
+   - Verify installation: `java -version`
 
-    make
+4. **Launch Ghidra** using the appropriate script:
+   - Windows: Run `ghidraRun.bat`
+   - Linux/Mac: Run `./ghidraRun`
 
-If you are building your application against an installed version of RAJA,
-it's important to make sure that the options you passed to CMake to build
-RAJA match the options you use to build this project, apart from the one 
-indicated above.
+5. **Create or open a project** and import a binary file for analysis
 
-## Using RAJA with Make
+### Step 2: Install GhidraMCP Plugin
 
-To use RAJA in a project with a make-based build system, you need to add the
-`include` directory where RAJA is installed to your compile flags and 
-link against the installed RAJA library. You must also ensure that you add 
-the appropriate flags for any RAJA features you have enabled (e.g. `-fopenmp` 
-or equivalent if you built RAJA with OpenMP enabled).
+GhidraMCP provides the API bridge that allows external tools (like OGhidra) to interact with Ghidra programmatically.
 
-For completeness, to compile and link the example in this project using the g++ 
-compiler, you could do the following on the command line:
+1. **Download the GhidraMCP plugin**:
+   - [GhidraMCP Repository](https://github.com/LaurieWired/GhidraMCP)
+   - Direct download: [GhidraMCP 1.3+](https://github.com/LaurieWired/GhidraMCP/releases)
 
-    g++ -I <path to RAJA install directory>/include -std=c++11 -fopenmp ./src/example.cpp -o example.exe <path to RAJA install directory>/lib/libRAJA.a
+2. **Install the plugin in Ghidra**:
+   - Open Ghidra
+   - Go to `File` → `Install Extensions`
+   - Click the `+` button
+   - Select the downloaded `GhidraMCP-release-X-X.zip` file
+   - Click `OK` to install
 
-Since most applications contain more than one source file, you probably want
-to create a Makefile to use to build your project. Here are the contents of a
-simple Makefile that builds the example in this project:
+3. **Restart Ghidra** to load the extension
 
-    CXX=<compiler executable>
-    CXXFLAGS=-I$(INC_DIR) -std=c++11 -fopenmp
+4. **Enable the GhidraMCP plugin**:
+   - Go to `File` → `Configure` → `Developer`
+   - Check the box for `GhidraMCPPlugin`
+   - Click `OK`
 
-    INC_DIR =<path to RAJA install directory>/include
-    LIB_DIR =<path to RAJA install directory>/include/lib
+5. **Configure the server port** (optional):
+   - Go to `Edit` → `Tool Options` → `GhidraMCP HTTP Server`
+   - Default port is `8080` - change if needed
+   - Click `OK`
 
-    LIBS=-lRAJA
+6. **Verify the server is running**:
+   - With a project open, the GhidraMCP server should start automatically
+   - Check Ghidra's console for "GhidraMCP server started" message
 
-    SRC_DIR=./src
-    OBJ_DIR=$(SRC_DIR)
+### Step 3: Install Ollama
 
-    OBJ = example.o
+Ollama is the local LLM runtime that powers OGhidra's AI capabilities.
 
-    $(OBJ_DIR)/%.o: $(SRC_DIR)/%.cpp
-         $(CXX) -c -o $@ $< $(CXXFLAGS)
+1. **Download and install Ollama**:
+   - [Ollama Official Website](https://ollama.com)
+   - [Ollama GitHub Repository](https://github.com/ollama/ollama)
+   - Available for Windows, macOS, and Linux
 
-    example.exe: $(OBJ_DIR)/$(OBJ)
-         $(CXX) -o $@ $^ $(CXXFLAGS) -L $(LIB_DIR) $(LIBS)
+2. **Verify Ollama installation**:
+   ```bash
+   ollama --version
+   ```
 
-    .PHONY: clean
+3. **Start the Ollama service**:
+   ```bash
+   ollama serve
+   ```
+   - This runs the Ollama API server on `http://localhost:11434`
+   - Keep this terminal running, or set up Ollama as a system service
 
-    clean:
-         rm -f $(OBJ_DIR)/*.o example.exe
+4. **Download required AI models**:
+   
+   Open a new terminal and pull the following models:
 
-To try it out, you can copy these lines into a file called Makefile in the 
-top-level project directory and type 'make'. The executable `example.exe` will 
-be generated in the same directory.
+   ```bash
+   # Primary reasoning model (large, high quality)
+   ollama pull gpt-oss:120b
+   
+   # Alternative primary model (faster, good balance)
+   ollama pull gemma3:27b
+   
+   # Embedding model for vector search (RAG)
+   ollama pull all-minilm:33m
+   ```
 
-## Next Steps
+   **Model Details**:
+   - `gpt-oss:120b` - Large open-source GPT model, best quality for complex analysis (requires ~80GB RAM)
+   - `gemma3:27b` - Google's Gemma 3 model, excellent balance of speed and quality (~20GB RAM)
+   - `all-minilm:33m` - Lightweight embedding model for semantic search and RAG features
 
-- For more information on RAJA, check out the RAJA
-  [tutorial](https://raja.readthedocs.io/en/master)
-- For more information on using BLT and CMake, check out the BLT
-  [tutorial](https://llnl-blt.readthedocs.io/en/develop)
+5. **Verify models are installed**:
+   ```bash
+   ollama list
+   ```
 
-If you have questions, comments or ideas, please join the RAJA mailing list on
-Google Groups [here](https://groups.google.com/forum/#!forum/raja-users).
+---
 
-## License
+## 🚀 OGhidra Installation
 
-RAJA is licensed under the BSD 3-Clause license, (BSD-3-Clause or
-https://opensource.org/licenses/BSD-3-Clause).
+Now that prerequisites are installed, set up OGhidra itself.
 
-Copyrights and patents in the RAJA project are retained by contributors.  No
-copyright assignment is required to contribute to RAJA.
+### Step 0: Verify Python Version
 
-Unlimited Open Source - BSD 3-clause Distribution
-`LLNL-CODE-689114`  `OCEC-16-063`
+Ensure you have Python 3.12 or later installed:
 
-## SPDX usage
+```bash
+python --version
+# or
+python3 --version
+```
 
-Individual files contain SPDX tags instead of the full license text.
-This enables machine processing of license information based on the SPDX
-License Identifiers that are available here: https://spdx.org/licenses/
 
-Files that are licensed as BSD 3-Clause contain the following
-text in the license header:
+### Step 1: Clone the Repository
 
-    SPDX-License-Identifier: (BSD-3-Clause)
+```bash
+git clone https://github.com/yourusername/OGhidra.git
+cd OGhidra
+```
+
+### Step 2: Create Python Virtual Environment (Recommended)
+
+```bash
+# Create virtual environment
+python -m venv venv
+
+# Activate it
+# On Windows:
+.\venv\Scripts\activate
+
+# On Linux/Mac:
+source venv/bin/activate
+```
+
+### Step 3: Install Python Dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+### Step 4: Configure Environment Variables
+
+1. **Copy the example configuration**:
+   ```bash
+   # On Windows:
+   copy .envexample .env
+   
+   # On Linux/Mac:
+   cp .envexample .env
+   ```
+
+2. **Edit `.env` file** with your preferred text editor and configure (or leave as is):
+
+   ```env
+   # Ollama Configuration
+   OLLAMA_API_URL=http://localhost:11434
+   OLLAMA_MODEL=gemma3:27b
+   
+   # Alternative: Use gpt-oss for higher quality (requires more RAM)
+   # OLLAMA_MODEL=gpt-oss:120b
+   
+   # GhidraMCP Server Configuration
+   GHIDRA_MCP_URL=http://localhost:8080
+   GHIDRA_MCP_EXTENDED_URL=http://localhost:8081
+   
+   # Memory and RAG Settings
+   SESSION_HISTORY_ENABLED=true
+   SESSION_HISTORY_USE_VECTOR_EMBEDDINGS=true
+   
+   # CAG (Cache-Augmented Generation) Settings
+   CAG_ENABLED=true
+   CAG_KNOWLEDGE_CACHE_ENABLED=true
+   CAG_SESSION_CACHE_ENABLED=true
+
+   # LLM Logging Configuration
+   # Enable comprehensive logging of all LLM interactions (prompts, responses, timing, tokens)
+   LLM_LOGGING_ENABLED=true
+   LLM_LOG_FILE=logs/llm_interactions.log
+   LLM_LOG_PROMPTS=true
+   LLM_LOG_RESPONSES=true
+   LLM_LOG_TOKENS=true
+   LLM_LOG_TIMING=true
+   LLM_LOG_FORMAT=json
+   ```
+
+### Step 5: Verify Installation
+
+1. **Ensure Ghidra is running** with a project open and GhidraMCP plugin enabled
+
+2. **Ensure Ollama is running**:
+   ```bash
+   ollama serve
+   ```
+
+3. **Launch OGhidra CLI** in interactive mode to test:
+   ```bash
+   python main.py --interactive
+   ```
+
+4. **Run health check**:
+   ```
+   health
+   ```
+   
+   You should see successful connections to both Ollama and GhidraMCP servers.
+
+---
+
+## 💻 How to Use OGhidra
+
+OGhidra offers two primary interfaces: **GUI Mode** (recommended for most users) and **Interactive CLI Mode** (for scripting and advanced users).
+
+### GUI Mode (Recommended)
+
+The graphical interface provides the most intuitive experience with visual feedback and one-click operations.
+
+**Launch the GUI**:
+```bash
+python main.py --ui
+```
+
+#### GUI Interface Overview
+
+**Left Panel - Workflow & Status**:
+- Real-time workflow progress tracking
+- Memory usage monitoring
+- CAG (Cache-Augmented Generation) status
+- List of renamed functions during session
+
+**Right Panel - Interaction**:
+- **Query Input Box**: Type natural language questions or commands
+- **AI Response Area**: View detailed AI analysis with syntax highlighting
+- **Smart Tool Buttons**: One-click access to common operations
+
+**Menu Bar**:
+- **File**: Save/load sessions, exit application
+- **Tools**: Server configuration, system settings
+- **Help**: Documentation and about information
+
+#### Smart Tool Buttons
+
+Use these one-click buttons for common reverse engineering tasks:
+
+| Button | Function | Description |
+|--------|----------|-------------|
+| 🔍 **Analyze Current Function** | Analyze selected function | AI-powered deep dive into current function's behavior |
+| ✏️ **Rename Current Function** | Intelligent rename | AI suggests meaningful names based on function behavior |
+| 📦 **Rename All Functions** | Bulk rename | Systematically rename all functions in binary |
+| 📥 **Analyze Imports** | Import analysis | Identify libraries, system calls, and external dependencies |
+| 🔤 **Analyze Strings** | String analysis | Find embedded URLs, credentials, configuration data |
+| 📤 **Analyze Exports** | Export analysis | Analyze exported functions and API surface |
+| 📊 **Generate Software Report** | Create report | Comprehensive security assessment in MD/JSON/HTML |
+
+#### Natural Language Queries
+
+In the query input box, you can ask questions naturally:
+
+- "What does the function at 0x00401000 do?"
+- "Show me all functions that call CreateProcess"
+- "Find suspicious string operations"
+- "Analyze the main function and explain its logic"
+- "List all network-related imports"
+
+### Interactive CLI Mode
+
+For advanced users, scripting, and automation workflows.
+
+**Launch CLI Mode**:
+```bash
+python main.py --interactive
+```
+
+#### Available Commands
+
+| Command | Usage | Description |
+|---------|-------|-------------|
+| `run-tools analyze_function` | `run-tools analyze_function <name_or_addr>` | Decompile and analyze specific function |
+| `run-tools strings` | `run-tools strings` | List all strings in the binary |
+| `run-tools imports` | `run-tools imports` | Display imported functions and libraries |
+| `run-tools exports` | `run-tools exports` | Show exported symbols |
+| `health` | `health` | Check Ollama and GhidraMCP connectivity |
+| `tools` | `tools` | List all available tools/commands |
+| `models` | `models` | Show available Ollama models |
+| `cag` | `cag` | Display CAG status and cache information |
+| `memory-stats` | `memory-stats` | View session memory statistics |
+| `help` | `help` | Show command help |
+| `exit` / `quit` | `exit` | Exit interactive mode |
+
+#### Example CLI Session
+
+```
+OGhidra> health
+✓ Ollama server: Connected (http://localhost:11434)
+✓ GhidraMCP server: Connected (http://localhost:8080)
+✓ Models available: gemma3:27b, gpt-oss:120b
+
+OGhidra> run-tools imports
+Analyzing imported functions...
+[AI analyzes imports and provides insights]
+
+OGhidra> Explain the main function
+[AI plans analysis, decompiles main, and provides detailed explanation]
+
+OGhidra> exit
+```
+
+---
+
+## 🔄 Common Workflows
+
+### Workflow 1: Bulk Function Renaming
+
+One of OGhidra's most powerful features is intelligently renaming all functions in a binary.
+
+**Using GUI**:
+1. Click the **"📦 Rename All Functions"** button
+2. Select renaming mode in the dialog:
+   - **Full**: Rename all functions with detailed analysis
+   - **Quick**: Faster renaming with basic analysis
+   - **Loading Vectors**: Use vector embeddings for context-aware naming
+3. Monitor progress in the workflow panel
+4. Review renamed functions in the left panel list
+
+**Using CLI**:
+```
+OGhidra> Rename all functions in this binary using full analysis
+```
+
+![Function Enumeration Example](https://github.com/user-attachments/assets/675a6971-c4d2-42bc-a932-50508071dfa7)
+
+**Renaming Process**:
+1. **Enumeration**: OGhidra lists all functions in the binary
+2. **Analysis**: AI analyzes each function's decompiled code, called functions, and string references
+3. **Naming**: Generates meaningful names based on behavior (e.g., `check_license`, `decrypt_config`, `send_network_data`)
+4. **Application**: Applies names to Ghidra project
+5. **Caching**: Stores results in session cache for future reference
+
+**Vector Loading Option**:
+- When enabled, OGhidra builds a vector embedding database of all functions
+- Enables semantic search: "Find all crypto functions" or "Show error handling code"
+- Useful for large binaries (1000+ functions)
+
+### Workflow 2: Security Analysis
+
+Perform comprehensive security assessment of a binary.
+
+**Using GUI**:
+1. Click **"📥 Analyze Imports"** to identify libraries and system calls
+2. Click **"🔤 Analyze Strings"** to find hardcoded credentials, URLs, or suspicious patterns
+3. Click **"📊 Generate Software Report"** and select HTML format
+4. Open the generated report in your browser for full security assessment
+
+**Using CLI**:
+```
+OGhidra> analyze security risks in this binary
+OGhidra> find all network communication functions
+OGhidra> identify potential vulnerabilities
+```
+
+### Workflow 3: Understanding a Specific Function
+
+**Using GUI**:
+1. In Ghidra, select the function you want to analyze
+2. In OGhidra, type: "Analyze the current function in detail"
+3. Review the AI's explanation of the function's logic, parameters, and behavior
+
+**Using CLI**:
+```
+OGhidra> run-tools analyze_function sub_401000
+OGhidra> What does this function do?
+OGhidra> Are there any security issues in this function?
+```
+
+### Workflow 4: Malware Behavioral Analysis
+
+**Typical workflow for analyzing suspected malware**:
+
+1. **Import Analysis**: Identify suspicious APIs (e.g., `VirtualAlloc`, `WriteProcessMemory`, `CreateRemoteThread`)
+2. **String Analysis**: Find C2 domains, registry keys, file paths, crypto constants
+3. **Function Renaming**: Rename key functions for better understanding
+4. **Export Analysis**: Identify DLL exports if analyzing a library
+5. **Report Generation**: Create comprehensive report for documentation
+
+**Example GUI Session**:
+```
+1. Click "Analyze Imports" → Review process injection APIs
+2. Click "Analyze Strings" → Find C2 server: "evil.com"
+3. Type query: "Find all functions that use VirtualAlloc"
+4. Select function → Click "Rename Current Function" → AI suggests "inject_shellcode"
+5. Click "Generate Software Report" (HTML) → Share with team
+```
+
+---
+
+## 📊 Software Report Generation
+
+OGhidra can generate comprehensive analysis reports in multiple formats.
+
+### Report Contents
+
+- **Executive Summary**: Software classification, purpose, threat level
+- **Binary Overview**: Statistics on functions, imports, exports, memory segments
+- **Architecture Analysis**: Code quality, design patterns, complexity metrics
+- **Function Analysis**: Categorized analysis with renamed function tracking
+- **Security Assessment**: Risk breakdown, suspicious indicators, CVE references
+- **Behavioral Analysis**: Workflows, network behavior, file operations, registry access
+
+### Generating Reports
+
+**GUI Method**:
+1. Click the **"📊 Generate Software Report"** button
+2. Select output format:
+   - **Markdown (.md)**: Human-readable, version-control friendly
+   - **JSON (.json)**: Machine-readable for automation/integration
+   - **HTML (.html)**: Formatted web page with styling
+3. Choose save location
+4. Wait for generation (may take several minutes for large binaries)
+
+**CLI Method**:
+```
+OGhidra> generate a comprehensive security report for this binary
+```
+
+**Output Location**: Reports are saved in the `reports/` directory by default.
+
+---
+
+## ⚙️ Server Configuration
+
+For distributed setups (e.g., running Ollama on a GPU server), configure remote servers through the GUI.
+
+### Using GUI Configuration Dialog
+
+1. Go to **Tools** → **Server Configuration**
+2. Configure settings:
+   - **Ollama Server URL**: Default `http://localhost:11434`, change to remote GPU server if needed
+   - **Ollama Model**: Select from dropdown of available models
+   - **GhidraMCP Server URL**: Default `http://localhost:8080`
+   - **Extended API URL**: Default `http://localhost:8081`
+3. Click **Test Connection** to verify
+4. Click **Save** - changes apply immediately without restart
+
+### Remote Ollama Setup Example
+
+```env
+# .env configuration for remote GPU server
+OLLAMA_API_URL=http://192.168.1.100:11434
+OLLAMA_MODEL=gpt-oss:120b
+
+# Local GhidraMCP
+GHIDRA_MCP_URL=http://localhost:8080
+```
+
+This allows you to:
+- Run heavyweight models (120B+) on dedicated GPU servers
+- Share Ollama instance across team
+- Keep Ghidra local while offloading AI processing
+
+---
+
+## 🧠 Advanced Features
+
+### Session Memory & RAG (Retrieval-Augmented Generation)
+
+OGhidra remembers previous analysis sessions and can retrieve relevant context:
+
+- **Session History**: Automatically saves all queries and responses
+- **Vector Embeddings**: Converts analysis results into searchable vectors
+- **Contextual Queries**: AI references past analysis when answering new questions
+
+**Enable in `.env`**:
+```env
+SESSION_HISTORY_ENABLED=true
+SESSION_HISTORY_USE_VECTOR_EMBEDDINGS=true
+```
+
+**CLI Commands**:
+- `memory-stats` - View memory database statistics
+- `memory-clear` - Clear session history
+- `memory-vectors-on` / `memory-vectors-off` - Toggle vector embeddings
+
+### CAG (Cache-Augmented Generation)
+
+CAG injects cached knowledge directly into AI prompts for better performance:
+
+- **Knowledge Cache**: Pre-loaded Ghidra commands, workflows, and patterns
+- **Session Cache**: Decompiled functions and renamed functions from current session
+- **Reduced Tokens**: Faster responses by reusing cached information
+
+**Enable in `.env`**:
+```env
+CAG_ENABLED=true
+CAG_KNOWLEDGE_CACHE_ENABLED=true
+CAG_SESSION_CACHE_ENABLED=true
+CAG_TOKEN_LIMIT=2000
+```
+
+**View CAG Status**: Type `cag` in CLI mode or check GUI memory panel
+
+### Multi-Phase AI Architecture
+
+OGhidra uses a three-phase AI processing system:
+
+1. **Planning Phase**: AI analyzes your query and creates a multi-step plan
+2. **Execution Phase**: Plan is executed deterministically with error correction
+3. **Review Phase**: Results are synthesized into a comprehensive answer
+
+This architecture prevents AI hallucination and ensures reliable tool execution.
+
+---
+
+## 🔧 Troubleshooting
+
+### Common Issues
+
+**Issue**: "Python version incompatible" or dependency installation failures
+- **Solution**: Verify Python version with `python --version`
+- Minimum required: Python 3.10
+- Recommended: Python 3.12 or 3.13
+- If using older Python (3.8, 3.9), upgrade to 3.12+
+- Create a fresh virtual environment after upgrading
+
+**Issue**: "Cannot connect to Ollama server"
+- **Solution**: Ensure Ollama is running (`ollama serve`)
+- Verify URL in `.env` matches Ollama server: `OLLAMA_API_URL=http://localhost:11434`
+- Check firewall settings if using remote server
+
+**Issue**: "GhidraMCP connection failed"
+- **Solution**: Ensure Ghidra is running with a project open
+- Verify GhidraMCP plugin is enabled in `File` → `Configure` → `Developer`
+- Check port configuration in Ghidra: `Edit` → `Tool Options` → `GhidraMCP HTTP Server`
+
+**Issue**: "Model not found"
+- **Solution**: Pull the model using Ollama: `ollama pull gemma3:27b`
+- Verify with `ollama list`
+- Update `.env` to use an available model
+
+**Issue**: "Out of memory" when using large models
+- **Solution**: Switch to smaller model: `OLLAMA_MODEL=gemma3:27b` instead of `gpt-oss:120b`
+- Close other applications to free RAM
+- Consider using remote Ollama server with more RAM
+
+**Issue**: "Function renaming is slow"
+- **Solution**: Use "Quick" mode instead of "Full" for faster renaming
+- Disable vector loading if not needed
+- Reduce `CAG_TOKEN_LIMIT` in `.env`
+
+### Health Check
+
+Always start troubleshooting with a health check:
+
+**GUI**: View connection status in Memory Info panel (left side)
+
+**CLI**:
+```bash
+python main.py --interactive
+# Then type:
+health
+```
+
+This shows the status of all connections and identifies configuration issues.
+
+---
+
+## 📚 Additional Resources
+
+- **Installation Tutorial**: [YouTube Video](https://www.youtube.com/watch?v=6Vopm0t1ZlY)
+- **Ghidra Documentation**: [https://ghidra-sre.org](https://ghidra-sre.org)
+- **GhidraMCP Repository**: [https://github.com/LaurieWired/GhidraMCP](https://github.com/LaurieWired/GhidraMCP)
+- **Ollama Documentation**: [https://ollama.com/docs](https://ollama.com/docs)
+
+## 📧 Support
+
+For setup assistance or questions:
+- Email: enochsurge@gmail.com
+- Open an issue on GitHub
+- Check existing documentation in the repository
+
+License
+----------------
+
+OGhidra is distributed under the terms of the BSD license. 
+
+See [LICENSE-BSD](https://github.com/spack/spack/blob/develop/LICENSE-MIT),
+[NOTICE](https://github.com/spack/spack/blob/develop/NOTICE) for details.
+
+LLNL-CODE-2013290
+
+
