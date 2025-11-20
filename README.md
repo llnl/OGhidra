@@ -22,7 +22,7 @@ OGhidra combines the power of local LLMs with Ghidra's reverse engineering capab
 
 ---
 
-## 📋 Pre-Installation Requirements
+## Pre-Installation Requirements
 
 Before installing OGhidra, you need to set up three core components: **Ghidra**, **GhidraMCP**, and **Ollama**.
 
@@ -286,13 +286,13 @@ Use these one-click buttons for common reverse engineering tasks:
 
 | Button | Function | Description |
 |--------|----------|-------------|
-| 🔍 **Analyze Current Function** | Analyze selected function | AI-powered deep dive into current function's behavior |
-| ✏️ **Rename Current Function** | Intelligent rename | AI suggests meaningful names based on function behavior |
-| 📦 **Rename All Functions** | Bulk rename | Systematically rename all functions in binary |
-| 📥 **Analyze Imports** | Import analysis | Identify libraries, system calls, and external dependencies |
-| 🔤 **Analyze Strings** | String analysis | Find embedded URLs, credentials, configuration data |
-| 📤 **Analyze Exports** | Export analysis | Analyze exported functions and API surface |
-| 📊 **Generate Software Report** | Create report | Comprehensive security assessment in MD/JSON/HTML |
+| **Analyze Current Function** | Analyze selected function | AI-powered deep dive into current function's behavior |
+| **Rename Current Function** | Intelligent rename | AI suggests meaningful names based on function behavior |
+| **Rename All Functions** | Bulk rename | Systematically rename all functions in binary |
+| **Analyze Imports** | Import analysis | Identify libraries, system calls, and external dependencies |
+| **Analyze Strings** | String analysis | Find embedded URLs, credentials, configuration data |
+| **Analyze Exports** | Export analysis | Analyze exported functions and API surface |
+| **Generate Software Report** | Create report | Comprehensive security assessment in MD/JSON/HTML |
 
 #### Natural Language Queries
 
@@ -451,7 +451,7 @@ OGhidra can generate comprehensive analysis reports in multiple formats.
 ### Generating Reports
 
 **GUI Method**:
-1. Click the **"📊 Generate Software Report"** button
+1. Click the **"Generate Software Report"** button
 2. Select output format:
    - **Markdown (.md)**: Human-readable, version-control friendly
    - **JSON (.json)**: Machine-readable for automation/integration
@@ -605,14 +605,14 @@ This shows the status of all connections and identifies configuration issues.
 
 ---
 
-## 📚 Additional Resources
+## Additional Resources
 
 - **Installation Tutorial**: [YouTube Video](https://www.youtube.com/watch?v=6Vopm0t1ZlY)
 - **Ghidra Documentation**: [https://ghidra-sre.org](https://ghidra-sre.org)
 - **GhidraMCP Repository**: [https://github.com/LaurieWired/GhidraMCP](https://github.com/LaurieWired/GhidraMCP)
 - **Ollama Documentation**: [https://ollama.com/docs](https://ollama.com/docs)
 
-## 📧 Support
+## Support
 
 For setup assistance or questions:
 - Email: enochsurge@gmail.com
