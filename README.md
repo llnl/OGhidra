@@ -22,6 +22,12 @@ OGhidra combines the power of local LLMs with Ghidra's reverse engineering capab
 
 ---
 
+### Monitor all your entire workflow!
+![OGhidra GUI Interface](https://github.com/user-attachments/assets/ba622283-3b87-4aeb-934b-e92ac4eae1e3)
+
+### Enumerating all your functions! 
+![UI-interface-function-enumeration](https://github.com/user-attachments/assets/675a6971-c4d2-42bc-a932-50508071dfa7)
+
 ## Pre-Installation Requirements
 
 Before installing OGhidra, you need to set up three core components: **Ghidra**, **GhidraMCP**, and **Ollama**.

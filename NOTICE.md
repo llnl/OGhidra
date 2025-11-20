@@ -1,5 +1,5 @@
 This work was produced under the auspices of the U.S. Department of Energy by
-Lawrence Livermore National Laboratory under Contract DE-AC52-07NA27344.
+Lawrence Livermore National Laboratory under Contract DE-AC52-07 NA27344.
 
 This work was prepared as an account of work sponsored by an agency of the
 United States Government. Neither the United States Government nor Lawrence
