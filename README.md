@@ -624,8 +624,8 @@ License
 
 OGhidra is distributed under the terms of the BSD license. 
 
-See [LICENSE-BSD](https://github.com/spack/spack/blob/develop/LICENSE-MIT),
-[NOTICE](https://github.com/spack/spack/blob/develop/NOTICE) for details.
+See [LICENSE-BSD](https://github.com/LLNL/OGhidra/blob/main/LICENSE-BSD),
+[NOTICE](https://github.com/LLNL/OGhidra/blob/main/NOTICE.md) for details.
 
 LLNL-CODE-2013290
 
