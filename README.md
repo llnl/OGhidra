@@ -139,7 +139,7 @@ Ollama is the local LLM runtime that powers OGhidra's AI capabilities.
 
 ---
 
-## 🚀 OGhidra Installation
+## OGhidra Installation
 
 Now that prerequisites are installed, set up OGhidra itself.
 
@@ -249,7 +249,7 @@ pip install -r requirements.txt
 
 ---
 
-## 💻 How to Use OGhidra
+## How to Use OGhidra
 
 OGhidra offers two primary interfaces: **GUI Mode** (recommended for most users) and **Interactive CLI Mode** (for scripting and advanced users).
 
@@ -349,14 +349,14 @@ OGhidra> exit
 
 ---
 
-## 🔄 Common Workflows
+##  Common Workflows
 
 ### Workflow 1: Bulk Function Renaming
 
 One of OGhidra's most powerful features is intelligently renaming all functions in a binary.
 
 **Using GUI**:
-1. Click the **"📦 Rename All Functions"** button
+1. Click the **"Rename All Functions"** button
 2. Select renaming mode in the dialog:
    - **Full**: Rename all functions with detailed analysis
    - **Quick**: Faster renaming with basic analysis
@@ -388,9 +388,9 @@ OGhidra> Rename all functions in this binary using full analysis
 Perform comprehensive security assessment of a binary.
 
 **Using GUI**:
-1. Click **"📥 Analyze Imports"** to identify libraries and system calls
-2. Click **"🔤 Analyze Strings"** to find hardcoded credentials, URLs, or suspicious patterns
-3. Click **"📊 Generate Software Report"** and select HTML format
+1. Click **"Analyze Imports"** to identify libraries and system calls
+2. Click **"Analyze Strings"** to find hardcoded credentials, URLs, or suspicious patterns
+3. Click **"Generate Software Report"** and select HTML format
 4. Open the generated report in your browser for full security assessment
 
 **Using CLI**:
@@ -435,7 +435,7 @@ OGhidra> Are there any security issues in this function?
 
 ---
 
-## 📊 Software Report Generation
+## Software Report Generation
 
 OGhidra can generate comprehensive analysis reports in multiple formats.
 
@@ -468,7 +468,7 @@ OGhidra> generate a comprehensive security report for this binary
 
 ---
 
-## ⚙️ Server Configuration
+## Server Configuration
 
 For distributed setups (e.g., running Ollama on a GPU server), configure remote servers through the GUI.
 
@@ -501,7 +501,7 @@ This allows you to:
 
 ---
 
-## 🧠 Advanced Features
+## Advanced Features
 
 ### Session Memory & RAG (Retrieval-Augmented Generation)
 
@@ -552,7 +552,7 @@ This architecture prevents AI hallucination and ensures reliable tool execution.
 
 ---
 
-## 🔧 Troubleshooting
+## Troubleshooting
 
 ### Common Issues
 
