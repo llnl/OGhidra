@@ -1,0 +1,34 @@
+Available Ghidra Interaction Capabilities (via GhidraMCPClient):
+
+Information Gathering:
+- list_methods(offset, limit): List function names.
+- list_classes(offset, limit): List class/namespace names.
+- list_segments(offset, limit): List memory segments.
+- list_imports(offset, limit): List imported symbols.
+- list_exports(offset, limit): List exported symbols.
+- list_namespaces(offset, limit): List non-global namespaces.
+- list_data_items(offset, limit): List defined data labels and values.
+- search_functions_by_name(query, offset, limit): Search functions by name substring.
+- get_function_by_address(address): Get function details by address (Example: Use '0x1800011a8' format or '1800011a8').
+- get_current_address(): Get currently selected address in Ghidra UI.
+- get_current_function(): Get currently selected function in Ghidra UI.
+- list_functions(): List all functions with addresses.
+- decompile_function(name): Decompile function by name.
+- decompile_function_by_address(address): Decompile function by address (Example: Use '0x1800011a8' format or '1800011a8').
+- disassemble_function(address): Get assembly listing for a function by address (Example: Use '0x1800011a8' format or '1800011a8').
+
+# --- New discovery helpers ---
+- list_strings(offset, limit, filter): List all defined strings or search by substring when *filter* is provided.  Alias: `string_search(filter="<text>")`.
+- get_xrefs_to(address, offset, limit): List all cross-references **to** the given address (incoming calls / data refs).
+- get_xrefs_from(address, offset, limit): List all cross-references **from** the given address (outgoing calls).
+- get_function_xrefs(name, offset, limit): Cross-references to a function by its current *name*.  Can be invoked via `xref_lookup(name="<func>")`.
+
+Modification/Annotation:
+- rename_function(old_name, new_name): Rename function by its current name (Example: rename_function(old_name="FUN_1800011a8", new_name="main")).
+- rename_function_by_address(function_address, new_name): Rename function by its address (IMPORTANT: Use numerical addresses only, like '1800011a8', NOT the function name 'FUN_1800011a8').
+- rename_data(address, new_name): Rename data label at a specific address.
+- rename_variable(function_name, old_name, new_name): Rename a local variable within a function (identified by function name).
+- set_decompiler_comment(address, comment): Add/Set a comment in the decompiled view at a specific address.
+- set_disassembly_comment(address, comment): Add/Set a comment in the assembly view at a specific address.
+- set_function_prototype(function_address, prototype): Set the function signature/prototype.
+- set_local_variable_type(function_address, variable_name, new_type): Change the data type of a local variable.

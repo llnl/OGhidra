@@ -1,0 +1,12 @@
+flask>=3.0.3,<3.1
+requests>=2.26.0
+httpx>=0.24.0
+python-dotenv>=1.0.0
+numpy>=1.24.0             # Required: for vector operations with Ollama embeddings
+rich>=13.7.1              # For enhanced terminal output in interactive mode 
+# HuggingFace dependencies removed - using local Ollama embeddings instead
+# sentence-transformers>=2.2.2 # REMOVED: Replaced with Ollama nomic-embed-text
+# huggingface_hub[hf_xet]      # REMOVED: No longer needed
+ijson>=3.2.0              # Optional: for streaming large JSON files (large sessions)
+pydantic>=2.7.1
+pydantic-settings>=2.2.1

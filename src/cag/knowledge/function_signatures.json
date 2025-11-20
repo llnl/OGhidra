@@ -1,0 +1,115 @@
+{
+  "function_signatures": {
+    "decompile_function": {
+      "name": "decompile_function",
+      "description": "Decompiles a function by name using Ghidra's decompiler. Returns the C-like representation of the function's code.",
+      "parameters": {
+        "name": "The name of the function to decompile (e.g., 'FUN_14001000', 'main')"
+      },
+      "return_type": "string",
+      "common_locations": ["Binary analysis"],
+      "related_functions": ["decompile_function_by_address", "get_current_function"]
+    },
+    "decompile_function_by_address": {
+      "name": "decompile_function_by_address",
+      "description": "Decompiles a function at the specified address using Ghidra's decompiler. Returns the C-like representation of the function's code.",
+      "parameters": {
+        "address": "The address of the function to decompile (e.g., '14001000')"
+      },
+      "return_type": "string",
+      "common_locations": ["Binary analysis"],
+      "related_functions": ["decompile_function", "get_function_by_address"]
+    },
+    "rename_function": {
+      "name": "rename_function",
+      "description": "Renames a function from its current name to a new name. This helps with code readability and understanding program semantics.",
+      "parameters": {
+        "old_name": "Current function name",
+        "new_name": "New function name"
+      },
+      "return_type": "string",
+      "common_locations": ["Symbol management", "Code organization"],
+      "related_functions": ["rename_function_by_address"]
+    },
+    "rename_function_by_address": {
+      "name": "rename_function_by_address",
+      "description": "Renames a function at the specified address to a new name. IMPORTANT: Use numerical addresses only, not function names.",
+      "parameters": {
+        "function_address": "The address of the function to rename (numerical only, e.g., '14001000')",
+        "new_name": "New function name"
+      },
+      "return_type": "string",
+      "common_locations": ["Symbol management", "Code organization"],
+      "related_functions": ["rename_function", "get_function_by_address"]
+    },
+    "list_functions": {
+      "name": "list_functions",
+      "description": "Lists all functions in the currently loaded program. This provides a comprehensive view of all defined functions.",
+      "parameters": {},
+      "return_type": "string[]",
+      "common_locations": ["Program exploration", "Initial analysis"],
+      "related_functions": ["list_imports", "list_exports"]
+    },
+    "list_imports": {
+      "name": "list_imports",
+      "description": "Lists imported symbols in the program with pagination. Useful for understanding external dependencies.",
+      "parameters": {
+        "offset": "Offset to start from",
+        "limit": "Maximum number of results"
+      },
+      "return_type": "string[]",
+      "common_locations": ["External interface analysis", "Dependency mapping"],
+      "related_functions": ["list_exports", "list_functions"]
+    },
+    "list_exports": {
+      "name": "list_exports",
+      "description": "Lists exported functions/symbols in the program with pagination. Useful for understanding the program's public interface.",
+      "parameters": {
+        "offset": "Offset to start from",
+        "limit": "Maximum number of results"
+      },
+      "return_type": "string[]",
+      "common_locations": ["External interface analysis", "API mapping"],
+      "related_functions": ["list_imports", "list_functions"]
+    },
+    "list_segments": {
+      "name": "list_segments",
+      "description": "Lists all memory segments in the program with pagination. This provides information about memory layout and permissions.",
+      "parameters": {
+        "offset": "Offset to start from",
+        "limit": "Maximum number of results"
+      },
+      "return_type": "string[]",
+      "common_locations": ["Memory analysis", "Program structure analysis"],
+      "related_functions": []
+    },
+    "search_functions_by_name": {
+      "name": "search_functions_by_name",
+      "description": "Searches for functions by name substring. Useful for finding specific functions without knowing the exact name.",
+      "parameters": {
+        "query": "Search query string",
+        "offset": "Offset to start from",
+        "limit": "Maximum number of results"
+      },
+      "return_type": "string[]",
+      "common_locations": ["Function discovery", "Code exploration"],
+      "related_functions": ["list_functions"]
+    },
+    "get_current_function": {
+      "name": "get_current_function",
+      "description": "Gets the function at the current cursor position or selection in Ghidra. Returns the function address and name.",
+      "parameters": {},
+      "return_type": "string",
+      "common_locations": ["Interactive analysis"],
+      "related_functions": ["get_current_address", "decompile_function"]
+    },
+    "get_current_address": {
+      "name": "get_current_address",
+      "description": "Gets the address at the current cursor position in Ghidra.",
+      "parameters": {},
+      "return_type": "string",
+      "common_locations": ["Interactive analysis"],
+      "related_functions": ["get_current_function"]
+    }
+  }
+} 

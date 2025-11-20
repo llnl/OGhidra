@@ -1,0 +1,19 @@
+{
+  "common_workflows": {
+    "function renaming": "1. Use `get_current_function()` to get the address of the current function\n2. Use `rename_function_by_address(function_address='ADDRESS', new_name='DESCRIPTIVE_NAME')` to rename it\n3. Verify the rename was successful by checking the response\n\nAlternatively, if you know the function's current name:\n1. Use `rename_function(old_name='OLD_NAME', new_name='NEW_NAME')`",
+    
+    "decompilation": "1. If you have a function name:\n   - Use `decompile_function(name='FUNCTION_NAME')` to get the decompiled code\n2. If you have a function address:\n   - Use `decompile_function_by_address(address='ADDRESS')` to get the decompiled code\n3. If you want to decompile the current function:\n   - First use `get_current_function()` to get the current function address\n   - Then use `decompile_function_by_address(address='ADDRESS')` with the obtained address",
+    
+    "function analysis": "To analyze an unknown function:\n1. First decompile it: `decompile_function(name='FUNCTION_NAME')` or `decompile_function_by_address(address='ADDRESS')`\n2. Examine parameters, local variables, and return value\n3. Look for library calls that indicate purpose\n4. Analyze the control flow structure (loops, conditionals)\n5. Identify any error handling patterns\n6. Rename the function based on findings: `rename_function(old_name='OLD_NAME', new_name='DESCRIPTIVE_NAME')`",
+    
+    "finding functions": "To locate functions of interest:\n1. Use `list_functions()` to get a list of all functions\n2. For a targeted search use `search_functions_by_name(query='KEYWORD')`\n3. To examine imports (external functions): `list_imports(offset=0, limit=100)`\n4. To examine exports (public interface): `list_exports(offset=0, limit=100)`\n5. Once found, use `decompile_function(name='FUNCTION_NAME')` to examine the code",
+    
+    "memory layout analysis": "To understand the program's memory layout:\n1. Use `list_segments(offset=0, limit=100)` to see all memory segments\n2. Examine segment types (code, data, read-only, read-write)\n3. Look for unusual segments or permissions that might indicate anti-debugging\n4. Check for large data segments that might contain embedded resources",
+    
+    "reversing an algorithm": "To reverse engineer an algorithm:\n1. Identify the function implementing the algorithm: `search_functions_by_name(query='KEYWORD')`\n2. Decompile the function: `decompile_function(name='FUNCTION_NAME')`\n3. Identify inputs (parameters) and outputs (return values)\n4. Break down the function into logical blocks\n5. For each block, identify its purpose and how it transforms data\n6. Look for standard operations such as xor, bit shifts, etc.\n7. Reconstruct the algorithm in pseudocode\n8. Test with sample inputs to verify understanding",
+    
+    "identifying main function": "To locate the main entry point:\n1. Use `list_exports(offset=0, limit=100)` to find potential entry points like 'main' or 'WinMain'\n2. Alternatively, search for functions that accept argc/argv parameters: `search_functions_by_name(query='main')`\n3. Once located, decompile it: `decompile_function(name='main')`\n4. Analyze the control flow to understand the program's high-level operation",
+    
+    "identifying crypto functions": "To identify cryptographic functions:\n1. Search for common crypto names: `search_functions_by_name(query='aes')`, `search_functions_by_name(query='sha')`, etc.\n2. Look for imported crypto libraries: `list_imports(offset=0, limit=100)`\n3. Search for functions with specific characteristics:\n   - Functions with large tables/arrays (S-boxes)\n   - Functions with many bitwise operations (XOR, rotations, shifts)\n   - Functions with mathematical operations typical in crypto (modular arithmetic)\n4. Once identified, decompile and analyze: `decompile_function(name='FUNCTION_NAME')`"
+  }
+} 
