@@ -576,7 +576,7 @@ This architecture prevents AI hallucination and ensures reliable tool execution.
 
 Always start troubleshooting with a health check:
 
-**GUI**: View connection status in Memory Info panel (left side)
+**GUI**: Tools > Health Check
 
 **CLI**:
 ```bash
