@@ -376,8 +376,6 @@ OGhidra> enumerate-binary
 OGhidra> What does my application do? Is there any malicious capability?
 ```
 
-![Function Enumeration Example](https://github.com/user-attachments/assets/675a6971-c4d2-42bc-a932-50508071dfa7)
-
 **Renaming Process**:
 1. **Enumeration**: OGhidra lists all functions in the binary
 2. **Analysis**: AI analyzes each function's decompiled code, called functions, and string references
