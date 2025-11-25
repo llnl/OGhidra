@@ -630,7 +630,7 @@ License
 
 OGhidra is distributed under the terms of the BSD license. 
 
-See [LICENSE-BSD](https://github.com/LLNL/OGhidra/blob/main/LICENSE-BSD),
+See [LICENSE-BSD](https://github.com/LLNL/OGhidra/blob/main/LICENSE),
 [NOTICE](https://github.com/LLNL/OGhidra/blob/main/NOTICE.md) for details.
 
 LLNL-CODE-2013290
