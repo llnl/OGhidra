@@ -357,22 +357,23 @@ OGhidra> exit
 
 ##  Common Workflows
 
-### Workflow 1: Bulk Function Renaming
+### Workflow 1: Bulk Function Renaming, Loading Vectors, and Query
 
-One of OGhidra's most powerful features is intelligently renaming all functions in a binary.
+One of OGhidra's most powerful features is intelligently renaming all functions in a binary and loading the results into a vector database.
 
 **Using GUI**:
 1. Click the **"Rename All Functions"** button
 2. Select renaming mode in the dialog:
    - **Full**: Rename all functions with detailed analysis
    - **Quick**: Faster renaming with basic analysis
-   - **Loading Vectors**: Use vector embeddings for context-aware naming
-3. Monitor progress in the workflow panel
-4. Review renamed functions in the left panel list
+3. Review renamed functions in the left panel list
+4. Click the **"Load Vectors"** button in the Analyzed Functions Tab
+5. Ask questions in the Query Box!
 
 **Using CLI**:
 ```
-OGhidra> Rename all functions in this binary using full analysis
+OGhidra> enumerate-binary
+OGhidra> What does my application do? Is there any malicious capability?
 ```
 
 ![Function Enumeration Example](https://github.com/user-attachments/assets/675a6971-c4d2-42bc-a932-50508071dfa7)
@@ -381,8 +382,6 @@ OGhidra> Rename all functions in this binary using full analysis
 1. **Enumeration**: OGhidra lists all functions in the binary
 2. **Analysis**: AI analyzes each function's decompiled code, called functions, and string references
 3. **Naming**: Generates meaningful names based on behavior (e.g., `check_license`, `decrypt_config`, `send_network_data`)
-4. **Application**: Applies names to Ghidra project
-5. **Caching**: Stores results in session cache for future reference
 
 **Vector Loading Option**:
 - When enabled, OGhidra builds a vector embedding database of all functions
@@ -420,27 +419,6 @@ OGhidra> What does this function do?
 OGhidra> Are there any security issues in this function?
 ```
 
-### Workflow 4: Malware Behavioral Analysis
-
-**Typical workflow for analyzing suspected malware**:
-
-1. **Import Analysis**: Identify suspicious APIs (e.g., `VirtualAlloc`, `WriteProcessMemory`, `CreateRemoteThread`)
-2. **String Analysis**: Find C2 domains, registry keys, file paths, crypto constants
-3. **Function Renaming**: Rename key functions for better understanding
-4. **Export Analysis**: Identify DLL exports if analyzing a library
-5. **Report Generation**: Create comprehensive report for documentation
-
-**Example GUI Session**:
-```
-1. Click "Analyze Imports" → Review process injection APIs
-2. Click "Analyze Strings" → Find C2 server: "evil.com"
-3. Type query: "Find all functions that use VirtualAlloc"
-4. Select function → Click "Rename Current Function" → AI suggests "inject_shellcode"
-5. Click "Generate Software Report" (HTML) → Share with team
-```
-
----
-
 ## Software Report Generation
 
 OGhidra can generate comprehensive analysis reports in multiple formats.
@@ -457,16 +435,18 @@ OGhidra can generate comprehensive analysis reports in multiple formats.
 ### Generating Reports
 
 **GUI Method**:
-1. Click the **"Generate Software Report"** button
-2. Select output format:
+1. Enumerate all functions using the enumeration steps indicated above **"Rename All Functions"** and **"Load Vectors"**
+2. Click the **"Generate Software Report"**
+3. Select output format:
    - **Markdown (.md)**: Human-readable, version-control friendly
    - **JSON (.json)**: Machine-readable for automation/integration
    - **HTML (.html)**: Formatted web page with styling
-3. Choose save location
-4. Wait for generation (may take several minutes for large binaries)
+4. Choose save location
+5. Wait for generation (may take several minutes for large binaries)
 
 **CLI Method**:
 ```
+OGhidra> enumerate-binary
 OGhidra> generate a comprehensive security report for this binary
 ```
 
