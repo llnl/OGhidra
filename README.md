@@ -72,7 +72,7 @@ GhidraMCP provides the API bridge that allows external tools (like OGhidra) to i
 
 1. **Download the GhidraMCP plugin**:
    - [GhidraMCP Repository](https://github.com/LaurieWired/GhidraMCP)
-   - Direct download: [GhidraMCP 1.3+](https://github.com/LaurieWired/GhidraMCP/releases)
+   - Direct download: [GhidraMCP 1.4+](https://github.com/LaurieWired/GhidraMCP/releases)
 
 2. **Install the plugin in Ghidra**:
    - Open Ghidra
