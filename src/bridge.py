@@ -1581,9 +1581,10 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
         Execute tools in a loop until investigation is complete.
         
         This implements the multi-tool execution loop that allows the AI to:
-        1. Execute multiple tools sequentially
+        1. Execute multiple tools sequentially (Batching)
         2. Accumulate results for comprehensive analysis
         3. Decide when investigation is complete
+        4. Capture reasoning for Chain of Thought
         
         Args:
             plan: The execution plan from planning phase
@@ -1622,7 +1623,18 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
                 exec_results.completed_at = datetime.now()
                 break
             
-            # Parse tool call from response
+            # Extract reasoning
+            reasoning = None
+            reasoning_match = re.search(r'REASONING:\s*(.*?)(?:\nEXECUTE:|$)', response, re.DOTALL)
+            if reasoning_match:
+                reasoning = reasoning_match.group(1).strip()
+                self.logger.info(f"🤔 Reasoning: {reasoning}")
+                
+                # Live CoT View
+                if getattr(self.config.ollama, 'show_reasoning', True):
+                    print(f"\n🤔 REASONING: {reasoning}\n")
+            
+            # Parse tool calls from response
             commands = self.command_parser.extract_commands(response)
             
             if not commands:
@@ -1633,66 +1645,68 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
                 else:
                     break
             
-            # Execute the tool (only ONE tool per iteration)
-            cmd_name, cmd_params = commands[0]  # Take first command only
-            
-            try:
-                self.logger.info(f"🔧 Executing: {cmd_name}({cmd_params})")
-                
-                # Execute the tool
-                result = self.execute_command(cmd_name, cmd_params)
-                
-                # Display the result to the user
-                self._display_tool_result(cmd_name, result)
-                
-                # Format result
-                if isinstance(result, (dict, list)):
-                    result_str = json.dumps(result, indent=2)
-                else:
-                    result_str = str(result)
-                
-                # Truncate if too large
-                if len(result_str) > 6000:
-                    result_str = result_str[:6000] + f"\n... [Truncated {len(result_str) - 6000} chars]"
-                
-                # Add to execution results
-                tool_exec = ToolExecution(
-                    tool_name=cmd_name,
-                    parameters=cmd_params,
-                    result=result_str,
-                    success=True
-                )
-                exec_results.add_execution(tool_exec)
-                
-                # Also add to session for tracking
-                self.session.add_tool_execution(
-                    tool_name=cmd_name,
-                    parameters=cmd_params,
-                    result=result_str,
-                    success=True
-                )
-                
-                # Update analysis state
-                self._update_analysis_state({"name": cmd_name, "params": cmd_params}, result_str)
-                
-                self.logger.info(f"✓ Step {step} complete: {cmd_name}")
-                
-            except Exception as e:
-                error_msg = f"ERROR: {str(e)}"
-                self.logger.error(f"❌ Error in execution loop step {step}: {error_msg}")
-                
-                # Add error to execution results
-                tool_exec = ToolExecution(
-                    tool_name=cmd_name,
-                    parameters=cmd_params,
-                    result=error_msg,
-                    success=False,
-                    error=error_msg
-                )
-                exec_results.add_execution(tool_exec)
-                
-                # Continue to next step
-                continue
+            # Execute tools (Batching Support)
+            for cmd_name, cmd_params in commands:
+                try:
+                    self.logger.info(f"🔧 Executing: {cmd_name}({cmd_params})")
+                    
+                    # Execute the tool
+                    result = self.execute_command(cmd_name, cmd_params)
+                    
+                    # Display the result to the user
+                    self._display_tool_result(cmd_name, result)
+                    
+                    # Format result
+                    if isinstance(result, (dict, list)):
+                        result_str = json.dumps(result, indent=2)
+                    else:
+                        result_str = str(result)
+                    
+                    # Truncate if too large
+                    if len(result_str) > 6000:
+                        result_str = result_str[:6000] + f"\n... [Truncated {len(result_str) - 6000} chars]"
+                    
+                    # Add to execution results
+                    tool_exec = ToolExecution(
+                        tool_name=cmd_name,
+                        parameters=cmd_params,
+                        result=result_str,
+                        success=True,
+                        reasoning=reasoning
+                    )
+                    exec_results.add_execution(tool_exec)
+                    
+                    # Also add to session for tracking
+                    self.session.add_tool_execution(
+                        tool_name=cmd_name,
+                        parameters=cmd_params,
+                        result=result_str,
+                        success=True,
+                        reasoning=reasoning
+                    )
+                    
+                    # Update analysis state
+                    self._update_analysis_state({"name": cmd_name, "params": cmd_params}, result_str)
+                    
+                    self.logger.info(f"✓ Step {step} complete: {cmd_name}")
+                    
+                except Exception as e:
+                    error_msg = f"ERROR: {str(e)}"
+                    self.logger.error(f"❌ Error in execution loop step {step}: {error_msg}")
+                    
+                    # Add error to execution results
+                    tool_exec = ToolExecution(
+                        tool_name=cmd_name,
+                        parameters=cmd_params,
+                        result=error_msg,
+                        success=False,
+                        error=error_msg,
+                        reasoning=reasoning
+                    )
+                    exec_results.add_execution(tool_exec)
+                    
+                    # Continue to next command in batch
+                    continue
         
         # Mark as complete
         if not exec_results.investigation_complete:
@@ -1740,15 +1754,22 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
         user_sections.append("""
 ## Your Task
 
-Based on the plan and results so far, determine the NEXT tool to execute.
+Based on the plan and results so far, determine the NEXT step(s).
+
+1. **Reasoning**: Explain WHY you are choosing the specific tool(s). What do you hope to learn?
+2. **Execution**: Execute one or more tools to gather information.
 
 If the investigation is complete and you have enough information, respond with:
 INVESTIGATION COMPLETE
 
-Otherwise, execute the next tool using the standard EXECUTE format:
-EXECUTE: tool_name(param1="value1", param2="value2")
+Otherwise, provide your reasoning and then execute the tool(s) using the standard EXECUTE format:
 
-Output ONLY the EXECUTE line or "INVESTIGATION COMPLETE".
+REASONING: [Your reasoning here]
+EXECUTE: tool_name(param1="value1", param2="value2")
+EXECUTE: another_tool(param1="value1")
+
+Output the REASONING line followed by one or more EXECUTE lines.
+If you are done, output ONLY "INVESTIGATION COMPLETE".
 """)
         
         user_prompt = "\n".join(user_sections)

@@ -142,6 +142,13 @@ class OllamaClient:
             Generated response text
         """
         start_time = time.time() if self.llm_log_timing else None
+        
+        # Request Delay
+        request_delay = getattr(self.config, 'request_delay', 0.0)
+        if request_delay > 0:
+            self.logger.debug(f"Sleeping for {request_delay}s before request")
+            time.sleep(request_delay)
+            
         url = f"{self.base_url}/api/generate"
         
         used_model = model or self.default_model
@@ -276,6 +283,12 @@ class OllamaClient:
         """
         start_time = time.time() if self.llm_log_timing else None
         
+        # Request Delay
+        request_delay = getattr(self.config, 'request_delay', 0.0)
+        if request_delay > 0:
+            self.logger.debug(f"Sleeping for {request_delay}s before request")
+            time.sleep(request_delay)
+            
         # Use provided model or default embedding model
         embedding_model = model or self.embedding_model
         url = f"{self.base_url}/api/embeddings"

@@ -72,7 +72,7 @@ GhidraMCP provides the API bridge that allows external tools (like OGhidra) to i
 
 1. **Download the GhidraMCP plugin**:
    - [GhidraMCP Repository](https://github.com/LaurieWired/GhidraMCP)
-   - Direct download: [GhidraMCP 1.4+](https://github.com/LaurieWired/GhidraMCP/releases)
+   - Direct download: [GhidraMCP 1.3+](https://github.com/LaurieWired/GhidraMCP/releases)
 
 2. **Install the plugin in Ghidra**:
    - Open Ghidra
@@ -230,6 +230,14 @@ pip install -r requirements.txt
    LLM_LOG_TOKENS=true
    LLM_LOG_TIMING=true
    LLM_LOG_FORMAT=json
+
+   # Live Chain of Thought View
+   # Print the AI's reasoning process to the terminal in real-time
+   OLLAMA_SHOW_REASONING=true
+
+   # Request Delay (Rate Limiting)
+   # Add a delay (in seconds) between AI requests to prevent rate limiting
+   OLLAMA_REQUEST_DELAY=0.0
    ```
 
 ### Step 5: Verify Installation

@@ -71,6 +71,12 @@ class OllamaConfig(BaseModel):
     llm_log_timing: bool = Field(default=True, env="LLM_LOG_TIMING")
     llm_log_format: str = Field(default="json", env="LLM_LOG_FORMAT")  # "json" or "text"
     
+    # Live CoT View
+    show_reasoning: bool = Field(default=True, description="Print Chain of Thought reasoning to stdout", env="OLLAMA_SHOW_REASONING")
+    
+    # Request Delay
+    request_delay: float = Field(default=0.0, ge=0.0, description="Delay in seconds before each request", env="OLLAMA_REQUEST_DELAY")
+    
     @validator('model')
     def validate_model_name(cls, v):
         """Ensure model name follows expected patterns."""

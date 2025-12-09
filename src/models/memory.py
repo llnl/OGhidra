@@ -70,12 +70,16 @@ class ToolExecution(BaseModel):
     result: Optional[str] = None
     success: bool = True
     error: Optional[str] = None
+    reasoning: Optional[str] = None
     timestamp: datetime = Field(default_factory=datetime.now)
     
     def format_for_prompt(self) -> str:
         """Format this tool execution for inclusion in a prompt."""
         param_str = ", ".join([f'{k}="{v}"' for k, v in self.parameters.items()])
-        lines = [f"Command: {self.tool_name}"]
+        lines = []
+        if self.reasoning:
+            lines.append(f"Reasoning: {self.reasoning}")
+        lines.append(f"Command: {self.tool_name}({param_str})")
         if self.result:
             lines.append(f"Result: {self.result}")
         return "\n".join(lines)
@@ -318,14 +322,15 @@ class SessionMemory(BaseModel):
     
     def add_tool_execution(self, tool_name: str, parameters: Dict[str, Any], 
                           result: Optional[str] = None, success: bool = True,
-                          error: Optional[str] = None):
+                          error: Optional[str] = None, reasoning: Optional[str] = None):
         """Record a tool execution."""
         execution = ToolExecution(
             tool_name=tool_name,
             parameters=parameters,
             result=result,
             success=success,
-            error=error
+            error=error,
+            reasoning=reasoning
         )
         self.tool_executions.append(execution)
         self.total_tool_calls += 1
