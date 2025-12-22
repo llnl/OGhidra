@@ -27,7 +27,7 @@ OGhidra combines the power of local LLMs with Ghidra's reverse engineering capab
 
 
 ### Summarize all your Functions
-![renaming-ui](https://raw.githubusercontent.com/llnl/OGhidra/main/images/renaming-ui.png)
+![function-summaries](https://raw.githubusercontent.com/llnl/OGhidra/main/images/function-summaries.png)
 
 
 ## Pre-Installation Requirements
