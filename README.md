@@ -2,7 +2,7 @@
 
 OGhidra bridges Large Language Models (LLMs) via Ollama with the Ghidra reverse engineering platform, enabling AI-driven binary analysis through natural language. Interact with Ghidra using conversational queries and automate complex reverse engineering workflows.
 
-![OGhidra Architecture](https://github.com/user-attachments/assets/21d2ec49-a814-407f-b56b-50fdb59ccab5)
+![OGhidra Architecture](<img width="1298" height="916" alt="design" src="https://github.com/user-attachments/assets/85ee1c09-a146-45ab-94fa-cd3debd82996" />)
 
 ## What is OGhidra?
 
@@ -22,10 +22,11 @@ OGhidra combines the power of local LLMs with Ghidra's reverse engineering capab
 
 ---
 
-### Monitor all your entire workflow!
-![OGhidra GUI Interface](https://github.com/user-attachments/assets/ba622283-3b87-4aeb-934b-e92ac4eae1e3)
+### Monitor your Investigation and Rename All Functions
+![OGhidra GUI Interface](<img width="1920" height="1028" alt="renaming-ui" src="https://github.com/user-attachments/assets/8843b5f5-1f2f-42eb-bf4a-4ef6c5625c9c" />)
 
-### Enumerating all your functions! 
+
+### Summarize all your Functions
 ![UI-interface-function-enumeration](https://github.com/user-attachments/assets/675a6971-c4d2-42bc-a932-50508071dfa7)
 
 ## Pre-Installation Requirements
