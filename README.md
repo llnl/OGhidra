@@ -2,7 +2,7 @@
 
 OGhidra bridges Large Language Models (LLMs) via Ollama with the Ghidra reverse engineering platform, enabling AI-driven binary analysis through natural language. Interact with Ghidra using conversational queries and automate complex reverse engineering workflows.
 
-![OGhidra Architecture](https://github.com/user-attachments/assets/21d2ec49-a814-407f-b56b-50fdb59ccab5)
+<img width="1298" height="916" alt="design" src="https://github.com/user-attachments/assets/85ee1c09-a146-45ab-94fa-cd3debd82996" />
 
 ## What is OGhidra?
 
@@ -22,11 +22,13 @@ OGhidra combines the power of local LLMs with Ghidra's reverse engineering capab
 
 ---
 
-### Monitor all your entire workflow!
-![OGhidra GUI Interface](https://github.com/user-attachments/assets/ba622283-3b87-4aeb-934b-e92ac4eae1e3)
+### Monitor your Investigation and Rename All Functions
+<img width="1920" height="1028" alt="renaming-ui" src="https://github.com/user-attachments/assets/8843b5f5-1f2f-42eb-bf4a-4ef6c5625c9c" />
 
-### Enumerating all your functions! 
-![UI-interface-function-enumeration](https://github.com/user-attachments/assets/675a6971-c4d2-42bc-a932-50508071dfa7)
+
+### Summarize all your Functions
+<img width="1920" height="1026" alt="function-summaries" src="https://github.com/user-attachments/assets/3eec778a-ccb3-4a35-86aa-11908eafc6c6" />
+
 
 ## Pre-Installation Requirements
 
@@ -35,7 +37,6 @@ Before installing OGhidra, you need to set up three core components: **Ghidra**,
 ### System Requirements
 
 **Python Version**:
-- **Minimum**: Python 3.10 or later
 - **Recommended**: Python 3.12 or Python 3.13 
 - **Check your version**: Run `python --version` or `python3 --version`
 
