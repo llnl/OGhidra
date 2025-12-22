@@ -23,7 +23,7 @@ OGhidra combines the power of local LLMs with Ghidra's reverse engineering capab
 ---
 
 ### Monitor your Investigation and Rename All Functions
-<img width="1920" height="1028" alt="renaming-ui" src="https://github.com/llnl/OGhidra/blob/main/images/renaming-ui.png" />
+![renaming-ui](https://raw.githubusercontent.com/llnl/OGhidra/main/images/renaming-ui.png)
 
 
 ### Summarize all your Functions
