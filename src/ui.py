@@ -107,16 +107,11 @@ class ServerConfigDialog:
         ghidra_entry = ttk.Entry(ghidra_frame, textvariable=self.ghidra_url_var, width=50)
         ghidra_entry.grid(row=0, column=1, sticky='ew', padx=(10, 0), pady=5)
         
-        ttk.Label(ghidra_frame, text="Extended URL:").grid(row=1, column=0, sticky='w', pady=5)
-        self.ghidra_ext_url_var = tk.StringVar(value=str(self.config.ghidra.extended_url))
-        ghidra_ext_entry = ttk.Entry(ghidra_frame, textvariable=self.ghidra_ext_url_var, width=50)
-        ghidra_ext_entry.grid(row=1, column=1, sticky='ew', padx=(10, 0), pady=5)
-        
         ghidra_frame.columnconfigure(1, weight=1)
         
         # Help text
         help_text = ttk.Label(main_frame, 
-                             text="Configure server URLs for distributed setups.\nDefault ports: Ollama (11434), GhidraMCP (8080), Extended (8081)\nEmbedding model is used for RAG/vector operations.",
+                             text="Configure server URLs for distributed setups.\nDefault ports: Ollama (11434), GhidraMCP (8080)\nEmbedding model is used for RAG/vector operations.",
                              font=('TkDefaultFont', 9),
                              foreground='gray')
         help_text.pack(pady=(10, 20))
@@ -188,21 +183,39 @@ class ServerConfigDialog:
                 if response.status_code == 200:
                     results.append("Ollama: ✅ Connected")
                     
-                    # Test embedding model specifically
+                    # Test embedding model specifically (try new API first, then legacy)
                     embedding_model = self.embedding_model_var.get()
                     if embedding_model:
+                        embed_success = False
+                        # Try new API (/api/embed) first
                         try:
                             embed_response = requests.post(
-                                f"{self.ollama_url_var.get()}/api/embeddings",
-                                json={"model": embedding_model, "prompt": "test"},
+                                f"{self.ollama_url_var.get()}/api/embed",
+                                json={"model": embedding_model, "input": "test"},
                                 timeout=10
                             )
                             if embed_response.status_code == 200:
                                 results.append(f"Embedding Model ({embedding_model}): ✅ Available")
-                            else:
-                                results.append(f"Embedding Model ({embedding_model}): ❌ Not available")
-                        except Exception as e:
-                            results.append(f"Embedding Model ({embedding_model}): ❌ {str(e)}")
+                                embed_success = True
+                        except Exception:
+                            pass
+                        
+                        # Fallback to legacy API (/api/embeddings) if new API failed
+                        if not embed_success:
+                            try:
+                                embed_response = requests.post(
+                                    f"{self.ollama_url_var.get()}/api/embeddings",
+                                    json={"model": embedding_model, "prompt": "test"},
+                                    timeout=10
+                                )
+                                if embed_response.status_code == 200:
+                                    results.append(f"Embedding Model ({embedding_model}): ✅ Available (legacy API)")
+                                    embed_success = True
+                            except Exception:
+                                pass
+                        
+                        if not embed_success:
+                            results.append(f"Embedding Model ({embedding_model}): ❌ Not available")
                 else:
                     results.append(f"Ollama: ❌ HTTP {response.status_code}")
             except Exception as e:
@@ -220,17 +233,6 @@ class ServerConfigDialog:
             except Exception as e:
                 results.append(f"GhidraMCP: ❌ {str(e)}")
             
-            # Test Extended GhidraMCP
-            try:
-                import requests
-                response = requests.get(f"{self.ghidra_ext_url_var.get()}/", timeout=5)
-                if response.status_code in [200, 404]:  # 404 is OK for base path
-                    results.append("GhidraMCP Extended: ✅ Connected")
-                else:
-                    results.append(f"GhidraMCP Extended: ❌ HTTP {response.status_code}")
-            except Exception as e:
-                results.append(f"GhidraMCP Extended: ❌ {str(e)}")
-            
             # Show results
             messagebox.showinfo("Connection Test", "\n".join(results))
         
@@ -245,14 +247,12 @@ class ServerConfigDialog:
             # Test URL validation
             ollama_url = AnyHttpUrl(self.ollama_url_var.get())
             ghidra_url = AnyHttpUrl(self.ghidra_url_var.get())
-            ghidra_ext_url = AnyHttpUrl(self.ghidra_ext_url_var.get())
             
             # Update config
             self.config.ollama.base_url = ollama_url
             self.config.ollama.model = self.ollama_model_var.get()
             self.config.ollama.embedding_model = self.embedding_model_var.get()
             self.config.ghidra.base_url = ghidra_url
-            self.config.ghidra.extended_url = ghidra_ext_url
             
             # Update the clients with new URLs
             # (No need to update _bridge_ref here; handled by main UI)
@@ -262,8 +262,7 @@ class ServerConfigDialog:
                 'OLLAMA_BASE_URL': str(ollama_url),
                 'OLLAMA_MODEL': self.ollama_model_var.get(),
                 'OLLAMA_EMBEDDING_MODEL': self.embedding_model_var.get(),
-                'GHIDRA_BASE_URL': str(ghidra_url),
-                'GHIDRA_EXTENDED_URL': str(ghidra_ext_url)
+                'GHIDRA_BASE_URL': str(ghidra_url)
             })
             # ---
             
@@ -455,7 +454,7 @@ class WorkflowDiagram:
                 color = self.stage_colors['idle']
                 text_color = 'black'
             
-            # Draw stage box
+            # Draw stage box (fixed size for consistent look)
             self.canvas.create_rectangle(
                 x_start, y_center - 15, x_start + stage_width - 10, y_center + 15,
                 fill=color, outline='black', width=2
@@ -929,11 +928,11 @@ class RenamedFunctionsPanel:
         self.tree.heading('New Name', text='New Name')
         self.tree.heading('Summary', text='Behavior Summary')
         
-        # Configure column widths
-        self.tree.column('Address', width=120, minwidth=80)
-        self.tree.column('Old Name', width=150, minwidth=100)
-        self.tree.column('New Name', width=150, minwidth=100)
-        self.tree.column('Summary', width=300, minwidth=200)
+        # Configure column widths (compact for sidebar)
+        self.tree.column('Address', width=80, minwidth=60)
+        self.tree.column('Old Name', width=100, minwidth=70)
+        self.tree.column('New Name', width=100, minwidth=70)
+        self.tree.column('Summary', width=150, minwidth=100)
         
         # Hide the summary_key column (used for internal tracking)
         self.tree.column('summary_key', width=0, minwidth=0, stretch=False)
@@ -1875,6 +1874,55 @@ class AIResponsePanel:
         self.response_text.insert(tk.END, formatted_response)
         self.response_text.see(tk.END)
     
+    def add_cot_update(self, update_type: str, content: str, timestamp: Optional[datetime] = None):
+        """Add a chain of thought update to the display (streaming during agentic loop).
+        
+        This method displays the AI's reasoning and progress during query processing,
+        mirroring what is printed to the terminal.
+        
+        Args:
+            update_type: Type of update (e.g., 'Cycle', 'Phase', 'Reasoning', 'Tool')
+            content: The update content
+            timestamp: Optional timestamp (defaults to now)
+        """
+        if timestamp is None:
+            timestamp = datetime.now()
+        
+        # Store in history with cot prefix
+        response_entry = {
+            'type': f'cot_{update_type.lower()}',
+            'content': content,
+            'timestamp': timestamp.isoformat()
+        }
+        self.response_history.append(response_entry)
+        
+        # Format based on update type for visual distinction
+        time_str = timestamp.strftime('%H:%M:%S')
+        
+        if update_type.upper() == 'CYCLE':
+            # Major cycle separator
+            formatted = f"\n{'='*60}\n"
+            formatted += f"[{time_str}] {content}\n"
+            formatted += f"{'='*60}\n"
+        elif update_type.upper() == 'PHASE':
+            # Phase indicator
+            formatted = f"[{time_str}] {content}\n"
+        elif update_type.upper() == 'REASONING':
+            # AI reasoning - highlight this
+            formatted = f"[{time_str}] {content}\n"
+        elif update_type.upper() == 'TOOL':
+            # Tool execution
+            formatted = f"[{time_str}]   -> {content}\n"
+        elif update_type.upper() == 'STATUS':
+            # Status update
+            formatted = f"[{time_str}] {content}\n"
+        else:
+            # Default format
+            formatted = f"[{time_str}] [{update_type}] {content}\n"
+        
+        self.response_text.insert(tk.END, formatted)
+        self.response_text.see(tk.END)
+    
     def _clear_responses(self):
         """Clear all responses."""
         self.response_text.delete(1.0, tk.END)
@@ -1952,9 +2000,19 @@ class QueryInputPanel:
         button_frame.grid(row=2, column=0, columnspan=2, sticky='ew')
         
         self.send_button = ttk.Button(button_frame, text="Send Query", command=self._send_query)
-        self.send_button.pack(side='left', padx=(0, 10))
+        self.send_button.pack(side='left', padx=(0, 5))
         
-        ttk.Button(button_frame, text="Clear", command=self._clear_query).pack(side='left')
+        ttk.Button(button_frame, text="Clear", command=self._clear_query).pack(side='left', padx=(0, 15))
+        
+        # Separator
+        ttk.Separator(button_frame, orient='vertical').pack(side='left', fill='y', padx=(0, 15), pady=2)
+        
+        # Quick action buttons for common smart tools
+        self.analyze_button = ttk.Button(button_frame, text="Analyze Function", command=self._analyze_current)
+        self.analyze_button.pack(side='left', padx=(0, 5))
+        
+        self.rename_button = ttk.Button(button_frame, text="Rename Function", command=self._rename_current)
+        self.rename_button.pack(side='left')
         
         # Status and progress
         self.status_label = ttk.Label(self.frame, text="Ready", foreground='green')
@@ -2020,6 +2078,20 @@ class QueryInputPanel:
     def _clear_query(self):
         """Clear the query input."""
         self.query_entry.delete(1.0, tk.END)
+    
+    def _analyze_current(self):
+        """Analyze the current function in Ghidra."""
+        if hasattr(self, 'tool_panel') and self.tool_panel:
+            self.tool_panel._analyze_current_function()
+        else:
+            messagebox.showwarning("Not Ready", "Tool panel not initialized yet.")
+    
+    def _rename_current(self):
+        """Rename the current function in Ghidra based on AI analysis."""
+        if hasattr(self, 'tool_panel') and self.tool_panel:
+            self.tool_panel._rename_current_function()
+        else:
+            messagebox.showwarning("Not Ready", "Tool panel not initialized yet.")
 
     def _stop_query(self):
         """Stop the currently running query."""
@@ -2033,7 +2105,10 @@ class QueryInputPanel:
         self.query_running = running
         
         # Update button states
-        self.send_button.config(state='disabled' if running else 'normal')
+        state = 'disabled' if running else 'normal'
+        self.send_button.config(state=state)
+        self.analyze_button.config(state=state)
+        self.rename_button.config(state=state)
         self.stop_button.config(state='normal' if running else 'disabled')
         
         # Update status and progress
@@ -2093,6 +2168,7 @@ class ToolButtonsPanel:
             ('analyze-strings', 'Analyze Strings', self._analyze_strings),
             ('analyze-exports', 'Analyze Exports', self._analyze_exports),
             ('search-strings', 'Search Strings', self._search_strings),
+            ('scan-tables', 'Scan Function Tables', self._scan_function_tables),
         ]
         
         for i, (tool_id, label, command) in enumerate(smart_tools):
@@ -2102,13 +2178,16 @@ class ToolButtonsPanel:
             )
             btn.grid(row=i//2, column=i%2, padx=5, pady=5, sticky='ew')
         
+        # Calculate the next row after buttons (buttons use rows 0 to (len-1)//2)
+        next_row = (len(smart_tools) + 1) // 2
+        
         # Status indicator
         self.status_label = ttk.Label(self.frame, text="Ready", foreground='green')
-        self.status_label.grid(row=4, column=0, columnspan=2, pady=(10, 0))
+        self.status_label.grid(row=next_row, column=0, columnspan=2, pady=(10, 0))
         
         # Progress bar and stop button frame
         progress_frame = ttk.Frame(self.frame)
-        progress_frame.grid(row=5, column=0, columnspan=2, sticky='ew', pady=(5, 0))
+        progress_frame.grid(row=next_row + 1, column=0, columnspan=2, sticky='ew', pady=(5, 0))
         progress_frame.grid_columnconfigure(0, weight=1)
         
         self.progress = ttk.Progressbar(progress_frame, mode='indeterminate')
@@ -3758,6 +3837,98 @@ Please provide a comprehensive analysis of this information.
         # list_strings supports optional 'filter' parameter (alias string_search)
         self._run_hardcoded_workflow("list_strings", f"Search Strings for '{query}'", params={"filter": query.strip()})
 
+    def _scan_function_tables(self):
+        """Scan for function pointer tables (vtables, dispatch tables) without LLM intervention."""
+        if self.tool_running:
+            return
+        
+        def worker():
+            try:
+                self._set_tool_running(True, "Scan Function Tables")
+                self.workflow_diagram.set_current_stage('execution')
+                
+                # Add initial message
+                self.response_panel.add_response(
+                    "Smart Tool: Scan Function Tables", 
+                    "Scanning binary for function pointer tables (vtables, dispatch tables, jump tables)...\n"
+                    "This runs algorithmically without LLM intervention."
+                )
+                
+                # Run the scan directly (no LLM needed)
+                tables = self.bridge.ghidra.scan_function_pointer_tables(
+                    min_table_entries=3,
+                    pointer_size=8,
+                    max_scan_size=65536
+                )
+                
+                if tables:
+                    # Format results
+                    formatted = self.bridge.ghidra.format_table_scan_results(tables)
+                    self.response_panel.add_response(
+                        f"Scan Complete: Found {len(tables)} Table(s)", 
+                        formatted
+                    )
+                    
+                    # Now send to AI for interpretation
+                    self.workflow_diagram.set_current_stage('analysis')
+                    
+                    # Build analysis prompt
+                    analysis_prompt = f"""Analyze these detected function pointer tables:
+
+{formatted}
+
+Please provide:
+1. What type of tables these likely are (vtables, dispatch tables, jump tables, etc.)
+2. What the functions in each table might be doing based on their names
+3. Any insights about the code structure or design patterns revealed
+4. Which functions are reachable through these tables (indirect call targets)
+"""
+                    
+                    # Stream the AI analysis
+                    self.response_panel.add_response("AI Analysis", "")
+                    
+                    for chunk in self.bridge.ollama_client.stream_generate(
+                        model=self.bridge.ollama_config.model,
+                        prompt=analysis_prompt,
+                        temperature=0.7
+                    ):
+                        if self.should_stop:
+                            break
+                        self.response_panel.append_to_last_response(chunk)
+                else:
+                    # Get segment info for context
+                    try:
+                        segments = self.bridge.ghidra.list_segments()
+                        seg_info = "\n".join(f"  {s}" for s in segments[:8])
+                    except:
+                        seg_info = "  (Could not retrieve segment info)"
+                    
+                    self.response_panel.add_response(
+                        "Scan Complete: No Tables Found", 
+                        f"No function pointer tables were detected (require 3+ consecutive function pointers).\n\n"
+                        f"**Scanned Segments:**\n{seg_info}\n\n"
+                        f"**This could mean:**\n"
+                        f"• The binary is written in C (no vtables) rather than C++\n"
+                        f"• No dispatch tables or jump tables in data segments\n"
+                        f"• Function pointers exist but aren't grouped into tables\n\n"
+                        f"**Alternative approaches:**\n"
+                        f"• Use read_bytes() to examine specific addresses manually\n"
+                        f"• Search for xrefs to functions to find indirect calls\n"
+                        f"• Look for DATA references using get_xrefs_to()"
+                    )
+                
+                self.workflow_diagram.set_current_stage('complete')
+                
+            except Exception as e:
+                import traceback
+                self.response_panel.add_response("Error", f"Scan failed: {str(e)}\n\n{traceback.format_exc()}")
+                self.workflow_diagram.set_current_stage('error')
+            finally:
+                self._set_tool_running(False, "")
+        
+        import threading
+        threading.Thread(target=worker, daemon=True).start()
+
 class OGhidraUI:
     """Main UI class for the OGhidra application."""
     
@@ -3784,71 +3955,61 @@ class OGhidraUI:
         main_paned = ttk.PanedWindow(self.root, orient='horizontal')
         main_paned.pack(fill='both', expand=True, padx=5, pady=5)
         
-        # Left panel
-        left_frame = ttk.Frame(main_paned)
-        main_paned.add(left_frame, weight=1)
+        # Left panel - Main focus: Query and AI Response (larger)
+        main_frame = ttk.Frame(main_paned)
+        main_paned.add(main_frame, weight=4)
         
-        # Right panel
-        right_frame = ttk.Frame(main_paned)
-        main_paned.add(right_frame, weight=2)
+        # Right panel - Analyzed Functions sidebar (slimmer)
+        sidebar_frame = ttk.Frame(main_paned)
+        main_paned.add(sidebar_frame, weight=1)
         
-        # Setup left panel components
-        self._setup_left_panel(left_frame)
+        # Setup main panel (query + AI response)
+        self._setup_main_panel(main_frame)
         
-        # Setup right panel components
-        self._setup_right_panel(right_frame)
+        # Setup sidebar (analyzed functions)
+        self._setup_sidebar_panel(sidebar_frame)
     
-    def _setup_left_panel(self, parent):
-        """Setup the left panel with workflow diagram, memory info, and renamed functions."""
-        # Create a notebook for tabbed interface to save space
-        notebook = ttk.Notebook(parent)
-        notebook.pack(fill='both', expand=True, pady=(0, 10))
+    def _setup_main_panel(self, parent):
+        """Setup the main panel with query input and AI responses (primary focus)."""
+        # Query input panel
+        self.query_panel = QueryInputPanel(parent, self.bridge, None, None)  # workflow_diagram set later
+        self.query_panel.get_widget().pack(fill='x', pady=(0, 10))
         
-        # Tab 1: Workflow and Memory
-        workflow_memory_frame = ttk.Frame(notebook)
-        notebook.add(workflow_memory_frame, text="Status & Memory")
-        
-        # Workflow diagram
-        workflow_frame = ttk.LabelFrame(workflow_memory_frame, text="Workflow Status", padding=10)
+        # AI Response panel (main content area)
+        self.response_panel = AIResponsePanel(parent)
+        self.response_panel.get_widget().pack(fill='both', expand=True)
+    
+    def _setup_sidebar_panel(self, parent):
+        """Setup the sidebar with analyzed functions (secondary, slimmer)."""
+        # Workflow status tracker (above analyzed functions)
+        workflow_frame = ttk.LabelFrame(parent, text="Workflow Status", padding=8)
         workflow_frame.pack(fill='x', pady=(0, 10))
         
-        self.workflow_diagram = WorkflowDiagram(workflow_frame)
+        self.workflow_diagram = WorkflowDiagram(workflow_frame, width=500, height=100)
         self.workflow_diagram.get_widget().pack()
         
-        # Memory info panel
-        self.memory_panel = MemoryInfoPanel(workflow_memory_frame, self.bridge)
-        self.memory_panel.get_widget().pack(fill='both', expand=True)
-        
-        # Set up memory panel refresh callback in bridge
-        self.bridge._ui_memory_panel_refresh = self.memory_panel._update_memory_info
-        
-        # Tab 2: Renamed Functions
-        renamed_functions_frame = ttk.Frame(notebook)
-        notebook.add(renamed_functions_frame, text="Analyzed Functions")
-        
-        # Renamed functions panel
-        self.renamed_functions_panel = RenamedFunctionsPanel(renamed_functions_frame, self.bridge)
+        # Analyzed Functions panel
+        self.renamed_functions_panel = RenamedFunctionsPanel(parent, self.bridge)
         self.renamed_functions_panel.get_widget().pack(fill='both', expand=True)
         # Start auto-refresh for renamed functions
         self.renamed_functions_panel._start_auto_refresh()
         
-        # Tool buttons panel (below the notebook)
-        self.tool_panel = ToolButtonsPanel(parent, self.bridge, None, self.workflow_diagram, self.renamed_functions_panel)  # Will set response_panel later
-        self.tool_panel.get_widget().pack(fill='x')
-    
-    def _setup_right_panel(self, parent):
-        """Setup the right panel with query input and AI responses."""
-        # Query input panel
-        self.query_panel = QueryInputPanel(parent, self.bridge, None, self.workflow_diagram)  # Will set response_panel later
-        self.query_panel.get_widget().pack(fill='x', pady=(0, 10))
+        # Hidden components (memory panel - accessed via Tools > System Info menu)
+        hidden_frame = ttk.Frame(parent)  # Don't pack this
+        self.memory_panel = MemoryInfoPanel(hidden_frame, self.bridge)
+        self.bridge._ui_memory_panel_refresh = self.memory_panel._update_memory_info
         
-        # AI Response panel
-        self.response_panel = AIResponsePanel(parent)
-        self.response_panel.get_widget().pack(fill='both', expand=True)
+        # Set up chain of thought callback for live AI reasoning updates
+        self.bridge._ui_cot_callback = self.response_panel.add_cot_update
         
-        # Connect panels to response panel
+        # Tool panel (hidden - accessed via Analysis menu)
+        self.tool_panel = ToolButtonsPanel(parent, self.bridge, None, self.workflow_diagram, self.renamed_functions_panel)
+        
+        # Connect panels to response panel and each other
         self.tool_panel.response_panel = self.response_panel
         self.query_panel.response_panel = self.response_panel
+        self.query_panel.workflow_diagram = self.workflow_diagram
+        self.query_panel.tool_panel = self.tool_panel  # For quick action buttons
     
     def _setup_menu(self):
         """Setup the application menu."""
@@ -3867,10 +4028,34 @@ class OGhidraUI:
         tools_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Tools", menu=tools_menu)
         tools_menu.add_command(label="Health Check", command=self._health_check)
+        tools_menu.add_command(label="System Info", command=self._show_system_info)
         tools_menu.add_command(label="Server Configuration", command=self._configure_servers)
         tools_menu.add_separator()
-        tools_menu.add_command(label="Clear All Data", command=self._clear_all_data)
-        tools_menu.add_command(label="Reset Workflow", command=self._reset_workflow)
+        tools_menu.add_command(label="Clear Session", command=self._clear_all_data)
+        
+        # Analysis menu (Smart Tools)
+        analysis_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Analysis", menu=analysis_menu)
+        
+        # Current function operations
+        analysis_menu.add_command(label="Analyze Current Function", command=self._menu_analyze_current)
+        analysis_menu.add_command(label="Rename Current Function", command=self._menu_rename_current)
+        analysis_menu.add_separator()
+        
+        # Batch operations
+        analysis_menu.add_command(label="Rename All Functions", command=self._menu_rename_all)
+        analysis_menu.add_command(label="Generate Software Report", command=self._menu_generate_report)
+        analysis_menu.add_separator()
+        
+        # Analysis tools
+        analysis_menu.add_command(label="Analyze Imports", command=self._menu_analyze_imports)
+        analysis_menu.add_command(label="Analyze Exports", command=self._menu_analyze_exports)
+        analysis_menu.add_command(label="Analyze Strings", command=self._menu_analyze_strings)
+        analysis_menu.add_separator()
+        
+        # Search/Scan tools
+        analysis_menu.add_command(label="Search Strings...", command=self._menu_search_strings)
+        analysis_menu.add_command(label="Scan Function Tables", command=self._menu_scan_tables)
         
         # Help menu
         help_menu = tk.Menu(menubar, tearoff=0)
@@ -4601,6 +4786,119 @@ class OGhidraUI:
         
         threading.Thread(target=check, daemon=True).start()
     
+    def _show_system_info(self):
+        """Show system information dialog with CAG/RAG controls and memory stats."""
+        dialog = tk.Toplevel(self.root)
+        dialog.title("System Information")
+        dialog.geometry("500x450")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        
+        # Center the dialog
+        dialog.update_idletasks()
+        x = (dialog.winfo_screenwidth() - 500) // 2
+        y = (dialog.winfo_screenheight() - 450) // 2
+        dialog.geometry(f"+{x}+{y}")
+        
+        main_frame = ttk.Frame(dialog, padding=15)
+        main_frame.pack(fill='both', expand=True)
+        
+        # CAG System Controls
+        cag_frame = ttk.LabelFrame(main_frame, text="Context-Augmented Generation (CAG)", padding=10)
+        cag_frame.pack(fill='x', pady=(0, 10))
+        
+        cag_enabled = getattr(self.bridge, 'enable_cag', False)
+        cag_status = ttk.Label(cag_frame, text=f"Status: {'Enabled' if cag_enabled else 'Disabled'}", 
+                              foreground='green' if cag_enabled else 'gray')
+        cag_status.pack(anchor='w')
+        
+        cag_var = tk.BooleanVar(value=cag_enabled)
+        def toggle_cag():
+            self.bridge.enable_cag = cag_var.get()
+            cag_status.config(text=f"Status: {'Enabled' if cag_var.get() else 'Disabled'}",
+                            foreground='green' if cag_var.get() else 'gray')
+        cag_check = ttk.Checkbutton(cag_frame, text="Enable CAG", variable=cag_var, command=toggle_cag)
+        cag_check.pack(anchor='w', pady=(5, 0))
+        
+        # RAG System Controls
+        rag_frame = ttk.LabelFrame(main_frame, text="Retrieval-Augmented Generation (RAG)", padding=10)
+        rag_frame.pack(fill='x', pady=(0, 10))
+        
+        # Get vector count
+        vector_count = 0
+        rag_enabled = False
+        if hasattr(self.bridge, 'cag_manager') and self.bridge.cag_manager:
+            rag_enabled = getattr(self.bridge.cag_manager, 'use_vector_store_for_prompts', True)
+            vector_store = self.bridge.cag_manager.vector_store
+            if vector_store and hasattr(vector_store, 'embeddings') and vector_store.embeddings:
+                try:
+                    vector_count = len(vector_store.embeddings)
+                except:
+                    pass
+        
+        rag_status = ttk.Label(rag_frame, text=f"Status: {'Enabled' if rag_enabled else 'Disabled'} ({vector_count} vectors)",
+                              foreground='green' if rag_enabled else 'gray')
+        rag_status.pack(anchor='w')
+        
+        rag_var = tk.BooleanVar(value=rag_enabled)
+        def toggle_rag():
+            if hasattr(self.bridge, 'cag_manager') and self.bridge.cag_manager:
+                self.bridge.cag_manager.use_vector_store_for_prompts = rag_var.get()
+            rag_status.config(text=f"Status: {'Enabled' if rag_var.get() else 'Disabled'} ({vector_count} vectors)",
+                            foreground='green' if rag_var.get() else 'gray')
+        rag_check = ttk.Checkbutton(rag_frame, text="Enable RAG", variable=rag_var, command=toggle_rag)
+        rag_check.pack(anchor='w', pady=(5, 0))
+        
+        # Memory Stats
+        stats_frame = ttk.LabelFrame(main_frame, text="Memory Statistics", padding=10)
+        stats_frame.pack(fill='both', expand=True, pady=(0, 10))
+        
+        stats_text = scrolledtext.ScrolledText(stats_frame, height=10, font=('Courier', 9))
+        stats_text.pack(fill='both', expand=True)
+        
+        # Populate memory stats
+        def refresh_stats():
+            stats_text.delete(1.0, tk.END)
+            try:
+                import psutil
+                process = psutil.Process()
+                mem_info = process.memory_info()
+                
+                stats = []
+                stats.append(f"Process Memory: {mem_info.rss / 1024 / 1024:.1f} MB")
+                stats.append(f"Virtual Memory: {mem_info.vms / 1024 / 1024:.1f} MB")
+                stats.append("")
+                
+                # Bridge stats
+                if hasattr(self.bridge, 'function_summaries'):
+                    stats.append(f"Analyzed Functions: {len(self.bridge.function_summaries)}")
+                if hasattr(self.bridge, 'function_address_mapping'):
+                    stats.append(f"Function Mappings: {len(self.bridge.function_address_mapping)}")
+                
+                # Vector store stats
+                if hasattr(self.bridge, 'cag_manager') and self.bridge.cag_manager:
+                    vs = self.bridge.cag_manager.vector_store
+                    if vs:
+                        doc_count = len(vs.documents) if hasattr(vs, 'documents') and vs.documents else 0
+                        emb_count = len(vs.embeddings) if hasattr(vs, 'embeddings') and vs.embeddings else 0
+                        stats.append(f"Vector Documents: {doc_count}")
+                        stats.append(f"Vector Embeddings: {emb_count}")
+                
+                stats_text.insert(1.0, "\n".join(stats))
+            except ImportError:
+                stats_text.insert(1.0, "Install psutil for detailed memory stats:\npip install psutil")
+            except Exception as e:
+                stats_text.insert(1.0, f"Error getting stats: {e}")
+        
+        refresh_stats()
+        
+        # Buttons
+        button_frame = ttk.Frame(main_frame)
+        button_frame.pack(fill='x')
+        
+        ttk.Button(button_frame, text="Refresh", command=refresh_stats).pack(side='left')
+        ttk.Button(button_frame, text="Close", command=dialog.destroy).pack(side='right')
+    
     def _configure_servers(self):
         """Open server configuration dialog."""
         try:
@@ -4614,7 +4912,6 @@ class OGhidraUI:
                 # Update Ghidra client configuration
                 if hasattr(self.bridge, 'ghidra_client') and self.bridge.ghidra_client:
                     self.bridge.ghidra_client.config.base_url = self.config.ghidra.base_url
-                    self.bridge.ghidra_client.config.extended_url = self.config.ghidra.extended_url
                 
                 messagebox.showinfo("Configuration Updated", 
                                   "Server configuration has been updated.\n\n"
@@ -4663,10 +4960,52 @@ class OGhidraUI:
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to clear data: {e}")
     
-    def _reset_workflow(self):
-        """Reset the workflow diagram."""
-        self.workflow_diagram.set_current_stage(None)
-        messagebox.showinfo("Success", "Workflow reset.")
+    # ========== Analysis Menu Handlers ==========
+    
+    def _menu_analyze_current(self):
+        """Menu handler: Analyze Current Function."""
+        if hasattr(self, 'tool_panel'):
+            self.tool_panel._analyze_current_function()
+    
+    def _menu_rename_current(self):
+        """Menu handler: Rename Current Function."""
+        if hasattr(self, 'tool_panel'):
+            self.tool_panel._rename_current_function()
+    
+    def _menu_rename_all(self):
+        """Menu handler: Rename All Functions."""
+        if hasattr(self, 'tool_panel'):
+            self.tool_panel._rename_all_functions()
+    
+    def _menu_generate_report(self):
+        """Menu handler: Generate Software Report."""
+        if hasattr(self, 'tool_panel'):
+            self.tool_panel._generate_software_report()
+    
+    def _menu_analyze_imports(self):
+        """Menu handler: Analyze Imports."""
+        if hasattr(self, 'tool_panel'):
+            self.tool_panel._analyze_imports()
+    
+    def _menu_analyze_exports(self):
+        """Menu handler: Analyze Exports."""
+        if hasattr(self, 'tool_panel'):
+            self.tool_panel._analyze_exports()
+    
+    def _menu_analyze_strings(self):
+        """Menu handler: Analyze Strings."""
+        if hasattr(self, 'tool_panel'):
+            self.tool_panel._analyze_strings()
+    
+    def _menu_search_strings(self):
+        """Menu handler: Search Strings."""
+        if hasattr(self, 'tool_panel'):
+            self.tool_panel._search_strings()
+    
+    def _menu_scan_tables(self):
+        """Menu handler: Scan Function Tables."""
+        if hasattr(self, 'tool_panel'):
+            self.tool_panel._scan_function_tables()
     
     def _show_about(self):
         """Show about dialog."""

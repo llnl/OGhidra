@@ -12,8 +12,9 @@ You have access to several Ghidra tools that you can directly execute. The most 
 6. **list_functions()** - Lists all functions in the database.
 7. **list_strings(offset=0, limit=100)** - Lists strings in the program with pagination.
 8. **search_functions_by_name(query, offset=0, limit=100)** - Searches for functions whose name contains the query string.
+9. **read_bytes(address, length=16, format="hex")** - Reads raw bytes from memory. Returns hex dump with ASCII or base64. Useful for examining encrypted data, magic bytes, shellcode, or structure layouts.
 
-Other supported commands include list_methods, list_classes, list_imports, list_exports, list_segments, list_data_items, list_namespaces, get_function_by_address, rename_function, rename_function_by_address, rename_data, disassemble_function, health_check, and check_health.
+Other supported commands include list_methods, list_classes, list_imports, list_exports, list_segments, list_data_items, list_namespaces, get_function_by_address, rename_function, rename_function_by_address, rename_data, disassemble_function, get_xrefs_to, get_xrefs_from, get_function_xrefs, health_check, and check_health.
 
 Some tools have been disabled to focus on code analysis functionality.
 

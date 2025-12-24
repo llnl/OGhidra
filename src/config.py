@@ -77,6 +77,41 @@ class OllamaConfig(BaseModel):
     # Request Delay
     request_delay: float = Field(default=0.0, ge=0.0, description="Delay in seconds before each request", env="OLLAMA_REQUEST_DELAY")
     
+    # Context Budget Management
+    context_budget: int = Field(
+        default=80000,
+        ge=4000,
+        le=200000,
+        description="Maximum context tokens for prompts (4000-200000)",
+        env="CONTEXT_BUDGET"
+    )
+    
+    context_budget_execution: float = Field(
+        default=0.5,
+        ge=0.1,
+        le=0.8,
+        description="Fraction of context budget for execution results (0.1-0.8)",
+        env="CONTEXT_BUDGET_EXECUTION"
+    )
+    
+    enable_result_summarization: bool = Field(
+        default=True,
+        description="Use LLM to summarize large results instead of truncating",
+        env="ENABLE_RESULT_SUMMARIZATION"
+    )
+    
+    result_cache_enabled: bool = Field(
+        default=True,
+        description="Cache full results and pass references to AI",
+        env="RESULT_CACHE_ENABLED"
+    )
+    
+    tiered_context_enabled: bool = Field(
+        default=True,
+        description="Use tiered context (detailed recent, summarized older)",
+        env="TIERED_CONTEXT_ENABLED"
+    )
+    
     @validator('model')
     def validate_model_name(cls, v):
         """Ensure model name follows expected patterns."""
@@ -354,20 +389,81 @@ class OllamaConfig(BaseModel):
                     "required": ["name"]
                 }
             }
+        },
+        # --- Raw memory access (new) ---
+        {
+            "type": "function",
+            "function": {
+                "name": "read_bytes",
+                "description": "Read raw bytes from memory at the specified address. Returns hex dump with ASCII representation or base64 encoded data. Useful for examining encrypted data, magic bytes, shellcode, or structure layouts.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "address": {"type": "string", "description": "Starting address in hex format (e.g., '10040fae0')"},
+                        "length": {"type": "integer", "description": "Number of bytes to read (1-4096, default: 16)"},
+                        "format": {"type": "string", "description": "Output format: 'hex' for hex dump (default), 'raw' for base64 encoded"}
+                    },
+                    "required": ["address"]
+                }
+            }
+        },
+        # --- Smart Analysis Tools (algorithmic, no LLM in loop) ---
+        {
+            "type": "function",
+            "function": {
+                "name": "scan_function_pointer_tables",
+                "description": "Scan the binary for function pointer tables (vtables, dispatch tables, jump tables). Returns structured list of detected tables with addresses and function entries. Runs algorithmically without LLM intervention - useful for reachability analysis.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "min_table_entries": {"type": "integer", "description": "Minimum consecutive function pointers to qualify as a table (default: 3)"},
+                        "pointer_size": {"type": "integer", "description": "Size of pointers in bytes: 8 for x64, 4 for x86 (default: 8)"},
+                        "max_scan_size": {"type": "integer", "description": "Maximum bytes to scan per segment (default: 65536)"}
+                    },
+                    "required": []
+                }
+            }
+        },
+        # --- Context Management Tools ---
+        {
+            "type": "function",
+            "function": {
+                "name": "get_cached_result",
+                "description": "Retrieve the full content of a previously summarized or truncated result. When large tool results are summarized due to context limits, they are cached with an ID like 'r5_decompile_function_abc123'. Use this to get the complete original content when the summary is not sufficient.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "result_id": {"type": "string", "description": "The cached result ID (e.g., 'r5_decompile_function_abc123')"}
+                    },
+                    "required": ["result_id"]
+                }
+            }
         }
     ])
     
     # Best practices for function calls
     FUNCTION_CALL_BEST_PRACTICES: ClassVar[str] = """# COMMON ERRORS TO AVOID:
-# ✓ DO use snake_case for function names and parameter names (e.g., decompile_function, old_name).
-# ✓ Parameter 'address' for tools like decompile_function_by_address, rename_function_by_address, and disassemble_function refers to the numerical memory address.
-# ✓ DO NOT use the "FUN_" prefix when providing an address to tools expecting a numerical address (e.g., use address="14024DA90", not address="FUN_14024DA90").
-# ✓ DO NOT use "0x" prefix when providing an address (e.g., use address="14024DA90", not address="0x14024DA90").
-# ✓ DO ensure a function exists (e.g., via search_functions_by_name or get_current_function) before trying to decompile or rename it by name.
-# ✓ For decompile_function (by name), use the full function name (e.g., name="FUN_14024DA90", or name="main").
-# ✓ For decompile_function_by_address and disassemble_function, use the numerical address (e.g., address="14024DA90").
-# ✓ Be precise with tool selection: decompile_function is for names, decompile_function_by_address and disassemble_function are for numerical addresses.
-# ✓ Use get_xrefs_to / get_function_xrefs to find what functions reference the current one; use get_xrefs_from to see which functions it calls.
+# - DO use snake_case for function names and parameter names (e.g., decompile_function, old_name).
+# - Parameter 'address' for tools like decompile_function_by_address, rename_function_by_address, and disassemble_function refers to the numerical memory address.
+# - DO NOT use the "FUN_" prefix when providing an address to tools expecting a numerical address (e.g., use address="14024DA90", not address="FUN_14024DA90").
+# - DO NOT use "0x" prefix when providing an address (e.g., use address="14024DA90", not address="0x14024DA90").
+# - DO ensure a function exists (e.g., via search_functions_by_name or get_current_function) before trying to decompile or rename it by name.
+# - For decompile_function (by name), use the full function name (e.g., name="FUN_14024DA90", or name="main").
+# - For decompile_function_by_address and disassemble_function, use the numerical address (e.g., address="14024DA90").
+# - Be precise with tool selection: decompile_function is for names, decompile_function_by_address and disassemble_function are for numerical addresses.
+# - Use get_xrefs_to / get_function_xrefs to find what functions reference the current one; use get_xrefs_from to see which functions it calls.
+
+# DATA VS CODE ADDRESSES:
+# - read_bytes() is for reading raw memory at ANY address (data, strings, tables, etc.).
+# - disassemble_function() and decompile_function_by_address() are ONLY for CODE addresses (functions).
+# - If you want to inspect data/strings/tables, use read_bytes(), NOT disassemble or decompile.
+# - If a read_bytes result shows readable ASCII text, that is often sufficient - no need to disassemble it.
+
+# DUPLICATE TOOL CALLS:
+# - If a tool call shows "[Already executed in step_L{loop}_{step}]", do NOT re-call that tool.
+# - The step ID format is step_L{loop}_{step} (e.g., step_L1_5 = Loop 1, Step 5).
+# - Use get_cached_result(result_id="step_L1_5") to retrieve the full result from that step.
+# - The result excerpt provided in the skip message often contains the key information you need.
 """
     
     # System prompt for each phase
@@ -444,6 +540,13 @@ class OllamaConfig(BaseModel):
     - NEVER rename a function to the SAME NAME (e.g., processData -> processData is useless)
     - Choose DIFFERENT, more descriptive names based on the function's actual purpose
     - If you receive an ERROR about duplicate commands, pick a *different* tool or change parameters
+
+    HANDLING CACHED/SKIPPED RESULTS:
+    - If a tool result shows "[Already executed in step_L<loop>_<step>]", the result is ALREADY AVAILABLE.
+    - The step ID format is step_L<loop>_<step> (e.g., step_L1_5 = Loop 1, Step 5).
+    - The excerpt in the skip message contains key info. Use it directly - do NOT re-call the tool.
+    - If you need the full result, use get_cached_result(result_id="step_L1_5") to retrieve it.
+    - Never call the same tool with identical parameters twice in a session.
     
     COMPLETION:
     - If the goal is met or no suitable tool exists, output "GOAL ACHIEVED"
@@ -497,7 +600,6 @@ class GhidraMCPConfig(BaseModel):
     timeout: int = Field(ge=1, le=300, default=30, description="Timeout in seconds (1-300)", env="GHIDRA_TIMEOUT")
     mock_mode: bool = Field(default=False, env="GHIDRA_MOCK_MODE")
     api_path: str = Field(default="", description="API path for GhidraMCP", env="GHIDRA_API_PATH")
-    extended_url: AnyHttpUrl = Field(default="http://localhost:8081", env="GHIDRA_EXTENDED_URL")
     
     @validator('api_path')
     def validate_api_path(cls, v):
@@ -705,10 +807,6 @@ def get_config() -> BridgeConfig:
             
         if os.getenv('GHIDRA_BASE_URL'):
             config_data['ghidra'] = {'base_url': os.getenv('GHIDRA_BASE_URL')}
-        if os.getenv('GHIDRA_EXTENDED_URL'):
-            if 'ghidra' not in config_data:
-                config_data['ghidra'] = {}
-            config_data['ghidra']['extended_url'] = os.getenv('GHIDRA_EXTENDED_URL')
             
         _config_instance = BridgeConfig(**config_data)
     return _config_instance 

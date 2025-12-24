@@ -158,7 +158,7 @@ def run_interactive_mode(bridge: Bridge, config: BridgeConfig):
                     client = bridge.ghidra if hasattr(bridge, 'ghidra') else GhidraMCPClient(config.ghidra) # Fallback if bridge.ghidra not init
                     
                     # Get all public methods (excluding those starting with _ and known non-tools)
-                    non_tool_methods = ['check_health', 'get_config', 'is_mock_mode', 'base_url', 'timeout', 'api_path', 'extended_url']
+                    non_tool_methods = ['check_health', 'get_config', 'is_mock_mode', 'base_url', 'timeout', 'api_path', 'config']
                     tools = [name for name in dir(client) if not name.startswith('_') and callable(getattr(client, name)) and name not in non_tool_methods]
                     
                     print(f"Found {len(tools)} available tools (via run-tool command):\n")

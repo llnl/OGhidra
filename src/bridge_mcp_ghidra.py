@@ -287,6 +287,25 @@ def list_strings(offset: int = 0, limit: int = 2000, filter: str = None) -> list
         params["filter"] = filter
     return safe_get("strings", params)
 
+@mcp.tool()
+def read_bytes(address: str, length: int = 16, format: str = "hex") -> str:
+    """
+    Read raw bytes from memory at the specified address.
+    
+    Args:
+        address: Starting address in hex format (e.g. "0x1400010a0" or "1400010a0")
+        length: Number of bytes to read (1-4096, default: 16)
+        format: Output format - "hex" for hex dump with ASCII, "raw" for base64 encoded
+        
+    Returns:
+        Hex dump or base64-encoded bytes from the specified address
+    """
+    return "\n".join(safe_get("read_bytes", {
+        "address": address, 
+        "length": length, 
+        "format": format
+    }))
+
 def main():
     parser = argparse.ArgumentParser(description="MCP server for Ghidra")
     parser.add_argument("--ghidra-server", type=str, default=DEFAULT_GHIDRA_SERVER,

@@ -215,17 +215,25 @@ class StructuredPrompt(BaseModel):
             sections.append(self.phase_specific_instructions)
         
         # Section 7: Conversation History (ALWAYS LAST - prevents confusion)
-        if self.conversation_history:
+        # NOTE: Skip if only 1-2 items and goal is already stated (reduces duplication)
+        if self.conversation_history and len(self.conversation_history) > 2:
             history_section = ["## Conversation History (For Context Only)"]
-            history_section.append("The following is your conversation history. Your CURRENT goal is stated above.")
+            history_section.append("The following is prior conversation context. Your CURRENT goal is stated above.")
             history_section.append("")
             
-            # Limit history to prevent token overflow
+            # Limit history to prevent token overflow and filter out goal duplicates
             recent_history = self.conversation_history[-max_history_items:]
+            goal_lower = self.goal.lower() if self.goal else ""
+            
             for msg in recent_history:
+                # Skip messages that are just the goal repeated
+                if goal_lower and msg.content.lower().strip() == goal_lower.strip():
+                    continue
                 history_section.append(msg.format_for_prompt())
             
-            sections.append("\n".join(history_section))
+            # Only add if we have meaningful history beyond goal
+            if len(history_section) > 3:
+                sections.append("\n".join(history_section))
         
         return "\n\n".join(sections)
     
@@ -258,22 +266,44 @@ class ExecutionPhaseResults(BaseModel):
         self.tool_executions.append(tool_exec)
         self.total_steps += 1
     
-    def format_for_analysis(self) -> str:
-        """Format all execution results for the analysis phase."""
+    def format_for_analysis(self, context_manager=None) -> str:
+        """
+        Format all execution results for the analysis phase.
+        
+        Args:
+            context_manager: Optional ContextManager for intelligent formatting.
+                           If provided, uses tiered context and summarization.
+                           If not provided, uses simple truncation.
+        """
         sections = [
             f"## Investigation Goal\n{self.goal}",
             f"\n## Execution Plan\n{self.plan}" if self.plan else "",
             f"\n## Execution Results ({self.total_steps} steps)\n"
         ]
         
+        total = len(self.tool_executions)
+        
         for i, exec_result in enumerate(self.tool_executions, 1):
             sections.append(f"\n### Step {i}: {exec_result.tool_name}")
             sections.append(f"Parameters: {exec_result.parameters}")
-            # Truncate very long results for readability
-            result_text = str(exec_result.result)
-            if len(result_text) > 2000:
-                result_text = result_text[:2000] + f"\n... [Truncated {len(result_text) - 2000} chars]"
-            sections.append(f"Result:\n{result_text}\n")
+            
+            result_text = str(exec_result.result) if exec_result.result else "No result"
+            
+            if context_manager:
+                # Use context manager for intelligent formatting
+                display_content, cached = context_manager.process_result(
+                    tool_name=exec_result.tool_name,
+                    parameters=exec_result.parameters,
+                    result=result_text,
+                    goal=self.goal
+                )
+                sections.append(f"Result:\n{display_content}\n")
+            else:
+                # Fallback: simple truncation for very long results
+                # Increased from 2000 to 8000 to preserve more context
+                if len(result_text) > 8000:
+                    result_text = result_text[:8000] + f"\n... [Truncated {len(result_text) - 8000} chars]"
+                sections.append(f"Result:\n{result_text}\n")
         
         return "\n".join(sections)
     

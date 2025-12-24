@@ -32,7 +32,7 @@ class GhidraMCPClient:
             config: GhidraMCPConfig object
         """
         self.base_url = str(config.base_url)
-        self.extended_url = str(config.extended_url)
+        self.config = config
         self.function_signatures = self._load_function_signatures()
         
     def _load_function_signatures(self) -> Dict[str, Any]:
@@ -50,63 +50,37 @@ class GhidraMCPClient:
             logger.error(f"Error loading function signatures: {e}")
             return {}
     
-    def _get_request(self, endpoint: str, params: Optional[Dict[str, Any]] = None, use_extended: bool = True) -> requests.Response:
+    def _get_request(self, endpoint: str, params: Optional[Dict[str, Any]] = None) -> requests.Response:
         """
         Make a GET request to the API.
         
         Args:
             endpoint: API endpoint
             params: Optional query parameters
-            use_extended: Whether to try the extended API if the base API fails
             
         Returns:
             Response object from the requests library
         """
-        try:
-            url = f"{self.base_url}/{endpoint}"
-            response = requests.get(url, params=params)
-            response.raise_for_status()
-            return response
-        except Exception as e:
-            if use_extended:
-                try:
-                    logger.info(f"Falling back to extended API for {endpoint}")
-                    url = f"{self.extended_url}/{endpoint}"
-                    response = requests.get(url, params=params)
-                    response.raise_for_status()
-                    return response
-                except Exception as ex:
-                    logger.error(f"Error in extended API for {endpoint}: {ex}")
-            raise
+        url = f"{self.base_url}/{endpoint}"
+        response = requests.get(url, params=params)
+        response.raise_for_status()
+        return response
     
-    def _post_request(self, endpoint: str, data: Dict[str, Any], use_extended: bool = True) -> requests.Response:
+    def _post_request(self, endpoint: str, data: Dict[str, Any]) -> requests.Response:
         """
         Make a POST request to the API.
         
         Args:
             endpoint: API endpoint
             data: Data to send in the request body
-            use_extended: Whether to try the extended API if the base API fails
             
         Returns:
             Response object from the requests library
         """
-        try:
-            url = f"{self.base_url}/{endpoint}"
-            response = requests.post(url, json=data)
-            response.raise_for_status()
-            return response
-        except Exception as e:
-            if use_extended:
-                try:
-                    logger.info(f"Falling back to extended API for {endpoint}")
-                    url = f"{self.extended_url}/{endpoint}"
-                    response = requests.post(url, json=data)
-                    response.raise_for_status()
-                    return response
-                except Exception as ex:
-                    logger.error(f"Error in extended API for {endpoint}: {ex}")
-            raise
+        url = f"{self.base_url}/{endpoint}"
+        response = requests.post(url, json=data)
+        response.raise_for_status()
+        return response
 
     # ------------------------------------------------------------------
     # Helper: Address normalisation to meet API expectations
@@ -141,18 +115,12 @@ class GhidraMCPClient:
             List of function names
         """
         try:
-            # First try the existing endpoint
-            response = self._get_request("methods", use_extended=False)
+            response = self._get_request("methods")
             functions = response.text.strip().split('\n')
             return functions
         except Exception as e:
-            try:
-                # Fallback to the functions endpoint on the extended API
-                response = self._get_request("functions", use_extended=True)
-                return response.json()
-            except Exception as ex:
-                logger.error(f"Error listing functions: {e}, extended API error: {ex}")
-                return []
+            logger.error(f"Error listing functions: {e}")
+            return []
     
     def decompile_function(self, name: str) -> str:
         """

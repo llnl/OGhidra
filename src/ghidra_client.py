@@ -6,7 +6,9 @@ import json
 import logging
 import time
 import re
-from typing import Dict, Any, List, Optional
+import struct
+import base64
+from typing import Dict, Any, List, Optional, Tuple
 
 import httpx
 
@@ -661,4 +663,343 @@ class GhidraMCPClient:
             return self.get_xrefs_to(addr, offset=offset, limit=limit)
 
         lines = self.safe_get("function_xrefs", {"name": name, "offset": offset, "limit": limit})
-        return lines 
+        return lines
+
+    # ------------------------------------------------------------------
+    # Raw byte reading capability
+    # ------------------------------------------------------------------
+
+    def read_bytes(self, address: str, length: int = 16, format: str = "hex") -> str:
+        """
+        Read raw bytes from memory at the specified address.
+        
+        Args:
+            address: Starting address in hex format (e.g. "0x1400010a0")
+            length: Number of bytes to read (1-4096, default: 16)
+            format: "hex" for hex dump with ASCII representation, 
+                    "raw" for base64 encoded bytes
+            
+        Returns:
+            Hex dump string or base64-encoded raw bytes
+        """
+        norm_addr = self._normalize_addr(address)
+        result = self.safe_get("read_bytes", {
+            "address": norm_addr,
+            "length": length,
+            "format": format
+        })
+        return "\n".join(result)
+
+    # =========================================================================
+    # Smart Analysis Tools - Algorithmic scanning without LLM intervention
+    # =========================================================================
+
+    def scan_function_pointer_tables(
+        self, 
+        min_table_entries: int = 3,
+        pointer_size: int = 8,
+        max_scan_size: int = 524288,  # 512KB per segment max
+        alignment: int = 8
+    ) -> List[Dict]:
+        """
+        Scan the binary for function pointer tables without LLM assistance.
+        
+        Algorithm:
+        1. Get all memory segments and identify data segments
+        2. Get all known function addresses to build a lookup set
+        3. Scan data segments for pointer-aligned sequences
+        4. Identify consecutive values that match valid function addresses
+        5. Return list of suspected tables with their entries
+        
+        Args:
+            min_table_entries: Minimum consecutive function pointers to qualify as a table (default: 3)
+            pointer_size: Size of pointers in bytes (8 for x64, 4 for x86)
+            max_scan_size: Maximum bytes to scan per segment
+            alignment: Expected pointer alignment
+            
+        Returns:
+            List of dicts: {
+                'table_address': str,
+                'entry_count': int,
+                'entries': [{'offset': int, 'pointer': str, 'function_name': str}, ...]
+            }
+        """
+        results = []
+        
+        # Step 1: Get all function addresses and build a lookup table
+        logger.info("Building function address lookup table...")
+        functions_raw = self.list_functions()
+        function_map = {}  # address -> name
+        
+        for line in functions_raw:
+            # Parse "FUN_140001234 at 140001234" or "main at 140001234"
+            if " at " in line:
+                parts = line.split(" at ")
+                if len(parts) == 2:
+                    name = parts[0].strip()
+                    addr_str = parts[1].strip()
+                    try:
+                        addr_int = int(addr_str, 16)
+                        function_map[addr_int] = name
+                    except ValueError:
+                        continue
+        
+        if not function_map:
+            logger.warning("No functions found, cannot scan for tables")
+            return []
+        
+        # Determine code address range for quick filtering
+        min_func_addr = min(function_map.keys())
+        max_func_addr = max(function_map.keys())
+        logger.info(f"Found {len(function_map)} functions in range 0x{min_func_addr:x} - 0x{max_func_addr:x}")
+        
+        # Step 2: Get memory segments and identify data segments
+        logger.info("Analyzing memory segments...")
+        segments_raw = self.list_segments()
+        data_segments = []
+        
+        for line in segments_raw:
+            # Parse segment info - Ghidra format: ".text: 100401000 - 10041d5ff"
+            # Look for the pattern after the colon: "start - end" where start/end are hex
+            seg_match = re.match(r'^([^:]+):\s*([0-9a-fA-F]+)\s*-\s*([0-9a-fA-F]+)', line)
+            if seg_match:
+                try:
+                    seg_name = seg_match.group(1).strip()
+                    start = int(seg_match.group(2), 16)
+                    end = int(seg_match.group(3), 16)
+                    size = end - start
+                    if size > 0:
+                        data_segments.append({
+                            'start': start, 
+                            'end': end, 
+                            'name': seg_name,
+                            'size': size
+                        })
+                        logger.debug(f"Parsed segment: {seg_name} 0x{start:x} - 0x{end:x} ({size} bytes)")
+                except ValueError:
+                    continue
+        
+        # If we couldn't parse segments, try scanning around function addresses
+        if not data_segments:
+            logger.warning("Could not parse data segments, scanning around function address range")
+            # Create a pseudo-segment covering the function address space + some buffer
+            data_segments = [{
+                'start': max(0, min_func_addr - 0x10000),
+                'end': max_func_addr + 0x10000,
+                'name': 'inferred',
+                'size': (max_func_addr - min_func_addr) + 0x20000
+            }]
+        
+        # Prioritize data segments where function tables are likely to be found
+        # Skip code segments (.text) and special segments
+        # Note: .bss is uninitialized data (zeros) so unlikely to have pointers
+        skip_segments = {'.text', '.pdata', '.xdata', '.rsrc', '.buildid', 'headers', 
+                         '.bss', '.reloc', '.gnu_debuglink', '.comment'}
+        priority_segments = {'.rdata', '.data', '.rodata', '.got', '.got.plt', '.idata'}
+        
+        # Sort segments: priority segments first, then others, skip unwanted
+        def segment_priority(seg):
+            name_lower = seg['name'].lower()
+            if name_lower in skip_segments:
+                return 2  # Skip these
+            if name_lower in priority_segments:
+                return 0  # Scan first
+            return 1  # Scan after priority
+        
+        scannable_segments = [s for s in data_segments if s['name'].lower() not in skip_segments]
+        scannable_segments.sort(key=segment_priority)
+        
+        logger.info(f"Scanning {len(scannable_segments)} segment(s) for function pointer tables (skipping code segments)")
+        
+        # Step 3: Scan each segment for function pointer sequences
+        for segment in scannable_segments:
+            scan_size = min(segment['size'], max_scan_size)
+            logger.info(f"Scanning segment {segment['name']}: 0x{segment['start']:x} ({segment['size']} bytes)")
+            tables_in_segment = self._scan_segment_for_tables(
+                segment['start'],
+                scan_size,
+                function_map,
+                min_func_addr,
+                max_func_addr,
+                pointer_size,
+                min_table_entries,
+                alignment
+            )
+            if tables_in_segment:
+                logger.info(f"Found {len(tables_in_segment)} table(s) in segment {segment['name']}")
+            results.extend(tables_in_segment)
+        
+        # Log summary
+        if results:
+            logger.info(f"Total: Found {len(results)} potential function pointer tables")
+        else:
+            logger.info(f"No function pointer tables found (require {min_table_entries}+ consecutive pointers)")
+            logger.info("Tip: Some binaries (especially C programs) may not have traditional pointer tables")
+        
+        return results
+
+    def _scan_segment_for_tables(
+        self,
+        start_addr: int,
+        scan_length: int,
+        function_map: Dict[int, str],
+        min_func_addr: int,
+        max_func_addr: int,
+        pointer_size: int,
+        min_table_entries: int,
+        alignment: int
+    ) -> List[Dict]:
+        """
+        Scan a memory region for function pointer tables.
+        
+        Returns list of detected tables.
+        """
+        tables = []
+        chunk_size = 4096  # Read 4KB at a time
+        
+        for offset in range(0, scan_length, chunk_size):
+            read_size = min(chunk_size, scan_length - offset)
+            current_addr = start_addr + offset
+            
+            try:
+                # Read raw bytes (base64 encoded)
+                raw_result = self.read_bytes(
+                    hex(current_addr), 
+                    length=read_size, 
+                    format="raw"
+                )
+                
+                if not raw_result or "Error" in raw_result or "No program" in raw_result:
+                    continue
+                
+                # Decode base64 to bytes
+                try:
+                    data = base64.b64decode(raw_result.strip())
+                    if len(data) < pointer_size:
+                        continue
+                except Exception:
+                    continue
+                
+                # Scan for consecutive function pointers
+                tables_in_chunk = self._find_pointer_sequences(
+                    data,
+                    current_addr,
+                    function_map,
+                    min_func_addr,
+                    max_func_addr,
+                    pointer_size,
+                    min_table_entries,
+                    alignment
+                )
+                tables.extend(tables_in_chunk)
+                
+            except Exception as e:
+                logger.debug(f"Error scanning at 0x{current_addr:x}: {e}")
+                continue
+        
+        return tables
+
+    def _find_pointer_sequences(
+        self,
+        data: bytes,
+        base_addr: int,
+        function_map: Dict[int, str],
+        min_func_addr: int,
+        max_func_addr: int,
+        pointer_size: int,
+        min_table_entries: int,
+        alignment: int
+    ) -> List[Dict]:
+        """
+        Find sequences of consecutive function pointers in a byte array.
+        """
+        tables = []
+        
+        # Track current sequence
+        current_table_start = None
+        current_entries = []
+        
+        # Format string for struct.unpack (little-endian)
+        ptr_format = '<Q' if pointer_size == 8 else '<I'
+        
+        i = 0
+        while i <= len(data) - pointer_size:
+            try:
+                # Extract pointer value
+                ptr_bytes = data[i:i + pointer_size]
+                ptr_value = struct.unpack(ptr_format, ptr_bytes)[0]
+                
+                # Quick range check then lookup
+                is_valid_func = (
+                    min_func_addr <= ptr_value <= max_func_addr and 
+                    ptr_value in function_map
+                )
+                
+                if is_valid_func:
+                    # We found a valid function pointer
+                    if current_table_start is None:
+                        current_table_start = base_addr + i
+                    
+                    current_entries.append({
+                        'offset': len(current_entries) * pointer_size,
+                        'pointer': f"0x{ptr_value:x}",
+                        'function_name': function_map[ptr_value]
+                    })
+                    i += alignment
+                    continue
+                
+                # Not a valid function pointer - check if we should end current sequence
+                if current_entries:
+                    if len(current_entries) >= min_table_entries:
+                        tables.append({
+                            'table_address': f"0x{current_table_start:x}",
+                            'entry_count': len(current_entries),
+                            'entries': current_entries.copy()
+                        })
+                    current_table_start = None
+                    current_entries = []
+                
+                i += alignment
+                
+            except struct.error:
+                i += alignment
+                continue
+        
+        # Don't forget the last sequence
+        if current_entries and len(current_entries) >= min_table_entries:
+            tables.append({
+                'table_address': f"0x{current_table_start:x}",
+                'entry_count': len(current_entries),
+                'entries': current_entries.copy()
+            })
+        
+        return tables
+
+    def format_table_scan_results(self, tables: List[Dict], max_entries_shown: int = 10) -> str:
+        """
+        Format the scan results for human-readable output.
+        
+        Args:
+            tables: List of table dicts from scan_function_pointer_tables
+            max_entries_shown: Maximum entries to show per table (default: 10)
+            
+        Returns:
+            Formatted string with table information
+        """
+        if not tables:
+            return "No function pointer tables detected."
+        
+        lines = [f"Found {len(tables)} function pointer table(s):\n"]
+        
+        for i, table in enumerate(tables, 1):
+            lines.append(f"## Table {i}: {table['table_address']} ({table['entry_count']} entries)")
+            
+            entries_to_show = table['entries'][:max_entries_shown]
+            for entry in entries_to_show:
+                lines.append(f"  [{entry['offset']:4d}] {entry['pointer']} -> {entry['function_name']}")
+            
+            if len(table['entries']) > max_entries_shown:
+                lines.append(f"  ... and {len(table['entries']) - max_entries_shown} more entries")
+            lines.append("")
+        
+        return "\n".join(lines)

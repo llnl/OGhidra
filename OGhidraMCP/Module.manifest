@@ -1,0 +1,2 @@
+GHIDRA_MODULE_NAME=OGhidraMCP
+GHIDRA_MODULE_DESC=Extended GhidraMCP - HTTP server plugin for AI-assisted Ghidra analysis

@@ -346,14 +346,22 @@ class SessionCache:
         """
         sections = []
         
-        # Format context history
-        if pruned_cache["context_history"]:
-            context_section = "## Recent Conversation:\n\n"
-            for item in pruned_cache["context_history"]:
+        # Format context history (skip if minimal to reduce bloat)
+        # Only include if there are meaningful exchanges beyond 1-2 messages
+        if pruned_cache["context_history"] and len(pruned_cache["context_history"]) > 2:
+            context_section = "## Prior Context:\n\n"
+            # Skip the most recent user message if it's just the current goal (already shown)
+            items_to_show = pruned_cache["context_history"][:-1] if len(pruned_cache["context_history"]) > 1 else []
+            
+            for item in items_to_show[-5:]:  # Limit to last 5 for brevity
                 prefix = f"**{item.role.capitalize()}**: "
-                content = item.content.replace("\n", "\n  ")  # Indent for readability
+                # Truncate very long content
+                content = item.content[:500] + "..." if len(item.content) > 500 else item.content
+                content = content.replace("\n", "\n  ")  # Indent for readability
                 context_section += f"{prefix}{content}\n\n"
-            sections.append(context_section)
+            
+            if items_to_show:
+                sections.append(context_section)
         
         # Format decompiled functions
         if pruned_cache["decompiled_functions"]:

@@ -50,6 +50,9 @@ class OllamaClient:
         self.llm_log_format = getattr(config, 'llm_log_format', 'json')
         self.llm_logger = None
         
+        # Embedding API version: None = auto-detect, 'new' = /api/embed, 'old' = /api/embeddings
+        self._embedding_api_version = None
+        
         if self.llm_logging_enabled:
             self._setup_llm_logger()
     
@@ -274,6 +277,9 @@ class OllamaClient:
         """
         Generate embeddings using Ollama embedding model.
         
+        Supports both new (/api/embed) and legacy (/api/embeddings) Ollama API versions.
+        Auto-detects which version works and caches the result for future calls.
+        
         Args:
             text: Text to embed
             model: Embedding model to use (defaults to configured embedding_model)
@@ -291,8 +297,69 @@ class OllamaClient:
             
         # Use provided model or default embedding model
         embedding_model = model or self.embedding_model
-        url = f"{self.base_url}/api/embeddings"
         
+        # Determine which API version to try based on cached result
+        if self._embedding_api_version == 'new':
+            return self._embed_new_api(text, embedding_model, start_time)
+        elif self._embedding_api_version == 'old':
+            return self._embed_old_api(text, embedding_model, start_time)
+        else:
+            # Auto-detect: try new API first, fall back to old
+            try:
+                result = self._embed_new_api(text, embedding_model, start_time)
+                self._embedding_api_version = 'new'
+                self.logger.debug("Using new Ollama embedding API (/api/embed)")
+                return result
+            except requests.exceptions.RequestException as e:
+                # Check if it's a 404 (endpoint not found) - indicates old Ollama version
+                if hasattr(e, 'response') and e.response is not None and e.response.status_code == 404:
+                    self.logger.debug("New embedding API not available, falling back to legacy /api/embeddings")
+                    try:
+                        result = self._embed_old_api(text, embedding_model, start_time)
+                        self._embedding_api_version = 'old'
+                        self.logger.debug("Using legacy Ollama embedding API (/api/embeddings)")
+                        return result
+                    except Exception as fallback_error:
+                        self.logger.error(f"Both embedding APIs failed. New API: {e}, Legacy API: {fallback_error}")
+                        raise fallback_error
+                else:
+                    # Other error (500, connection error, etc.) - don't fallback, just raise
+                    raise
+    
+    def _embed_new_api(self, text: str, embedding_model: str, start_time: Optional[float]) -> List[float]:
+        """
+        Generate embeddings using the new Ollama API (/api/embed).
+        Introduced in Ollama 0.1.26+.
+        """
+        url = f"{self.base_url}/api/embed"
+        payload = {
+            "model": embedding_model,
+            "input": text
+        }
+        
+        try:
+            response = requests.post(url, json=payload)
+            response.raise_for_status()
+            data = response.json()
+            # New API returns "embeddings" (array) for batch input
+            embeddings_data = data.get('embeddings', [])
+            embedding = embeddings_data[0] if embeddings_data else data.get('embedding', [])
+            
+            self._log_embed_success(embedding_model, text, embedding, start_time)
+            return embedding
+        except requests.exceptions.RequestException as e:
+            self._log_embed_error(embedding_model, text, e, start_time)
+            raise
+        except json.JSONDecodeError as e:
+            self.logger.error(f"Error parsing Ollama embed response: {str(e)}")
+            raise
+    
+    def _embed_old_api(self, text: str, embedding_model: str, start_time: Optional[float]) -> List[float]:
+        """
+        Generate embeddings using the legacy Ollama API (/api/embeddings).
+        For Ollama versions prior to 0.1.26.
+        """
+        url = f"{self.base_url}/api/embeddings"
         payload = {
             "model": embedding_model,
             "prompt": text
@@ -304,44 +371,48 @@ class OllamaClient:
             data = response.json()
             embedding = data.get('embedding', [])
             
-            # Log LLM interaction
-            if self.llm_logging_enabled:
-                log_data = {
-                    'model': embedding_model,
-                    'method': 'embed',
-                    'embedding_dimension': len(embedding)
-                }
-                
-                if self.llm_log_prompts:
-                    log_data['text'] = text[:500] + ('...' if len(text) > 500 else '')
-                    log_data['text_length'] = len(text)
-                
-                if self.llm_log_timing and start_time:
-                    log_data['timing'] = {'total_duration_seconds': time.time() - start_time}
-                
-                log_data['status'] = 'success'
-                self._log_llm_interaction('embed', log_data)
-            
+            self._log_embed_success(embedding_model, text, embedding, start_time)
             return embedding
         except requests.exceptions.RequestException as e:
-            self.logger.error(f"Error calling Ollama embeddings API: {str(e)}")
-            
-            # Log failed interaction
-            if self.llm_logging_enabled:
-                log_data = {
-                    'model': embedding_model,
-                    'method': 'embed',
-                    'status': 'error',
-                    'error': str(e)
-                }
-                if self.llm_log_timing and start_time:
-                    log_data['timing'] = {'total_duration_seconds': time.time() - start_time}
-                self._log_llm_interaction('embed', log_data)
-            
+            self._log_embed_error(embedding_model, text, e, start_time)
             raise
         except json.JSONDecodeError as e:
             self.logger.error(f"Error parsing Ollama embeddings response: {str(e)}")
             raise
+    
+    def _log_embed_success(self, embedding_model: str, text: str, embedding: List[float], start_time: Optional[float]):
+        """Log successful embedding generation."""
+        if self.llm_logging_enabled:
+            log_data = {
+                'model': embedding_model,
+                'method': 'embed',
+                'embedding_dimension': len(embedding)
+            }
+            
+            if self.llm_log_prompts:
+                log_data['text'] = text[:500] + ('...' if len(text) > 500 else '')
+                log_data['text_length'] = len(text)
+            
+            if self.llm_log_timing and start_time:
+                log_data['timing'] = {'total_duration_seconds': time.time() - start_time}
+            
+            log_data['status'] = 'success'
+            self._log_llm_interaction('embed', log_data)
+    
+    def _log_embed_error(self, embedding_model: str, text: str, error: Exception, start_time: Optional[float]):
+        """Log failed embedding generation."""
+        self.logger.error(f"Error calling Ollama embed API: {str(error)}")
+        
+        if self.llm_logging_enabled:
+            log_data = {
+                'model': embedding_model,
+                'method': 'embed',
+                'status': 'error',
+                'error': str(error)
+            }
+            if self.llm_log_timing and start_time:
+                log_data['timing'] = {'total_duration_seconds': time.time() - start_time}
+            self._log_llm_interaction('embed', log_data)
 
     def check_health(self) -> bool:
         """

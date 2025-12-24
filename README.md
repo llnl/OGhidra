@@ -2,7 +2,7 @@
 
 OGhidra bridges Large Language Models (LLMs) via Ollama with the Ghidra reverse engineering platform, enabling AI-driven binary analysis through natural language. Interact with Ghidra using conversational queries and automate complex reverse engineering workflows.
 
-![design](https://raw.githubusercontent.com/llnl/OGhidra/main/images/design.png)
+<img width="1298" height="916" alt="design" src="https://github.com/user-attachments/assets/85ee1c09-a146-45ab-94fa-cd3debd82996" />
 
 ## What is OGhidra?
 
@@ -23,11 +23,11 @@ OGhidra combines the power of local LLMs with Ghidra's reverse engineering capab
 ---
 
 ### Monitor your Investigation and Rename All Functions
-![renaming-ui](https://raw.githubusercontent.com/llnl/OGhidra/main/images/renaming-ui.png)
+<img width="1920" height="1028" alt="renaming-ui" src="https://github.com/user-attachments/assets/8843b5f5-1f2f-42eb-bf4a-4ef6c5625c9c" />
 
 
 ### Summarize all your Functions
-![function-summaries](https://raw.githubusercontent.com/llnl/OGhidra/main/images/function-summaries.png)
+<img width="1920" height="1026" alt="function-summaries" src="https://github.com/user-attachments/assets/3eec778a-ccb3-4a35-86aa-11908eafc6c6" />
 
 
 ## Pre-Installation Requirements
@@ -71,6 +71,34 @@ Ghidra is the NSA's reverse engineering platform that OGhidra enhances with AI c
 
 GhidraMCP provides the API bridge that allows external tools (like OGhidra) to interact with Ghidra programmatically.
 
+**Option A: OGhidraMCP (Recommended)**
+
+OGhidraMCP is an extended version of GhidraMCP with additional capabilities for AI-assisted reverse engineering.
+
+| Property | Value |
+|----------|-------|
+| **Version** | 1.1.0 |
+| **Ghidra Compatibility** | 11.3.2 (also compatible with 11.3.x, 11.4.x) |
+| **Original Author** | LaurieWired |
+| **Modified By** | ezrealenoch |
+
+**Additional Features in OGhidraMCP:**
+- `read_bytes`: Read raw bytes from memory addresses for AI analysis of data structures, magic bytes, and encrypted content
+- `scan_function_pointer_tables`: Algorithmic scanning for vtables, dispatch tables, and jump tables
+
+**Installation:**
+1. Locate the plugin in `OGhidraMCP/dist/ghidra_11.3.2_PUBLIC_20251223_OGhidraMCP.zip`
+2. Open Ghidra
+3. Go to `File` → `Install Extensions`
+4. Click the `+` button
+5. Select the `OGhidraMCP.zip` file
+6. Click `OK` to install
+7. Restart Ghidra
+
+**Option B: Original GhidraMCP**
+
+If you prefer the original plugin without modifications:
+
 1. **Download the GhidraMCP plugin**:
    - [GhidraMCP Repository](https://github.com/LaurieWired/GhidraMCP)
    - Direct download: [GhidraMCP 1.3+](https://github.com/LaurieWired/GhidraMCP/releases)
@@ -84,17 +112,19 @@ GhidraMCP provides the API bridge that allows external tools (like OGhidra) to i
 
 3. **Restart Ghidra** to load the extension
 
-4. **Enable the GhidraMCP plugin**:
+**Enable the Plugin (Both Options):**
+
+1. **Enable the GhidraMCP plugin**:
    - Go to `File` → `Configure` → `Developer`
-   - Check the box for `GhidraMCPPlugin`
+   - Check the box for `GhidraMCPPlugin` (or `OGhidraMCPPlugin`)
    - Click `OK`
 
-5. **Configure the server port** (optional):
+2. **Configure the server port** (optional):
    - Go to `Edit` → `Tool Options` → `GhidraMCP HTTP Server`
    - Default port is `8080` - change if needed
    - Click `OK`
 
-6. **Verify the server is running**:
+3. **Verify the server is running**:
    - With a project open, the GhidraMCP server should start automatically
    - Check Ghidra's console for "GhidraMCP server started" message
 

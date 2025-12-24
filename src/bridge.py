@@ -32,6 +32,7 @@ from src.models.memory import (
     ExecutionPhaseResults,
     ToolExecution
 )
+from src.context_manager import ContextManager
 from datetime import datetime
 
 # Configure logging
@@ -101,6 +102,16 @@ class Bridge:
         # Memory/knowledge manager
         self.memory_manager = None
         
+        # Context manager for intelligent result handling
+        self.context_manager = ContextManager(
+            ollama_client=self.ollama,
+            context_budget=self.config.ollama.context_budget,
+            execution_fraction=self.config.ollama.context_budget_execution,
+            enable_summarization=self.config.ollama.enable_result_summarization,
+            enable_caching=self.config.ollama.result_cache_enabled,
+            enable_tiered_context=self.config.ollama.tiered_context_enabled
+        )
+        
         if self.enable_cag:
             try:
                 from .cag import CAGManager
@@ -140,14 +151,19 @@ class Bridge:
         self.goal_achieved = False
         self.current_plan = ""
         self.current_plan_tools = []
-        self.executed_tools = []  # Track which tools have been called to avoid loops
+        self.executed_tools = set()  # Track (cmd_name:params_signature) to avoid duplicates
+        self.step_result_map = {}  # Map cmd_signature -> (loop_step_id, result_excerpt)
         self.tool_repetition_limit = 2  # Maximum repetitions allowed for tool calls
+        self.current_loop_number = 1  # Track current agentic loop/cycle number
         
         # Workflow stage tracking for UI integration
         self.current_workflow_stage = None  # Can be: 'planning', 'execution', 'analysis', 'review', None
         
         # Partial outputs storage
         self.partial_outputs = []
+        
+        # UI callback for chain of thought updates (set by UI if present)
+        self._ui_cot_callback = None
         
         self.logger.info("Bridge initialized successfully")
         
@@ -207,6 +223,35 @@ class Bridge:
             'misses': 0,
             'cache_size': 0
         }
+    
+    def _emit_cot(self, update_type: str, content: str, also_print: bool = True):
+        """Emit a chain of thought update to both terminal and UI.
+        
+        This method provides live visibility into the AI agent's reasoning
+        during the agentic loop, mirroring output to both console and UI.
+        
+        Args:
+            update_type: Type of update ('Cycle', 'Phase', 'Reasoning', 'Tool', 'Status')
+            content: The update content to display
+            also_print: Whether to also print to terminal (default True)
+        """
+        # Print to terminal if requested
+        if also_print:
+            if update_type.upper() == 'REASONING':
+                print(f"\n{content}\n")
+            elif update_type.upper() == 'CYCLE':
+                print(f"\n{'='*70}")
+                print(content)
+                print(f"{'='*70}")
+            else:
+                print(content)
+        
+        # Send to UI callback if available
+        if hasattr(self, '_ui_cot_callback') and self._ui_cot_callback is not None:
+            try:
+                self._ui_cot_callback(update_type, content)
+            except Exception as e:
+                self.logger.debug(f"Could not emit CoT to UI: {e}")
     
     def _load_capabilities_text(self) -> Optional[str]:
         """Load the capabilities text from the file if the flag is set."""
@@ -575,6 +620,30 @@ You can help analyze binary files by executing commands through GhidraMCP."""
             
         return normalized_params
 
+    def get_cached_result(self, result_id: str) -> str:
+        """
+        Retrieve the full content of a cached result by its ID.
+        
+        This allows the AI to request the full content of results that
+        were previously summarized or truncated due to context budget limits.
+        
+        Args:
+            result_id: The cached result ID (e.g., "r5_decompile_function_abc123")
+            
+        Returns:
+            Full result content, or error message if not found
+        """
+        if not self.context_manager or not self.context_manager.result_cache:
+            return "Error: Result caching is not enabled"
+        
+        full_result = self.context_manager.get_full_result(result_id)
+        
+        if full_result:
+            self.logger.info(f"Retrieved cached result: {result_id} ({len(full_result)} chars)")
+            return full_result
+        else:
+            return f"Error: Cached result '{result_id}' not found. Available IDs: {list(self.context_manager.result_cache.cache.keys())[:5]}"
+
     def execute_command(self, command_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
         """
         Execute a command with parameters.
@@ -587,7 +656,20 @@ You can help analyze binary files by executing commands through GhidraMCP."""
             The result of the command execution
         """
         try:
-            # Normalize command name and parameters
+            # Handle bridge-level commands FIRST (before Ghidra client validation)
+            bridge_commands = {"get_cached_result", "scan_function_pointer_tables"}
+            normalized_bridge_cmd = command_name.lower().replace("-", "_").replace(" ", "_")
+            
+            if normalized_bridge_cmd == "get_cached_result":
+                result_id = params.get("result_id", "")
+                result = self.get_cached_result(result_id)
+                return {"result": result, "source": "context_cache"}
+            
+            if normalized_bridge_cmd == "scan_function_pointer_tables":
+                # This is handled by ghidra_client, so let it pass through
+                pass
+            
+            # Normalize command name and parameters for Ghidra client commands
             normalized_command = self._normalize_command_name(command_name)
             if not normalized_command:
                 exists, error_message, similar_commands, all_available_commands = self._check_command_exists(command_name)
@@ -599,6 +681,11 @@ You can help analyze binary files by executing commands through GhidraMCP."""
                             tools_list_str += f"  - {tool}\n"
                     else:
                         tools_list_str += "  (Could not fetch tool list or no tools available via client introspection).\n"
+                    
+                    # Also mention bridge-level commands
+                    tools_list_str += "\nBridge-level commands:\n"
+                    tools_list_str += "  - get_cached_result(result_id): Retrieve full cached result\n"
+                    tools_list_str += "  - scan_function_pointer_tables(): Scan for vtables/dispatch tables\n"
                     
                     enhanced_unknown_command_error = f"{error_message}\n\nTo help you choose a valid tool, here is a list of available Ghidra tools:\n{tools_list_str}"
                     raise ValueError(enhanced_unknown_command_error)
@@ -836,7 +923,8 @@ You can help analyze binary files by executing commands through GhidraMCP."""
             self.current_goal = query
             self.goal_achieved = False
             self.goal_steps_taken = 0
-            self.executed_tools = []  # Reset tool tracking for new query
+            self.executed_tools = set()  # Reset tool tracking for new query
+            self.step_result_map = {}  # Reset step result map for new query
             
             # Ensure context is initialized
             if not isinstance(self.context, list):
@@ -858,11 +946,18 @@ You can help analyze binary files by executing commands through GhidraMCP."""
             # OUTER LOOP: Agentic cycles
             for cycle in range(1, max_cycles + 1):
                 self.logger.info(f"{'='*70}")
-                self.logger.info(f"🔄 AGENTIC CYCLE {cycle}/{max_cycles}")
+                self.logger.info(f"AGENTIC CYCLE {cycle}/{max_cycles}")
                 self.logger.info(f"{'='*70}")
+                
+                # Emit cycle start to UI
+                self._emit_cot("Cycle", f"AGENTIC CYCLE {cycle}/{max_cycles}")
+                
+                # Track current loop number for step ID generation
+                self.current_loop_number = cycle
                 
                 # PHASE 1: Planning
                 self.logger.info(f"📋 Cycle {cycle} - Phase 1: Planning")
+                self._emit_cot("Phase", f"Phase 1: Planning")
                 self.current_workflow_stage = 'planning'
                 
                 # For cycles after the first, add context about what we learned
@@ -870,30 +965,46 @@ You can help analyze binary files by executing commands through GhidraMCP."""
                     cycle_context = f"\n\n## Previous Cycle Results\n"
                     cycle_context += f"Cycles completed: {cycle - 1}\n"
                     cycle_context += f"Previous evaluation: {all_cycle_results[-1]['reason']}\n"
-                    cycle_context += "Continue investigating based on the gaps identified above.\n"
+                    
+                    # Build summary of tools already executed to prevent redundant calls
+                    cycle_context += "\n### Already Executed Tools (DO NOT repeat these exact calls):\n"
+                    for cmd_sig, (step_id, excerpt) in self.step_result_map.items():
+                        # Parse the command signature to show a readable format
+                        cmd_parts = cmd_sig.split(":", 1)
+                        cmd_name = cmd_parts[0] if cmd_parts else cmd_sig
+                        cycle_context += f"- {step_id}: {cmd_name} -> {excerpt[:80]}...\n"
+                    
+                    cycle_context += "\nContinue investigating based on the gaps identified above. "
+                    cycle_context += "Use get_cached_result(result_id=\"step_L{loop}_{N}\") to retrieve any previous result.\n"
                     plan_response = self._generate_plan(query + cycle_context)
                 else:
                     plan_response = self._generate_plan(query)
                 
                 self.logger.info(f"✅ Planning completed: {len(plan_response)} chars")
+                self._emit_cot("Status", f"Planning completed ({len(plan_response)} chars)")
                 
                 # PHASE 2: Execution Loop (INNER LOOP)
                 self.logger.info(f"🔧 Cycle {cycle} - Phase 2: Execution Loop (max {max_exec_steps} steps)")
+                self._emit_cot("Phase", f"Phase 2: Execution Loop (max {max_exec_steps} steps)")
                 self.current_workflow_stage = 'execution'
                 exec_results = self._execution_loop(plan_response, max_steps=max_exec_steps)
                 self.logger.info(f"✅ Execution loop completed: {exec_results.total_steps} steps executed")
+                self._emit_cot("Status", f"Execution completed: {exec_results.total_steps} tools executed")
                 
                 # PHASE 3: Analysis
                 self.logger.info(f"🧠 Cycle {cycle} - Phase 3: Analysis")
+                self._emit_cot("Phase", f"Phase 3: Analysis")
                 self.current_workflow_stage = 'analysis'
                 response = self._analyze_execution_results(exec_results)
                 self.logger.info(f"✅ Analysis completed: {len(response)} chars")
+                self._emit_cot("Status", f"Analysis completed ({len(response)} chars)")
                 
                 # Store best response so far
                 best_response = response
                 
                 # PHASE 4: Evaluation
                 self.logger.info(f"🔍 Cycle {cycle} - Phase 4: Goal Evaluation")
+                self._emit_cot("Phase", f"Phase 4: Goal Evaluation")
                 self.current_workflow_stage = 'evaluation'
                 goal_achieved, reason = self._evaluate_goal_achievement(
                     goal=query,
@@ -913,20 +1024,24 @@ You can help analyze binary files by executing commands through GhidraMCP."""
                     self.logger.info(f"✅ Goal achieved in cycle {cycle}!")
                     self.logger.info(f"   Total cycles used: {cycle}/{max_cycles}")
                     self.logger.info(f"   Total tools executed: {sum(r['tools_executed'] for r in all_cycle_results)}")
+                    self._emit_cot("Status", f"Goal achieved in cycle {cycle}! Total tools: {sum(r['tools_executed'] for r in all_cycle_results)}")
                     self.goal_achieved = True
                     break
                 else:
                     self.logger.warning(f"⚠️ Goal not achieved in cycle {cycle}")
                     self.logger.warning(f"   Reason: {reason}")
+                    self._emit_cot("Status", f"Goal not yet achieved: {reason[:100]}...")
                     
                     if cycle < max_cycles:
                         self.logger.info(f"🔄 Looping back to planning for cycle {cycle + 1}")
+                        self._emit_cot("Status", f"Looping back to planning for cycle {cycle + 1}")
                         # Add evaluation result to context for next planning
                         eval_context = f"Cycle {cycle} evaluation: Goal not yet achieved. {reason}"
                         self.add_to_context("evaluation", eval_context)
                     else:
                         self.logger.warning(f"⚠️ Max cycles ({max_cycles}) reached")
                         self.logger.warning(f"   Returning best effort response from {len(all_cycle_results)} cycles")
+                        self._emit_cot("Status", f"Max cycles ({max_cycles}) reached - returning best effort response")
             
             # Add final summary to response if multiple cycles were used
             if len(all_cycle_results) > 1:
@@ -973,7 +1088,8 @@ You can help analyze binary files by executing commands through GhidraMCP."""
             self.current_goal = query
             self.goal_achieved = False
             self.goal_steps_taken = 0
-            self.executed_tools = []  # Reset tool tracking for new query
+            self.executed_tools = set()  # Reset tool tracking for new query
+            self.step_result_map = {}  # Reset step result map for new query
             
             # Ensure context is initialized as a list if it's not already
             if not isinstance(self.context, list):
@@ -1318,20 +1434,23 @@ You can help analyze binary files by executing commands through GhidraMCP."""
                     else:
                         execution_result = str(result)
                     
-                    # Truncate large results to prevent context overflow
-                    # Use a token estimate: ~4 chars per token
-                    max_result_tokens = 1500  # Reasonable limit for tool results
-                    max_result_chars = max_result_tokens * 4
+                    # Dynamic truncation based on context budget
+                    # Default: 15,000 chars (~3,750 tokens) - increased from previous 6,000
+                    max_result_chars = 15000
+                    if self.context_manager and hasattr(self.context_manager, 'budget'):
+                        remaining = self.context_manager.budget.get_remaining_execution_chars()
+                        # Allow up to 25% of remaining budget or default, whichever is larger
+                        max_result_chars = max(15000, remaining // 4)
                     
                     context_result = execution_result
                     if len(execution_result) > max_result_chars:
                         # For list-like results, show a summary instead of full output
                         lines = execution_result.split('\n')
                         if len(lines) > 50:
-                            # Show first 20 and last 10 lines with a summary
-                            first_lines = '\n'.join(lines[:20])
-                            last_lines = '\n'.join(lines[-10:])
-                            truncation_msg = f"\n... [Truncated {len(lines) - 30} lines for context efficiency] ...\n"
+                            # Show first 30 and last 15 lines with a summary (increased from 20/10)
+                            first_lines = '\n'.join(lines[:30])
+                            last_lines = '\n'.join(lines[-15:])
+                            truncation_msg = f"\n... [Truncated {len(lines) - 45} lines for context efficiency] ...\n"
                             context_result = f"{first_lines}{truncation_msg}{last_lines}\n\nSummary: {len(lines)} total items returned"
                             logging.info(f"Truncated large result ({len(execution_result)} chars -> {len(context_result)} chars)")
                         else:
@@ -1630,9 +1749,9 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
                 reasoning = reasoning_match.group(1).strip()
                 self.logger.info(f"🤔 Reasoning: {reasoning}")
                 
-                # Live CoT View
+                # Live CoT View - emit to both terminal and UI
                 if getattr(self.config.ollama, 'show_reasoning', True):
-                    print(f"\n🤔 REASONING: {reasoning}\n")
+                    self._emit_cot("Reasoning", f"REASONING: {reasoning}")
             
             # Parse tool calls from response
             commands = self.command_parser.extract_commands(response)
@@ -1648,7 +1767,45 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
             # Execute tools (Batching Support)
             for cmd_name, cmd_params in commands:
                 try:
+                    # Generate signature for duplicate detection
+                    param_sig = str(sorted(cmd_params.items())) if cmd_params else ""
+                    cmd_signature = f"{cmd_name}:{param_sig}"
+                    
+                    # Check for duplicate tool execution
+                    if cmd_signature in self.executed_tools:
+                        self.logger.warning(f"Skipping duplicate tool call: {cmd_name}({cmd_params})")
+                        
+                        # Get original step info for helpful message (now includes loop prefix)
+                        original_step_id, result_excerpt = self.step_result_map.get(cmd_signature, (None, None))
+                        
+                        if original_step_id and result_excerpt:
+                            # Include loop-prefixed step reference so AI clearly knows which loop it came from
+                            skip_note = (
+                                f"[Already executed in {original_step_id}. "
+                                f"Result excerpt: {result_excerpt[:150]}... "
+                                f"Use get_cached_result(result_id=\"{original_step_id}\") for full content]"
+                            )
+                        else:
+                            skip_note = f"[Skipped - already executed with same parameters]"
+                        
+                        tool_exec = ToolExecution(
+                            tool_name=cmd_name,
+                            parameters=cmd_params,
+                            result=skip_note,
+                            success=True,
+                            reasoning=f"Duplicate call skipped: {reasoning}"
+                        )
+                        exec_results.add_execution(tool_exec)
+                        continue
+                    
+                    # Track this execution
+                    self.executed_tools.add(cmd_signature)
+                    
                     self.logger.info(f"🔧 Executing: {cmd_name}({cmd_params})")
+                    
+                    # Emit tool execution to UI
+                    params_str = ", ".join(f"{k}={v}" for k, v in cmd_params.items()) if cmd_params else ""
+                    self._emit_cot("Tool", f"Executing: {cmd_name}({params_str})")
                     
                     # Execute the tool
                     result = self.execute_command(cmd_name, cmd_params)
@@ -1662,9 +1819,27 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
                     else:
                         result_str = str(result)
                     
-                    # Truncate if too large
-                    if len(result_str) > 6000:
-                        result_str = result_str[:6000] + f"\n... [Truncated {len(result_str) - 6000} chars]"
+                    # Store the full result for caching before truncation
+                    full_result_str = result_str
+                    
+                    # Generate step ID early so we can reference it in truncation message
+                    # Use loop-prefixed ID: step_L{loop}_{step} for unambiguous cross-loop references
+                    current_step = exec_results.total_steps + 1
+                    loop_step_id = f"step_L{self.current_loop_number}_{current_step}"
+                    
+                    # Dynamic truncation based on context budget
+                    # Default: 15,000 chars (~3,750 tokens) - much larger than previous 6,000
+                    max_result_chars = 15000
+                    if self.context_manager and hasattr(self.context_manager, 'budget'):
+                        remaining = self.context_manager.budget.get_remaining_execution_chars()
+                        # Allow up to 25% of remaining budget or default, whichever is larger
+                        max_result_chars = max(15000, remaining // 4)
+                    
+                    if len(result_str) > max_result_chars:
+                        result_str = result_str[:max_result_chars] + (
+                            f"\n... [Truncated {len(result_str) - max_result_chars} chars. "
+                            f"Use get_cached_result(result_id=\"{loop_step_id}\") for full content]"
+                        )
                     
                     # Add to execution results
                     tool_exec = ToolExecution(
@@ -1675,6 +1850,19 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
                         reasoning=reasoning
                     )
                     exec_results.add_execution(tool_exec)
+                    
+                    # Store step result for duplicate reference and caching
+                    result_excerpt = result_str[:200].replace('\n', ' ').strip()
+                    self.step_result_map[cmd_signature] = (loop_step_id, result_excerpt)
+                    
+                    # Cache FULL result with loop-prefixed ID for retrieval via get_cached_result
+                    if self.context_manager and self.context_manager.result_cache:
+                        self.context_manager.result_cache.store(
+                            tool_name=cmd_name,
+                            parameters=cmd_params,
+                            result=full_result_str,  # Store full result, not truncated
+                            custom_id=loop_step_id
+                        )
                     
                     # Also add to session for tracking
                     self.session.add_tool_execution(
@@ -1688,7 +1876,7 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
                     # Update analysis state
                     self._update_analysis_state({"name": cmd_name, "params": cmd_params}, result_str)
                     
-                    self.logger.info(f"✓ Step {step} complete: {cmd_name}")
+                    self.logger.info(f"Step {step} complete: {cmd_name}")
                     
                 except Exception as e:
                     error_msg = f"ERROR: {str(e)}"
@@ -1734,20 +1922,33 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
         system_prompt, _ = self._build_structured_prompt(phase="execution")
         
         # Build custom user prompt (dynamic - shows progress)
+        loop_num = self.current_loop_number
         user_sections = [
             f"## Investigation Goal\n{exec_results.goal}",
             f"\n## Execution Plan\n{exec_results.plan}",
-            f"\n## Progress: Step {current_step} (completed {exec_results.total_steps} steps so far)"
+            f"\n## Progress: Loop {loop_num}, Step {current_step} (completed {exec_results.total_steps} steps in this loop)"
         ]
         
-        # Show execution results so far
+        # Show previous loop results if this is cycle 2+
+        if loop_num > 1 and self.step_result_map:
+            prev_loop_results = [(sid, exc) for sid, exc in self.step_result_map.values() 
+                                 if not sid.startswith(f"step_L{loop_num}_")]
+            if prev_loop_results:
+                user_sections.append(f"\n## Results from Previous Loop(s) (available via get_cached_result):")
+                for step_id, excerpt in prev_loop_results[:5]:  # Limit to 5 to avoid bloat
+                    user_sections.append(f"- {step_id}: {excerpt[:100]}...")
+                if len(prev_loop_results) > 5:
+                    user_sections.append(f"  ... and {len(prev_loop_results) - 5} more results")
+        
+        # Show execution results so far in current loop
         if exec_results.tool_executions:
-            user_sections.append("\n## Execution Results So Far:")
+            user_sections.append(f"\n## Execution Results (Loop {loop_num}):")
             for i, tool_exec in enumerate(exec_results.tool_executions, 1):
+                step_id = f"step_L{loop_num}_{i}"
                 result_preview = str(tool_exec.result)[:500]  # Truncate for context
                 if len(str(tool_exec.result)) > 500:
                     result_preview += "..."
-                user_sections.append(f"\nStep {i}: {tool_exec.tool_name}({tool_exec.parameters})")
+                user_sections.append(f"\n{step_id}: {tool_exec.tool_name}({tool_exec.parameters})")
                 user_sections.append(f"Result: {result_preview}")
         
         # Instructions for next step
@@ -1780,6 +1981,11 @@ If you are done, output ONLY "INVESTIGATION COMPLETE".
         """
         Analysis phase: Review all execution results and provide comprehensive analysis.
         
+        Uses context manager for intelligent result formatting with:
+        - Tiered context (recent results get more detail)
+        - Large result summarization
+        - Context budget enforcement
+        
         Args:
             exec_results: Accumulated results from execution loop
             
@@ -1788,7 +1994,13 @@ If you are done, output ONLY "INVESTIGATION COMPLETE".
         """
         self.logger.info("📊 Starting analysis phase with accumulated results")
         
-        # Build prompt with ALL execution results
+        # Reset context manager for fresh budget tracking
+        self.context_manager.reset()
+        
+        # Format results with context-aware truncation and summarization
+        formatted_results = self._format_results_with_context(exec_results)
+        
+        # Build prompt with context-managed execution results
         system_prompt, _ = self._build_structured_prompt(phase="analysis")
         
         user_prompt = f"""
@@ -1798,7 +2010,8 @@ If you are done, output ONLY "INVESTIGATION COMPLETE".
 ## Execution Summary
 {exec_results.get_summary()}
 
-{exec_results.format_for_analysis()}
+## Execution Results ({exec_results.total_steps} steps)
+{formatted_results}
 
 ## Your Task
 
@@ -1814,6 +2027,9 @@ Focus on:
 Provide a clear, detailed analysis. Start your response with "FINAL RESPONSE:" to mark it as the final output.
 """
         
+        # Log context budget usage
+        self.logger.debug(self.context_manager.get_status())
+        
         response = self.ollama.generate_with_phase(
             user_prompt,
             phase="analysis",
@@ -1825,6 +2041,63 @@ Provide a clear, detailed analysis. Start your response with "FINAL RESPONSE:" t
         
         self.logger.info("✅ Analysis phase complete")
         return final_response
+    
+    def _format_results_with_context(self, exec_results: ExecutionPhaseResults) -> str:
+        """
+        Format execution results with context-aware truncation and summarization.
+        
+        Uses the context manager to:
+        - Give recent results more detail (tiered context)
+        - Summarize or truncate large results
+        - Stay within context budget
+        
+        Args:
+            exec_results: Accumulated tool execution results
+            
+        Returns:
+            Formatted string suitable for prompt inclusion
+        """
+        if not exec_results.tool_executions:
+            return "No tool executions recorded."
+        
+        sections = []
+        total = len(exec_results.tool_executions)
+        
+        for i, tool_exec in enumerate(exec_results.tool_executions, 1):
+            # Determine detail level based on recency
+            is_recent = i > total - self.context_manager.max_recent_detailed
+            
+            # Process result through context manager
+            result_text = str(tool_exec.result) if tool_exec.result else "No result"
+            display_content, cached = self.context_manager.process_result(
+                tool_name=tool_exec.tool_name,
+                parameters=tool_exec.parameters,
+                result=result_text,
+                goal=exec_results.goal
+            )
+            
+            # Build section with loop-prefixed step ID
+            step_id = f"step_L{self.current_loop_number}_{i}"
+            section_lines = [f"\n### {step_id}: {tool_exec.tool_name}"]
+            
+            # Add reasoning if present
+            if tool_exec.reasoning:
+                section_lines.append(f"Reasoning: {tool_exec.reasoning}")
+            
+            # Add parameters
+            param_str = ", ".join([f'{k}="{v}"' for k, v in tool_exec.parameters.items()])
+            section_lines.append(f"Parameters: {param_str}")
+            
+            # Add result
+            section_lines.append(f"Result:\n{display_content}")
+            
+            # Note if result was summarized
+            if cached and cached.is_summarized:
+                section_lines.append(f"[Full result cached as {cached.result_id}]")
+            
+            sections.append("\n".join(section_lines))
+        
+        return "\n".join(sections)
 
     def _evaluate_goal_achievement(
         self, 
@@ -2705,7 +2978,8 @@ Keywords: function analysis, reverse engineering, {old_name}, {new_name}, behavi
         logging.info(f"Executing goal: {goal}")
         self.context["goal"] = goal
         self.current_goal = goal
-        self.executed_tools = []  # Reset tool tracking for new goal
+        self.executed_tools = set()  # Reset tool tracking for new goal
+        self.step_result_map = {}  # Reset step result map for new goal
         all_results = []
         step_count = 0
         self.goal_achieved = False
@@ -2761,8 +3035,16 @@ Keywords: function analysis, reverse engineering, {old_name}, {new_name}, behavi
                     tool_call = f"EXECUTE: {cmd_name}({', '.join([f'{k}=\"{v}\"' for k, v in cmd_params.items()])})"
                     self.add_to_context("tool_call", tool_call)
                     
-                    # Track executed tools
-                    self.executed_tools.append(cmd_name)
+                    # Track executed tools with full signature for duplicate detection
+                    param_sig = str(sorted(cmd_params.items())) if cmd_params else ""
+                    cmd_signature = f"{cmd_name}:{param_sig}"
+                    
+                    # Skip if already executed with same params
+                    if cmd_signature in self.executed_tools:
+                        self.logger.warning(f"Skipping duplicate: {cmd_name}")
+                        continue
+                    
+                    self.executed_tools.add(cmd_signature)
                     
                     # Execute command
                     result = self.execute_command(cmd_name, cmd_params)

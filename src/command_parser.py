@@ -37,6 +37,9 @@ class CommandParser:
         "get_xrefs_to": ["address"],
         "get_xrefs_from": ["address"],
         "get_function_xrefs": ["name"],
+        "read_bytes": ["address"],
+        "scan_function_pointer_tables": [],  # All params optional
+        "get_cached_result": ["result_id"],  # Retrieve full cached result
     }
     
     # List of all supported commands for validation purposes
@@ -66,6 +69,9 @@ class CommandParser:
         "get_function_by_address",
         "rename_data",
         "disassemble_function",
+        "read_bytes",  # Read raw bytes from memory addresses
+        "scan_function_pointer_tables",  # Scan for function pointer tables (vtables, dispatch tables)
+        "get_cached_result",  # Retrieve full content of a cached/summarized result
         "health_check",
         "check_health"
         # Disabled tools:
@@ -115,9 +121,21 @@ class CommandParser:
             List of tuples containing (command_name, parameters_dict)
         """
         commands = []
+        seen_commands = set()  # Track unique command signatures for deduplication
+        
+        # Clean up malformed output - sometimes AI outputs "EXECUTE: cmd()REASONING:"
+        # Split on known keywords to isolate EXECUTE statements
+        cleaned_response = response
+        for keyword in ['REASONING:', 'EXPLANATION:', 'INVESTIGATION', 'GOAL']:
+            # Ensure newline before keyword if it follows a command
+            cleaned_response = re.sub(
+                r'(\))\s*(' + keyword + ')', 
+                r'\1\n\2', 
+                cleaned_response
+            )
         
         # Find all command occurrences in the response using the correct format
-        matches = re.finditer(CommandParser.COMMAND_PATTERN, response, re.MULTILINE)
+        matches = re.finditer(CommandParser.COMMAND_PATTERN, cleaned_response, re.MULTILINE)
         
         for match in matches:
             command_name = match.group(1)
@@ -135,6 +153,16 @@ class CommandParser:
             # Validate and transform parameters for specific commands
             params = CommandParser._validate_and_transform_params(command_name, params)
             
+            # Create signature for deduplication (command + sorted params)
+            param_str = str(sorted(params.items())) if params else ""
+            cmd_signature = f"{command_name}:{param_str}"
+            
+            # Skip if we've already seen this exact command
+            if cmd_signature in seen_commands:
+                logger.debug(f"Skipping duplicate command: {command_name}")
+                continue
+            
+            seen_commands.add(cmd_signature)
             commands.append((command_name, params))
             logger.debug(f"Extracted command: {command_name} with params: {params}")
         
