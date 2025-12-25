@@ -9,8 +9,6 @@ OGhidra bridges Large Language Models (LLMs) via Ollama with the Ghidra reverse 
 
 [![OGhidra Introduction](https://img.youtube.com/vi/hBD92FUgR0Y/0.jpg)](https://www.youtube.com/watch?v=hBD92FUgR0Y)
 
-<img width="1298" height="916" alt="design" src="https://github.com/user-attachments/assets/85ee1c09-a146-45ab-94fa-cd3debd82996" />
-
 ## What is OGhidra?
 
 OGhidra combines the power of local LLMs with Ghidra's reverse engineering capabilities, allowing you to:
@@ -44,6 +42,10 @@ OGhidra combines the power of local LLMs with Ghidra's reverse engineering capab
 - [License](#license)
 
 ---
+### OGhidra Architecture 
+<img width="1298" height="916" alt="design" src="https://github.com/user-attachments/assets/85ee1c09-a146-45ab-94fa-cd3debd82996" />
+
+
 
 ### Monitor your Investigation and Rename All Functions
 <img width="1920" height="1028" alt="renaming-ui" src="https://github.com/user-attachments/assets/8843b5f5-1f2f-42eb-bf4a-4ef6c5625c9c" />
