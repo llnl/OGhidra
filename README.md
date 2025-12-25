@@ -9,23 +9,6 @@ OGhidra bridges Large Language Models (LLMs) via Ollama with the Ghidra reverse 
 
 [![OGhidra Introduction](https://img.youtube.com/vi/hBD92FUgR0Y/0.jpg)](https://www.youtube.com/watch?v=hBD92FUgR0Y)
 
-## What is OGhidra?
-
-OGhidra combines the power of local LLMs with Ghidra's reverse engineering capabilities, allowing you to:
-- **Analyze binaries using natural language** - Ask questions about functions, strings, imports, and more
-- **Automate reverse engineering workflows** - Rename functions, analyze patterns, generate reports
-- **Use local AI models** - Complete privacy with models running on your own hardware
-- **Deep Data Inspection** - Leverage the custom OGhidraMCP plugin to read raw bytes and analyze memory directly
-- **Work with modern GUI or CLI** - Choose the interface that suits your workflow
-
-## Use Cases
-
-- **Malware Analysis**: Quickly identify suspicious functions and behavioral patterns
-- **Vulnerability Research**: Analyze imports, strings, and function relationships
-- **Code Understanding**: Get AI-powered explanations of complex decompiled code
-- **Bulk Operations**: Rename hundreds of functions with intelligent AI suggestions
-- **Report Generation**: Create comprehensive security assessments and software reports
-
 ## Table of Contents
 
 - [What is OGhidra?](#what-is-oghidra)
@@ -41,9 +24,27 @@ OGhidra combines the power of local LLMs with Ghidra's reverse engineering capab
 - [Contributing](#contributing)
 - [License](#license)
 
----
-### OGhidra Architecture 
+
+## What is OGhidra?
+
+
 <img width="1298" height="916" alt="design" src="https://github.com/user-attachments/assets/85ee1c09-a146-45ab-94fa-cd3debd82996" />
+
+OGhidra combines the power of local LLMs with Ghidra's reverse engineering capabilities, allowing you to:
+- **Analyze binaries using natural language** - Ask questions about functions, strings, imports, and more
+- **Automate reverse engineering workflows** - Rename functions, analyze patterns, generate reports
+- **Use local AI models** - Complete privacy with models running on your own hardware
+- **Deep Data Inspection** - Leverage the custom OGhidraMCP plugin to read raw bytes and analyze memory directly
+- **Work with modern GUI or CLI** - Choose the interface that suits your workflow
+
+## Use Cases
+
+- **Malware Analysis**: Quickly identify suspicious functions and behavioral patterns
+- **Vulnerability Research**: Analyze imports, strings, and function relationships
+- **Code Understanding**: Get AI-powered explanations of complex decompiled code
+- **Bulk Operations**: Rename hundreds of functions with intelligent AI suggestions
+- **Report Generation**: Create comprehensive security assessments and software reports
+---
 
 
 
