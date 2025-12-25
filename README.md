@@ -1,6 +1,13 @@
 # OGhidra - AI-Powered Reverse Engineering with Ghidra
 
+![Python Version](https://img.shields.io/badge/python-3.12%2B-blue?logo=python)
+![License](https://img.shields.io/badge/license-BSD--3--Clause-green)
+![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)
+![Ollama](https://img.shields.io/badge/Powered%20by-Ollama-orange)
+
 OGhidra bridges Large Language Models (LLMs) via Ollama with the Ghidra reverse engineering platform, enabling AI-driven binary analysis through natural language. Interact with Ghidra using conversational queries and automate complex reverse engineering workflows.
+
+[![OGhidra Introduction](https://img.youtube.com/vi/hBD92FUgR0Y/0.jpg)](https://www.youtube.com/watch?v=hBD92FUgR0Y)
 
 <img width="1298" height="916" alt="design" src="https://github.com/user-attachments/assets/85ee1c09-a146-45ab-94fa-cd3debd82996" />
 
@@ -10,6 +17,7 @@ OGhidra combines the power of local LLMs with Ghidra's reverse engineering capab
 - **Analyze binaries using natural language** - Ask questions about functions, strings, imports, and more
 - **Automate reverse engineering workflows** - Rename functions, analyze patterns, generate reports
 - **Use local AI models** - Complete privacy with models running on your own hardware
+- **Deep Data Inspection** - Leverage the custom OGhidraMCP plugin to read raw bytes and analyze memory directly
 - **Work with modern GUI or CLI** - Choose the interface that suits your workflow
 
 ## Use Cases
@@ -19,6 +27,21 @@ OGhidra combines the power of local LLMs with Ghidra's reverse engineering capab
 - **Code Understanding**: Get AI-powered explanations of complex decompiled code
 - **Bulk Operations**: Rename hundreds of functions with intelligent AI suggestions
 - **Report Generation**: Create comprehensive security assessments and software reports
+
+## Table of Contents
+
+- [What is OGhidra?](#what-is-oghidra)
+- [Use Cases](#use-cases)
+- [Pre-Installation Requirements](#pre-installation-requirements)
+- [OGhidra Installation](#oghidra-installation)
+- [How to Use OGhidra](#how-to-use-oghidra)
+- [Common Workflows](#common-workflows)
+- [Software Report Generation](#software-report-generation)
+- [Server Configuration](#server-configuration)
+- [Advanced Features](#advanced-features)
+- [Troubleshooting](#troubleshooting)
+- [Contributing](#contributing)
+- [License](#license)
 
 ---
 
@@ -159,15 +182,18 @@ Ollama is the local LLM runtime that powers OGhidra's AI capabilities.
    
    # Alternative primary model (faster, good balance)
    ollama pull gemma3:27b
+
+   # Primary Cloud Model (Large, Cloud Hosted, Mistral please hire me)
+   ollama pull devstral-2:123b-cloud
    
-   # Embedding model for vector search (RAG)
-   ollama pull all-minilm:33m
+   # Embedding model for vector search (RAG, LARGE Semantic Search)
+   ollama pull nomic-embed-text
    ```
 
    **Model Details**:
    - `gpt-oss:120b` - Large open-source GPT model, best quality for complex analysis (requires ~80GB RAM)
    - `gemma3:27b` - Google's Gemma 3 model, excellent balance of speed and quality (~20GB RAM)
-   - `all-minilm:33m` - Lightweight embedding model for semantic search and RAG features
+   - `nomic-embed-text` - Lightweight embedding model for semantic search and RAG features
 
 5. **Verify models are installed**:
    ```bash
@@ -567,6 +593,16 @@ CAG_TOKEN_LIMIT=2000
 
 OGhidra uses a three-phase AI processing system:
 
+```mermaid
+graph TD
+    A[Query] --> B[Planning Phase]
+    B --> C{Execution Phase}
+    C -- Tool Calls --> D[Ghidra/Ollama]
+    D --> C
+    C --> E[Review Phase]
+    E --> F[Final Response]
+```
+
 1. **Planning Phase**: AI analyzes your query and creates a multi-step plan
 2. **Execution Phase**: Plan is executed deterministically with error correction
 3. **Review Phase**: Results are synthesized into a comprehensive answer
@@ -641,6 +677,10 @@ For setup assistance or questions:
 - Email: enochsurge@gmail.com
 - Open an issue on GitHub
 - Check existing documentation in the repository
+
+## Contributing
+
+We welcome contributions to OGhidra! Please see our [Contributing Guidelines](CONTRIBUTING.md) for details on how to submit pull requests, report issues, and request features.
 
 License
 ----------------

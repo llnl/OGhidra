@@ -119,16 +119,16 @@ class ServerConfigDialog:
         
         # Embedding model selection
         ttk.Label(ollama_frame, text="Embedding Model:").grid(row=2, column=0, sticky='w', pady=5)
-        self.embedding_model_var = tk.StringVar(value=getattr(self.config.ollama, 'embedding_model', 'all-minilm:33m'))
+        self.embedding_model_var = tk.StringVar(value=getattr(self.config.ollama, 'embedding_model', 'nomic-embed-text'))
         self.embedding_combo = ttk.Combobox(ollama_frame, textvariable=self.embedding_model_var, width=47, state='readonly')
         self.embedding_combo.grid(row=2, column=1, sticky='ew', padx=(10, 0), pady=5)
         
         # Set default embedding model options (include code-centric model)
         self.embedding_combo['values'] = (
-            'all-minilm:33m',
-            'nomic-embed-text:latest',
             'nomic-embed-text',
-            'codebert-base-emb'
+            'nomic-embed-text:latest',
+            'mxbai-embed-large',
+            'all-minilm:33m'
         )
         
         # Button to refresh available models
@@ -191,7 +191,7 @@ class ServerConfigDialog:
                             embedding_models.append(model.get('name', ''))
                     
                     # Add default options and fetched models
-                    all_models = ['all-minilm:33m', 'nomic-embed-text:latest', 'nomic-embed-text'] + embedding_models
+                    all_models = ['nomic-embed-text', 'nomic-embed-text:latest', 'mxbai-embed-large', 'all-minilm:33m'] + embedding_models
                     # Remove duplicates while preserving order
                     seen = set()
                     unique_models = []
@@ -360,7 +360,7 @@ class SessionLoadDialog:
         # Create the dialog window
         self.dialog = tk.Toplevel(parent)
         self.dialog.title("Load Session")
-        self.dialog.geometry("600x400")
+        self.dialog.geometry("700x600")
         self.dialog.transient(parent)
         self.dialog.grab_set()
         
@@ -371,8 +371,8 @@ class SessionLoadDialog:
         parent_width = parent.winfo_width()
         parent_height = parent.winfo_height()
         
-        dialog_width = 600
-        dialog_height = 400
+        dialog_width = 700
+        dialog_height = 600
         
         x = parent_x + (parent_width - dialog_width) // 2
         y = parent_y + (parent_height - dialog_height) // 2
@@ -535,6 +535,7 @@ class WorkflowDiagram:
                 text_color = self.text_idle_color
                 outline_color = '#5a5a5a'
             
+            # Draw stage box with rounded appearance (using softer outline)
             self.canvas.create_rectangle(
                 x_start, y_center - 15, x_start + stage_width - 10, y_center + 15,
                 fill=color, outline=outline_color, width=1
@@ -542,15 +543,15 @@ class WorkflowDiagram:
             
             # Draw stage text
             self.canvas.create_text(
-                x_center - 5, y_center, text=stage, fill=text_color, font=('Arial', 10, 'bold')
+                x_center - 5, y_center, text=stage, fill=text_color, font=('Segoe UI', 9, 'bold')
             )
             
-            # Draw arrow to next stage
+            # Draw arrow to next stage (light color for dark theme)
             if i < len(self.stages) - 1:
                 arrow_x = x_start + stage_width - 5
                 self.canvas.create_line(
                     arrow_x, y_center, arrow_x + 10, y_center,
-                    arrow=tk.LAST, fill='black', width=2
+                    arrow=tk.LAST, fill='#6a6a6a', width=2
                 )
     
         # Draw RAG status text below workflow if active
@@ -638,7 +639,23 @@ class MemoryInfoPanel:
         # Memory Stats
         ttk.Label(self.frame, text="Memory Stats:", font=('Arial', 10, 'bold')).grid(row=2, column=0, sticky='nw', pady=(5, 0))
         
-        self.memory_text = scrolledtext.ScrolledText(self.frame, height=8, width=60, font=('Courier', 9))
+        # Get theme colors for dark styling
+        colors = _theme_colors
+        if colors:
+            bg, fg = colors.inputbg, colors.inputfg
+            selectbg, selectfg = colors.selectbg, colors.selectfg
+            font = colors.text_font
+        else:
+            bg, fg = '#303030', '#e0e0e0'
+            selectbg, selectfg = '#505050', '#ffffff'
+            font = ('Consolas', 11)
+        
+        self.memory_text = scrolledtext.ScrolledText(
+            self.frame, height=8, width=60, font=font,
+            bg=bg, fg=fg,
+            selectbackground=selectbg, selectforeground=selectfg,
+            relief='flat', borderwidth=1, padx=6, pady=6
+        )
         self.memory_text.grid(row=3, column=0, columnspan=2, sticky='nsew', pady=(5, 0))
         
         # Configure grid weights to make memory text expand
@@ -1123,17 +1140,34 @@ class RenamedFunctionsPanel:
                 # Collect from function_address_mapping
                 if hasattr(self.bridge, 'function_address_mapping'):
                     function_address_mapping = self.bridge.function_address_mapping
+                    bridge_summaries = getattr(self.bridge, 'function_summaries', {})
+                    
                     for address, info in function_address_mapping.items():
                         old_name = info.get('old_name', 'Unknown')
                         new_name = info.get('new_name', 'Unknown')
                         
-                        # Get summary from bridge
+                        # Get summary from multiple sources (bridge and panel)
                         summary = ''
-                        if hasattr(self.bridge, 'function_summaries'):
-                            bridge_summaries = self.bridge.function_summaries
-                            summary = (bridge_summaries.get(address, '') or 
-                                     bridge_summaries.get(old_name, '') or
-                                     bridge_summaries.get(new_name, ''))
+                        
+                        # Try bridge function_summaries first
+                        summary = (bridge_summaries.get(address, '') or 
+                                 bridge_summaries.get(old_name, '') or
+                                 bridge_summaries.get(new_name, ''))
+                        
+                        # If not found, try panel's function_summaries with various key formats
+                        if not summary:
+                            summary_key = f"{address}_{new_name}" if address != "Unknown" else f"{old_name}_{new_name}"
+                            summary = self.function_summaries.get(summary_key, '')
+                            
+                            # Also try alternate key formats
+                            if not summary:
+                                summary = self.function_summaries.get(f"{address}_{old_name}", '')
+                            if not summary:
+                                # Try matching by just the address or name in the key
+                                for key, val in self.function_summaries.items():
+                                    if address in key or new_name in key or old_name in key:
+                                        summary = val
+                                        break
                         
                         if summary:  # Only process functions with summaries
                             functions_to_process.append({
@@ -1193,9 +1227,12 @@ class RenamedFunctionsPanel:
                     # Test Ollama embeddings availability
                     test_embeddings = Bridge.get_ollama_embeddings(["test"])
                     if not test_embeddings:
-                        raise Exception("Ollama embedding model (nomic-embed-text) not available.\n\nPlease ensure:\n1. Ollama server is running\n2. Run: ollama pull nomic-embed-text")
+                        # Get the configured embedding model name
+                        emb_model = getattr(self.bridge.config.ollama, 'embedding_model', 'nomic-embed-text')
+                        raise Exception(f"Ollama embedding model ({emb_model}) not available.\n\nPlease ensure:\n1. Ollama server is running\n2. Run: ollama pull {emb_model}")
                     
-                    logger.info("✅ Using Ollama embeddings (nomic-embed-text) for vector creation")
+                    emb_model = getattr(self.bridge.config.ollama, 'embedding_model', 'nomic-embed-text')
+                    logger.info(f"✅ Using Ollama embeddings ({emb_model}) for vector creation")
                 except Exception as e:
                     raise Exception(f"Ollama embedding model not available: {e}")
                 
@@ -1212,7 +1249,23 @@ class RenamedFunctionsPanel:
                     progress_dialog.update()
                     
                     # ✅ FIXED: Use Ollama batch embeddings instead of SentenceTransformer
-                    batch_texts = [func['summary'] for func in batch]
+                    # Filter out empty summaries which cause 400 errors
+                    batch_texts = []
+                    valid_batch = []
+                    for func in batch:
+                        summary = func.get('summary', '').strip()
+                        if summary and len(summary) > 0:
+                            batch_texts.append(summary)
+                            valid_batch.append(func)
+                        else:
+                            logger.warning(f"Skipping function {func.get('new_name', 'Unknown')} - empty summary")
+                            vectors_failed += 1
+                    
+                    if not batch_texts:
+                        logger.warning(f"Batch {batch_num + 1} has no valid texts to embed")
+                        continue
+                    
+                    batch = valid_batch  # Use only valid functions
                     batch_embeddings_list = Bridge.get_ollama_embeddings(batch_texts)
                     
                     if not batch_embeddings_list:
@@ -1320,22 +1373,37 @@ class RenamedFunctionsPanel:
         }
         
         # Add to vector store
-        if hasattr(self.bridge, 'cag_manager') and self.bridge.cag_manager and hasattr(self.bridge.cag_manager, 'vector_store'):
-            vector_store = self.bridge.cag_manager.vector_store
-            if vector_store:
-                vector_store.documents.append(function_doc)
-                
-                # Add embedding
-                if isinstance(vector_store.embeddings, list):
-                    vector_store.embeddings.append(embedding)
+        if hasattr(self.bridge, 'cag_manager') and self.bridge.cag_manager:
+            cag_manager = self.bridge.cag_manager
+            vector_store = cag_manager.vector_store
+            
+            # Create a new vector store if one doesn't exist
+            if vector_store is None:
+                try:
+                    from src.cag.vector_store import SimpleVectorStore
+                    # Create empty vector store
+                    vector_store = SimpleVectorStore(documents=[], embeddings=[])
+                    # Set it directly on the cag_manager
+                    cag_manager._vector_store = vector_store
+                    cag_manager._vector_store_initialized = True
+                    logger.info("Created new empty vector store for function embeddings")
+                except Exception as e:
+                    raise Exception(f"Could not create vector store: {e}")
+            
+            # Now add the document and embedding
+            vector_store.documents.append(function_doc)
+            
+            # Add embedding
+            if isinstance(vector_store.embeddings, list):
+                vector_store.embeddings.append(embedding)
+            else:
+                # Handle numpy array case
+                if len(vector_store.embeddings) == 0:
+                    vector_store.embeddings = [embedding]
                 else:
-                    # Handle numpy array case
-                    if len(vector_store.embeddings) == 0:
-                        vector_store.embeddings = [embedding]
-                    else:
-                        vector_store.embeddings = np.vstack([vector_store.embeddings, embedding.reshape(1, -1)])
+                    vector_store.embeddings = np.vstack([vector_store.embeddings, embedding.reshape(1, -1)])
         else:
-            raise Exception("Vector store not available")
+            raise Exception("CAG manager not available - cannot add to vector store")
     
     def _update_function_list(self):
         """Update the list of renamed functions."""
@@ -1583,15 +1651,16 @@ class RenamedFunctionsPanel:
         # Create a new window
         editor_window = tk.Toplevel(self.frame)
         editor_window.title(f"Edit Behavior Summary - {new_name}")
-        editor_window.geometry("700x500")
+        editor_window.geometry("750x700")
         editor_window.transient(self.frame.winfo_toplevel())
         editor_window.grab_set()
+        editor_window.minsize(600, 500)  # Ensure minimum size for buttons to be visible
         
         # Center the window
         editor_window.update_idletasks()
-        x = (editor_window.winfo_screenwidth() // 2) - (700 // 2)
-        y = (editor_window.winfo_screenheight() // 2) - (500 // 2)
-        editor_window.geometry(f"700x500+{x}+{y}")
+        x = (editor_window.winfo_screenwidth() // 2) - (750 // 2)
+        y = (editor_window.winfo_screenheight() // 2) - (700 // 2)
+        editor_window.geometry(f"750x700+{x}+{y}")
         
         # Create the UI
         main_frame = ttk.Frame(editor_window, padding=10)
@@ -1619,7 +1688,26 @@ class RenamedFunctionsPanel:
         text_frame = ttk.Frame(summary_frame)
         text_frame.pack(fill='both', expand=True)
         
-        summary_text = scrolledtext.ScrolledText(text_frame, height=15, width=80, wrap=tk.WORD, font=('Consolas', 10))
+        # Get theme colors for dark styling
+        colors = _theme_colors
+        if colors:
+            bg, fg = colors.inputbg, colors.inputfg
+            selectbg, selectfg = colors.selectbg, colors.selectfg
+            insertbg = colors.fg
+            font = colors.text_font
+        else:
+            bg, fg = '#303030', '#e0e0e0'
+            selectbg, selectfg = '#505050', '#ffffff'
+            insertbg = '#ffffff'
+            font = ('Consolas', 11)
+        
+        summary_text = scrolledtext.ScrolledText(
+            text_frame, height=12, width=80, wrap=tk.WORD, font=font,
+            bg=bg, fg=fg,
+            insertbackground=insertbg,
+            selectbackground=selectbg, selectforeground=selectfg,
+            relief='flat', borderwidth=1, padx=6, pady=6
+        )
         summary_text.pack(fill='both', expand=True)
         summary_text.insert('1.0', current_summary)
         summary_text.focus()
@@ -1636,9 +1724,9 @@ class RenamedFunctionsPanel:
         summary_text.bind('<KeyRelease>', update_char_count)
         update_char_count()
         
-        # Buttons
+        # Buttons - ensure they're always visible at the bottom
         button_frame = ttk.Frame(main_frame)
-        button_frame.pack(fill='x')
+        button_frame.pack(fill='x', pady=(10, 5))
         
         def save_and_close():
             new_summary = summary_text.get('1.0', tk.END).strip()
@@ -1912,14 +2000,40 @@ class AIResponsePanel:
     def __init__(self, parent):
         self.frame = ttk.LabelFrame(parent, text="AI Agent Responses", padding=10)
         self._setup_widgets()
+        self._setup_text_tags()
         self.response_history = []
     
     def _setup_widgets(self):
         """Setup the AI response widgets."""
-        # Response display
+        # Get theme colors (fallback to sensible defaults if not initialized)
+        colors = _theme_colors
+        if colors:
+            bg = colors.inputbg
+            fg = colors.inputfg
+            selectbg = colors.selectbg
+            selectfg = colors.selectfg
+            insertbg = colors.fg
+            font = colors.text_font
+        else:
+            bg = '#303030'
+            fg = '#e0e0e0'
+            selectbg = '#505050'
+            selectfg = '#ffffff'
+            insertbg = '#ffffff'
+            font = ('Consolas', 11)
+        
+        # Response display with dark theme and better font
         self.response_text = scrolledtext.ScrolledText(
             self.frame, height=15, width=80, 
-            font=('Courier', 9), wrap=tk.WORD
+            font=font, wrap=tk.WORD,
+            bg=bg, fg=fg,
+            insertbackground=insertbg,
+            selectbackground=selectbg,
+            selectforeground=selectfg,
+            relief='flat',
+            borderwidth=1,
+            padx=8,
+            pady=8
         )
         self.response_text.grid(row=0, column=0, columnspan=3, sticky='nsew', pady=(0, 10))
         
@@ -1931,6 +2045,32 @@ class AIResponsePanel:
         # Configure grid weights
         self.frame.grid_rowconfigure(0, weight=1)
         self.frame.grid_columnconfigure(0, weight=1)
+    
+    def _setup_text_tags(self):
+        """Setup text tags for syntax highlighting in responses."""
+        colors = _theme_colors
+        if colors:
+            # Header/separator styling
+            self.response_text.tag_config('header', foreground=colors.info, font=('Consolas', 11, 'bold'))
+            self.response_text.tag_config('separator', foreground=colors.secondary)
+            # Status colors
+            self.response_text.tag_config('success', foreground=colors.success)
+            self.response_text.tag_config('warning', foreground=colors.warning)
+            self.response_text.tag_config('error', foreground=colors.danger)
+            self.response_text.tag_config('info', foreground=colors.info)
+            # Tool/action styling
+            self.response_text.tag_config('tool', foreground=colors.warning, font=('Consolas', 11, 'italic'))
+            self.response_text.tag_config('reasoning', foreground='#a0a0a0')  # Subtle gray for reasoning
+        else:
+            # Fallback colors
+            self.response_text.tag_config('header', foreground='#5bc0de', font=('Consolas', 11, 'bold'))
+            self.response_text.tag_config('separator', foreground='#6c757d')
+            self.response_text.tag_config('success', foreground='#5cb85c')
+            self.response_text.tag_config('warning', foreground='#f0ad4e')
+            self.response_text.tag_config('error', foreground='#d9534f')
+            self.response_text.tag_config('info', foreground='#5bc0de')
+            self.response_text.tag_config('tool', foreground='#f0ad4e')
+            self.response_text.tag_config('reasoning', foreground='#a0a0a0')
     
     def add_response(self, response_type: str, content: str, timestamp: Optional[datetime] = None):
         """Add a new AI response to the display."""
@@ -2072,7 +2212,25 @@ class QueryInputPanel:
         # Query input
         ttk.Label(self.frame, text="Enter your query:", font=('Arial', 10, 'bold')).grid(row=0, column=0, sticky='w', pady=(0, 5))
         
-        self.query_entry = tk.Text(self.frame, height=3, width=60, font=('Arial', 10), wrap=tk.WORD)
+        # Get theme colors for dark styling
+        colors = _theme_colors
+        if colors:
+            bg, fg = colors.inputbg, colors.inputfg
+            selectbg, selectfg = colors.selectbg, colors.selectfg
+            insertbg = colors.fg
+        else:
+            bg, fg = '#303030', '#e0e0e0'
+            selectbg, selectfg = '#505050', '#ffffff'
+            insertbg = '#ffffff'
+        
+        self.query_entry = tk.Text(
+            self.frame, height=3, width=60, 
+            font=('Segoe UI', 11), wrap=tk.WORD,
+            bg=bg, fg=fg,
+            insertbackground=insertbg,
+            selectbackground=selectbg, selectforeground=selectfg,
+            relief='flat', borderwidth=1, padx=6, pady=6
+        )
         self.query_entry.grid(row=1, column=0, columnspan=2, sticky='ew', pady=(0, 10))
         
         # Buttons
@@ -4015,13 +4173,20 @@ class OGhidraUI:
     def __init__(self, bridge: Bridge, config: BridgeConfig):
         self.bridge = bridge
         self.config = config
-        self.root = tk.Tk()
-        self.root.title("OGhidra - Ollama-GhidraMCP Bridge")
-        self.root.geometry("1400x900")
         
-        # Configure styles
-        self.style = ttk.Style()
-        self.style.theme_use('clam')
+        # Use ttkbootstrap Window for modern dark theme with rounded corners
+        self.root = tb.Window(
+            title="OGhidra - Ollama-GhidraMCP Bridge",
+            themename="darkly",  # Dark gray theme with soft corners
+            size=(1400, 900)
+        )
+        
+        # Store style reference for theme-aware color access
+        self.style = self.root.style
+        
+        # Initialize global theme colors for raw tk widgets
+        global _theme_colors
+        _theme_colors = ThemeColors(self.style)
         
         self._setup_ui()
         self._setup_menu()
@@ -4182,16 +4347,16 @@ class OGhidraUI:
             # Create session name dialog
             session_dialog = tk.Toplevel(self.root)
             session_dialog.title("Save Analysis Session")
-            session_dialog.geometry("500x400")
+            session_dialog.geometry("700x600")
             session_dialog.transient(self.root)
             session_dialog.grab_set()
             
             # Center dialog
             try:
                 session_dialog.update_idletasks()
-                x = (session_dialog.winfo_screenwidth() // 2) - (250)
-                y = (session_dialog.winfo_screenheight() // 2) - (200)
-                session_dialog.geometry(f"500x400+{x}+{y}")
+                x = (session_dialog.winfo_screenwidth() // 2) - (350)
+                y = (session_dialog.winfo_screenheight() // 2) - (300)
+                session_dialog.geometry(f"700x600+{x}+{y}")
             except Exception as e:
                 logger.warning(f"Could not center dialog: {e}")
             
@@ -4209,7 +4374,26 @@ class OGhidraUI:
             
             # Description
             ttk.Label(main_frame, text="Description (optional):").pack(anchor='w')
-            desc_text = tk.Text(main_frame, height=4, width=50)
+            
+            # Get theme colors for dark styling
+            colors = _theme_colors
+            if colors:
+                bg, fg = colors.inputbg, colors.inputfg
+                selectbg, selectfg = colors.selectbg, colors.selectfg
+                insertbg = colors.fg
+            else:
+                bg, fg = '#303030', '#e0e0e0'
+                selectbg, selectfg = '#505050', '#ffffff'
+                insertbg = '#ffffff'
+            
+            desc_text = tk.Text(
+                main_frame, height=4, width=50,
+                font=('Segoe UI', 10),
+                bg=bg, fg=fg,
+                insertbackground=insertbg,
+                selectbackground=selectbg, selectforeground=selectfg,
+                relief='flat', borderwidth=1, padx=6, pady=6
+            )
             desc_text.pack(fill='x', pady=(5, 10))
             
             # Current session info
@@ -4444,15 +4628,15 @@ class OGhidraUI:
             # Create session selection dialog
             load_dialog = tk.Toplevel(self.root)
             load_dialog.title("Load Analysis Session")
-            load_dialog.geometry("700x500")
+            load_dialog.geometry("700x650")
             load_dialog.transient(self.root)
             load_dialog.grab_set()
             
             # Center dialog
             load_dialog.update_idletasks()
             x = (load_dialog.winfo_screenwidth() // 2) - (350)
-            y = (load_dialog.winfo_screenheight() // 2) - (250)
-            load_dialog.geometry(f"700x500+{x}+{y}")
+            y = (load_dialog.winfo_screenheight() // 2) - (325)
+            load_dialog.geometry(f"700x650+{x}+{y}")
             
             main_frame = ttk.Frame(load_dialog, padding=20)
             main_frame.pack(fill='both', expand=True)
@@ -4870,14 +5054,14 @@ class OGhidraUI:
         """Show system information dialog with CAG/RAG controls and memory stats."""
         dialog = tk.Toplevel(self.root)
         dialog.title("System Information")
-        dialog.geometry("500x450")
+        dialog.geometry("500x700")
         dialog.transient(self.root)
         dialog.grab_set()
         
         # Center the dialog
         dialog.update_idletasks()
         x = (dialog.winfo_screenwidth() - 500) // 2
-        y = (dialog.winfo_screenheight() - 450) // 2
+        y = (dialog.winfo_screenheight() - 700) // 2
         dialog.geometry(f"+{x}+{y}")
         
         main_frame = ttk.Frame(dialog, padding=15)
@@ -4904,19 +5088,24 @@ class OGhidraUI:
         rag_frame = ttk.LabelFrame(main_frame, text="Retrieval-Augmented Generation (RAG)", padding=10)
         rag_frame.pack(fill='x', pady=(0, 10))
         
-        # Get vector count
-        vector_count = 0
+        # Helper function to get current vector count
+        def get_vector_count():
+            count = 0
+            if hasattr(self.bridge, 'cag_manager') and self.bridge.cag_manager:
+                vector_store = self.bridge.cag_manager.vector_store
+                if vector_store and hasattr(vector_store, 'embeddings') and vector_store.embeddings is not None:
+                    try:
+                        count = len(vector_store.embeddings)
+                    except:
+                        pass
+            return count
+        
+        # Get initial values
         rag_enabled = False
         if hasattr(self.bridge, 'cag_manager') and self.bridge.cag_manager:
             rag_enabled = getattr(self.bridge.cag_manager, 'use_vector_store_for_prompts', True)
-            vector_store = self.bridge.cag_manager.vector_store
-            if vector_store and hasattr(vector_store, 'embeddings') and vector_store.embeddings:
-                try:
-                    vector_count = len(vector_store.embeddings)
-                except:
-                    pass
         
-        rag_status = ttk.Label(rag_frame, text=f"Status: {'Enabled' if rag_enabled else 'Disabled'} ({vector_count} vectors)",
+        rag_status = ttk.Label(rag_frame, text=f"Status: {'Enabled' if rag_enabled else 'Disabled'} ({get_vector_count()} vectors)",
                               foreground='green' if rag_enabled else 'gray')
         rag_status.pack(anchor='w')
         
@@ -4924,16 +5113,42 @@ class OGhidraUI:
         def toggle_rag():
             if hasattr(self.bridge, 'cag_manager') and self.bridge.cag_manager:
                 self.bridge.cag_manager.use_vector_store_for_prompts = rag_var.get()
-            rag_status.config(text=f"Status: {'Enabled' if rag_var.get() else 'Disabled'} ({vector_count} vectors)",
+            # Refresh vector count when toggling
+            current_count = get_vector_count()
+            rag_status.config(text=f"Status: {'Enabled' if rag_var.get() else 'Disabled'} ({current_count} vectors)",
                             foreground='green' if rag_var.get() else 'gray')
         rag_check = ttk.Checkbutton(rag_frame, text="Enable RAG", variable=rag_var, command=toggle_rag)
         rag_check.pack(anchor='w', pady=(5, 0))
+        
+        # Add refresh button for vector count
+        def refresh_rag_status():
+            current_count = get_vector_count()
+            is_enabled = rag_var.get()
+            rag_status.config(text=f"Status: {'Enabled' if is_enabled else 'Disabled'} ({current_count} vectors)",
+                            foreground='green' if is_enabled else 'gray')
+        ttk.Button(rag_frame, text="Refresh Count", command=refresh_rag_status).pack(anchor='w', pady=(5, 0))
         
         # Memory Stats
         stats_frame = ttk.LabelFrame(main_frame, text="Memory Statistics", padding=10)
         stats_frame.pack(fill='both', expand=True, pady=(0, 10))
         
-        stats_text = scrolledtext.ScrolledText(stats_frame, height=10, font=('Courier', 9))
+        # Get theme colors for dark styling
+        colors = _theme_colors
+        if colors:
+            bg, fg = colors.inputbg, colors.inputfg
+            selectbg, selectfg = colors.selectbg, colors.selectfg
+            font = colors.text_font
+        else:
+            bg, fg = '#303030', '#e0e0e0'
+            selectbg, selectfg = '#505050', '#ffffff'
+            font = ('Consolas', 11)
+        
+        stats_text = scrolledtext.ScrolledText(
+            stats_frame, height=10, font=font,
+            bg=bg, fg=fg,
+            selectbackground=selectbg, selectforeground=selectfg,
+            relief='flat', borderwidth=1, padx=6, pady=6
+        )
         stats_text.pack(fill='both', expand=True)
         
         # Populate memory stats

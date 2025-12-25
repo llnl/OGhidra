@@ -331,6 +331,11 @@ class OllamaClient:
         Generate embeddings using the new Ollama API (/api/embed).
         Introduced in Ollama 0.1.26+.
         """
+        # Validate input - empty or None text causes 400 errors
+        if not text or not text.strip():
+            self.logger.warning("Empty text provided to embed API, using placeholder")
+            text = "empty"
+        
         url = f"{self.base_url}/api/embed"
         payload = {
             "model": embedding_model,
@@ -339,6 +344,13 @@ class OllamaClient:
         
         try:
             response = requests.post(url, json=payload)
+            if response.status_code == 400:
+                # Log the actual error response for debugging
+                try:
+                    error_detail = response.json()
+                    self.logger.error(f"Ollama embed 400 error: {error_detail}")
+                except:
+                    self.logger.error(f"Ollama embed 400 error: {response.text[:500]}")
             response.raise_for_status()
             data = response.json()
             # New API returns "embeddings" (array) for batch input
@@ -359,6 +371,11 @@ class OllamaClient:
         Generate embeddings using the legacy Ollama API (/api/embeddings).
         For Ollama versions prior to 0.1.26.
         """
+        # Validate input - empty or None text causes errors
+        if not text or not text.strip():
+            self.logger.warning("Empty text provided to embed API, using placeholder")
+            text = "empty"
+        
         url = f"{self.base_url}/api/embeddings"
         payload = {
             "model": embedding_model,
@@ -367,6 +384,13 @@ class OllamaClient:
         
         try:
             response = requests.post(url, json=payload)
+            if response.status_code == 400:
+                # Log the actual error response for debugging
+                try:
+                    error_detail = response.json()
+                    self.logger.error(f"Ollama embeddings 400 error: {error_detail}")
+                except:
+                    self.logger.error(f"Ollama embeddings 400 error: {response.text[:500]}")
             response.raise_for_status()
             data = response.json()
             embedding = data.get('embedding', [])

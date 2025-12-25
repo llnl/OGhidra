@@ -468,8 +468,8 @@ class CAGManager:
                 
         except Exception as e:
             logging.error(f"Error creating combined vector store: {e}")
-            logging.error("This may be due to vector dimension mismatch between HuggingFace and Ollama embeddings.")
-            logging.error("Ensure all vectors are created using the same embedding model (Ollama nomic-embed-text).")
+            logging.error("This may be due to vector dimension mismatch between different embedding models.")
+            logging.error("Ensure all vectors are created using the same embedding model (check OLLAMA_EMBEDDING_MODEL in .env).")
             # Fallback to existing vectors only
             from .vector_store import SimpleVectorStore
             return SimpleVectorStore(existing_docs, existing_vectors)

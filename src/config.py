@@ -29,7 +29,7 @@ class OllamaConfig(BaseModel):
     # llama3.1 is recommended for features like tool calling.
     model: str = Field(default="gemma3:27b", min_length=1, description="Model name cannot be empty", env="OLLAMA_MODEL")
     # Embedding model for vector operations
-    embedding_model: str = Field(default="all-minilm:33m", min_length=1, description="Embedding model name cannot be empty", env="OLLAMA_EMBEDDING_MODEL")
+    embedding_model: str = Field(default="nomic-embed-text", min_length=1, description="Embedding model name cannot be empty", env="OLLAMA_EMBEDDING_MODEL")
     timeout: int = Field(ge=1, le=600, default=120, description="Timeout for requests in seconds (1-600)", env="OLLAMA_TIMEOUT")
     
     # Execution loop settings (INNER LOOP - tools per execution phase)

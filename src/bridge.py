@@ -181,9 +181,22 @@ class Bridge:
     @classmethod
     def get_ollama_embeddings(cls, texts: List[str], model: str = None) -> List[List[float]]:
         """Get embeddings using local Ollama embedding model."""
+        logger = logging.getLogger("ollama-ghidra-bridge")
+        
         if not hasattr(cls, '_ollama_client') or cls._ollama_client is None:
-            logger = logging.getLogger("ollama-ghidra-bridge")
             logger.debug("Ollama client not initialized. Embeddings unavailable.")
+            return []
+        
+        # Filter out empty/None texts which cause 400 errors
+        valid_texts = []
+        for text in texts:
+            if text and isinstance(text, str) and text.strip():
+                valid_texts.append(text.strip())
+            else:
+                logger.warning(f"Skipping invalid text for embedding: {repr(text)[:50]}")
+        
+        if not valid_texts:
+            logger.warning("No valid texts to embed after filtering")
             return []
         
         # Use provided model or default from config
@@ -191,21 +204,18 @@ class Bridge:
             
         try:
             embeddings = []
-            for text in texts:
+            for text in valid_texts:
                 embedding = cls._ollama_client.embed(text, model=embedding_model)
                 if embedding:
                     embeddings.append(embedding)
                 else:
-                    logger = logging.getLogger("ollama-ghidra-bridge")
                     logger.debug(f"Failed to generate embedding for text: {text[:50]}...")
                     return []  # Return empty if any embedding fails
             
-            logger = logging.getLogger("ollama-ghidra-bridge")
             logger.debug(f"✅ Generated {len(embeddings)} embeddings using Ollama {embedding_model}")
             return embeddings
         except Exception as e:
-            logger = logging.getLogger("ollama-ghidra-bridge")
-            logger.debug(f"Failed to generate Ollama embeddings: {e}")
+            logger.error(f"Failed to generate Ollama embeddings: {e}")
             return []
 
     @classmethod

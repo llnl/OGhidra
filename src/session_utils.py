@@ -23,7 +23,7 @@ class SessionEmbedder:
     a proper embedding model, such as one from OpenAI, HuggingFace, or a locally hosted model.
     """
     
-    def __init__(self, embedding_model: str = "gemma3:2b"):
+    def __init__(self, embedding_model: str = "nomic-embed-text"):
         """
         Initialize the SessionEmbedder.
         
