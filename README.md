@@ -238,8 +238,6 @@ pip install -r requirements.txt
    
    # Alternative: Use gpt-oss for higher quality (requires more RAM)
    # OLLAMA_MODEL=gpt-oss:120b
-   # Or if you lack the hardware i've been playing around with cloud models and this one is pretty good. Mistral please hire me
-   # OLLAMA_MODEL=devstral-2:123b-cloud 
    
    # GhidraMCP Server Configuration
    GHIDRA_MCP_URL=http://localhost:8080

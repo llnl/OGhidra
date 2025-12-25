@@ -7,6 +7,8 @@ Comprehensive GUI interface for the Ollama-GhidraMCP Bridge application.
 
 import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox, filedialog, simpledialog
+import ttkbootstrap as tb
+from ttkbootstrap.constants import *
 import threading
 import json
 import time
@@ -21,6 +23,43 @@ from .bridge import Bridge
 
 logger = logging.getLogger("ollama-ghidra-bridge.ui")
 
+# Global theme colors instance - set when OGhidraUI initializes
+_theme_colors = None
+
+class ThemeColors:
+    """Theme-aware colors for raw tk widgets (Canvas, Text, Listbox, etc.)."""
+    
+    def __init__(self, style):
+        """Initialize with a ttkbootstrap style object."""
+        colors = style.colors
+        
+        # Main backgrounds
+        self.bg = colors.bg                    # Main window background
+        self.inputbg = colors.inputbg          # Input field background  
+        self.selectbg = colors.selectbg        # Selection background
+        
+        # Foregrounds
+        self.fg = colors.fg                    # Main text color
+        self.inputfg = colors.inputfg          # Input text color
+        self.selectfg = colors.selectfg        # Selected text color
+        
+        # Accent colors
+        self.primary = colors.primary          # Primary accent (blue)
+        self.secondary = colors.secondary      # Secondary accent
+        self.success = colors.success          # Success/green
+        self.info = colors.info                # Info/cyan
+        self.warning = colors.warning          # Warning/orange
+        self.danger = colors.danger            # Error/red
+        
+        # Border
+        self.border = colors.border
+        
+        # Computed colors for specific use cases
+        self.canvas_bg = colors.bg             # Canvas background
+        self.text_font = ('Consolas', 11)      # Softer monospace font
+        self.ui_font = ('Segoe UI', 10)        # UI font
+
+
 class ServerConfigDialog:
     """Dialog for configuring server URLs."""
     
@@ -31,7 +70,7 @@ class ServerConfigDialog:
         # Create the dialog window
         self.dialog = tk.Toplevel(parent)
         self.dialog.title("Server Configuration")
-        self.dialog.geometry("600x550")
+        self.dialog.geometry("600x650")
         self.dialog.transient(parent)
         self.dialog.grab_set()
         
@@ -43,7 +82,7 @@ class ServerConfigDialog:
         parent_height = parent.winfo_height()
         
         dialog_width = 600
-        dialog_height = 550
+        dialog_height = 650
         
         x = parent_x + (parent_width - dialog_width) // 2
         y = parent_y + (parent_height - dialog_height) // 2
@@ -366,7 +405,24 @@ class SessionLoadDialog:
         scrollbar = ttk.Scrollbar(list_frame)
         scrollbar.pack(side='right', fill='y')
         
-        self.session_listbox = tk.Listbox(list_frame, yscrollcommand=scrollbar.set, font=('TkDefaultFont', 10))
+        # Get theme colors for dark styling
+        colors = _theme_colors
+        if colors:
+            bg, fg = colors.inputbg, colors.inputfg
+            selectbg = colors.primary
+            selectfg = '#ffffff'
+        else:
+            bg, fg = '#303030', '#e0e0e0'
+            selectbg, selectfg = '#375a7f', '#ffffff'
+        
+        self.session_listbox = tk.Listbox(
+            list_frame, yscrollcommand=scrollbar.set, 
+            font=('Segoe UI', 10),
+            bg=bg, fg=fg,
+            selectbackground=selectbg, selectforeground=selectfg,
+            relief='flat', borderwidth=1,
+            highlightthickness=0
+        )
         self.session_listbox.pack(side='left', fill='both', expand=True)
         scrollbar.config(command=self.session_listbox.yview)
         
@@ -413,18 +469,41 @@ class WorkflowDiagram:
     """Visual representation of the agentic workflow stages."""
     
     def __init__(self, parent, width=400, height=100):
-        self.canvas = tk.Canvas(parent, width=width, height=height, bg='white', relief='sunken', bd=2)
+        # Get theme colors for dark styling
+        colors = _theme_colors
+        if colors:
+            canvas_bg = colors.bg
+            self.idle_color = '#4a4a4a'  # Dark gray for idle
+            self.text_idle_color = '#a0a0a0'  # Light gray text
+            self.stage_colors = {
+                'Planning': colors.info,       # Cyan/blue
+                'Execution': colors.warning,   # Orange
+                'Analysis': colors.success,    # Green
+                'Review': colors.secondary,    # Purple-ish
+                'idle': self.idle_color
+            }
+        else:
+            canvas_bg = '#303030'
+            self.idle_color = '#4a4a4a'
+            self.text_idle_color = '#a0a0a0'
+            self.stage_colors = {
+                'Planning': '#3498db',
+                'Execution': '#f39c12',
+                'Analysis': '#2ecc71',
+                'Review': '#9b59b6',
+                'idle': self.idle_color
+            }
+        
+        self.canvas = tk.Canvas(
+            parent, width=width, height=height, 
+            bg=canvas_bg, 
+            relief='flat', bd=0,
+            highlightthickness=0
+        )
         self.width = width
         self.height = height
         self.current_stage = None
         self.stages = ['Planning', 'Execution', 'Analysis', 'Review']
-        self.stage_colors = {
-            'Planning': '#3498db',    # Blue
-            'Execution': '#f39c12',   # Orange
-            'Analysis': '#2ecc71',    # Green
-            'Review': '#9b59b6',      # Purple
-            'idle': '#95a5a6'         # Gray
-        }
         
         # RAG vector progress tracking (for status display only)
         self.rag_progress = 0
@@ -446,18 +525,19 @@ class WorkflowDiagram:
             x_start = 20 + i * stage_width
             x_center = x_start + stage_width // 2
             
-            # Determine color
+            # Determine color (dark theme aware)
             if self.current_stage == stage.lower().replace(' ', '_'):
                 color = self.stage_colors[stage]
                 text_color = 'white'
+                outline_color = '#ffffff'
             else:
                 color = self.stage_colors['idle']
-                text_color = 'black'
+                text_color = self.text_idle_color
+                outline_color = '#5a5a5a'
             
-            # Draw stage box (fixed size for consistent look)
             self.canvas.create_rectangle(
                 x_start, y_center - 15, x_start + stage_width - 10, y_center + 15,
-                fill=color, outline='black', width=2
+                fill=color, outline=outline_color, width=1
             )
             
             # Draw stage text

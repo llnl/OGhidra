@@ -3,7 +3,6 @@ requests>=2.26.0
 httpx>=0.24.0
 python-dotenv>=1.0.0
 numpy>=1.24.0             # Required: for vector operations with Ollama embeddings
-rich>=13.7.1              # For enhanced terminal output in interactive mode 
 rich>=13.7.1              # For enhanced terminal output in interactive mode
 ttkbootstrap>=1.10.0      # Modern dark themes with rounded corners for UI 
 # HuggingFace dependencies removed - using local Ollama embeddings instead
