@@ -27,15 +27,15 @@ OGhidra bridges Large Language Models (LLMs) via Ollama with the Ghidra reverse 
 
 ## What is OGhidra?
 
-
-<img width="779" height="550" alt="design" src="https://github.com/user-attachments/assets/85ee1c09-a146-45ab-94fa-cd3debd82996" />
-
 OGhidra combines the power of local LLMs with Ghidra's reverse engineering capabilities, allowing you to:
 - **Analyze binaries using natural language** - Ask questions about functions, strings, imports, and more
 - **Automate reverse engineering workflows** - Rename functions, analyze patterns, generate reports
 - **Use local AI models** - Complete privacy with models running on your own hardware
 - **Deep Data Inspection** - Leverage the custom OGhidraMCP plugin to read raw bytes and analyze memory directly
 - **Work with modern GUI or CLI** - Choose the interface that suits your workflow
+
+<img width="779" height="550" alt="design" src="https://github.com/user-attachments/assets/85ee1c09-a146-45ab-94fa-cd3debd82996" />
+
 
 ## Use Cases
 
