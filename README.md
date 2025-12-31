@@ -9,6 +9,25 @@ OGhidra bridges Large Language Models (LLMs) via Ollama with the Ghidra reverse 
 
 [![OGhidra Introduction](https://img.youtube.com/vi/hBD92FUgR0Y/0.jpg)](https://www.youtube.com/watch?v=hBD92FUgR0Y)
 
+<img width="779" height="550" alt="design" src="https://github.com/user-attachments/assets/85ee1c09-a146-45ab-94fa-cd3debd82996" />
+
+## What is OGhidra?
+
+OGhidra combines the power of local LLMs with Ghidra's reverse engineering capabilities, allowing you to:
+- **Analyze binaries using natural language** - Ask questions about functions, strings, imports, and more
+- **Automate reverse engineering workflows** - Rename functions, analyze patterns, generate reports
+- **Use local AI models** - Complete privacy with models running on your own hardware
+- **Deep Data Inspection** - Leverage the custom OGhidraMCP plugin to read raw bytes and analyze memory directly
+- **Work with modern GUI or CLI** - Choose the interface that suits your workflow
+
+## Use Cases
+
+- **Malware Analysis**: Quickly identify suspicious functions and behavioral patterns
+- **Vulnerability Research**: Analyze imports, strings, and function relationships
+- **Code Understanding**: Get AI-powered explanations of complex decompiled code
+- **Bulk Operations**: Rename hundreds of functions with intelligent AI suggestions
+- **Report Generation**: Create comprehensive security assessments and software reports
+
 ## Table of Contents
 
 - [What is OGhidra?](#what-is-oghidra)
@@ -24,29 +43,7 @@ OGhidra bridges Large Language Models (LLMs) via Ollama with the Ghidra reverse 
 - [Contributing](#contributing)
 - [License](#license)
 
-
-## What is OGhidra?
-
-OGhidra combines the power of local LLMs with Ghidra's reverse engineering capabilities, allowing you to:
-- **Analyze binaries using natural language** - Ask questions about functions, strings, imports, and more
-- **Automate reverse engineering workflows** - Rename functions, analyze patterns, generate reports
-- **Use local AI models** - Complete privacy with models running on your own hardware
-- **Deep Data Inspection** - Leverage the custom OGhidraMCP plugin to read raw bytes and analyze memory directly
-- **Work with modern GUI or CLI** - Choose the interface that suits your workflow
-
-<img width="779" height="550" alt="design" src="https://github.com/user-attachments/assets/85ee1c09-a146-45ab-94fa-cd3debd82996" />
-
-
-## Use Cases
-
-- **Malware Analysis**: Quickly identify suspicious functions and behavioral patterns
-- **Vulnerability Research**: Analyze imports, strings, and function relationships
-- **Code Understanding**: Get AI-powered explanations of complex decompiled code
-- **Bulk Operations**: Rename hundreds of functions with intelligent AI suggestions
-- **Report Generation**: Create comprehensive security assessments and software reports
 ---
-
-
 
 ### Monitor your Investigation and Rename All Functions
 <img width="1920" height="1028" alt="renaming-ui" src="https://github.com/user-attachments/assets/8843b5f5-1f2f-42eb-bf4a-4ef6c5625c9c" />
@@ -196,6 +193,7 @@ Ollama is the local LLM runtime that powers OGhidra's AI capabilities.
    **Model Details**:
    - `gpt-oss:120b` - Large open-source GPT model, best quality for complex analysis (requires ~80GB RAM)
    - `gemma3:27b` - Google's Gemma 3 model, excellent balance of speed and quality (~20GB RAM)
+   - `devstral-2:123b-cloud` - Large Cloud Hosted Model
    - `nomic-embed-text` - Lightweight embedding model for semantic search and RAG features
 
 5. **Verify models are installed**:
@@ -270,7 +268,6 @@ pip install -r requirements.txt
    
    # GhidraMCP Server Configuration
    GHIDRA_MCP_URL=http://localhost:8080
-   GHIDRA_MCP_EXTENDED_URL=http://localhost:8081
    
    # Memory and RAG Settings
    SESSION_HISTORY_ENABLED=true
@@ -531,7 +528,6 @@ For distributed setups (e.g., running Ollama on a GPU server), configure remote 
    - **Ollama Server URL**: Default `http://localhost:11434`, change to remote GPU server if needed
    - **Ollama Model**: Select from dropdown of available models
    - **GhidraMCP Server URL**: Default `http://localhost:8080`
-   - **Extended API URL**: Default `http://localhost:8081`
 3. Click **Test Connection** to verify
 4. Click **Save** - changes apply immediately without restart
 

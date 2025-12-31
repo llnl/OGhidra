@@ -12,7 +12,124 @@ import time
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
+
+
+# =============================================================================
+# Text Chunking Utilities for Embedding Context Limits
+# =============================================================================
+
+# nomic-embed-text and most embedding models have 8192 token limit
+# Using ~4 chars per token as rough estimate
+MAX_EMBEDDING_TOKENS = 8192
+CHARS_PER_TOKEN = 4
+MAX_EMBEDDING_CHARS = MAX_EMBEDDING_TOKENS * CHARS_PER_TOKEN  # ~32,768 chars
+SAFE_EMBEDDING_CHARS = int(MAX_EMBEDDING_CHARS * 0.95)  # 95% to be safe (~31,129 chars)
+
+
+def chunk_text_for_embedding(
+    text: str, 
+    max_chars: int = SAFE_EMBEDDING_CHARS, 
+    overlap_chars: int = 500
+) -> List[str]:
+    """
+    Split text into chunks that fit within embedding model context window.
+    
+    Only chunks if text exceeds max_chars. Attempts to break at natural
+    boundaries (newlines, periods) to preserve semantic meaning.
+    
+    Args:
+        text: The text to potentially chunk
+        max_chars: Maximum characters per chunk (default: ~31K for 8192 tokens)
+        overlap_chars: Character overlap between chunks for context continuity
+        
+    Returns:
+        List of text chunks (single-element list if no chunking needed)
+    """
+    if not text:
+        return [""]
+    
+    # If text fits, return as single chunk
+    if len(text) <= max_chars:
+        return [text]
+    
+    chunks = []
+    start = 0
+    text_length = len(text)
+    
+    while start < text_length:
+        end = min(start + max_chars, text_length)
+        
+        # If not at the end, try to break at a natural boundary
+        if end < text_length:
+            # Search window: last 2000 chars of the chunk
+            search_start = max(start, end - 2000)
+            
+            # Priority 1: Double newline (paragraph break)
+            double_newline = text.rfind('\n\n', search_start, end)
+            if double_newline > start + (max_chars // 2):  # Must be past halfway
+                end = double_newline + 2
+            else:
+                # Priority 2: Single newline
+                single_newline = text.rfind('\n', search_start, end)
+                if single_newline > start + (max_chars // 2):
+                    end = single_newline + 1
+                else:
+                    # Priority 3: End of sentence
+                    sentence_end = max(
+                        text.rfind('. ', search_start, end),
+                        text.rfind('.\n', search_start, end),
+                        text.rfind(';\n', search_start, end),
+                        text.rfind('}\n', search_start, end),  # Code block end
+                    )
+                    if sentence_end > start + (max_chars // 2):
+                        end = sentence_end + 2
+        
+        chunk = text[start:end].strip()
+        if chunk:  # Only add non-empty chunks
+            chunks.append(chunk)
+        
+        # Move start, accounting for overlap
+        if end >= text_length:
+            break
+        start = max(start + 1, end - overlap_chars)
+    
+    return chunks if chunks else [text[:max_chars]]
+
+
+def average_embeddings(embeddings: List[List[float]]) -> List[float]:
+    """
+    Average multiple embeddings into a single embedding vector.
+    
+    Used when text is chunked - each chunk's embedding is averaged
+    to produce a single representative embedding.
+    
+    Args:
+        embeddings: List of embedding vectors (all same dimension)
+        
+    Returns:
+        Averaged embedding vector
+    """
+    if not embeddings:
+        return []
+    
+    if len(embeddings) == 1:
+        return embeddings[0]
+    
+    # Get embedding dimension from first embedding
+    dim = len(embeddings[0])
+    
+    # Sum all embeddings
+    averaged = [0.0] * dim
+    for emb in embeddings:
+        for i, val in enumerate(emb):
+            averaged[i] += val
+    
+    # Divide by count
+    count = len(embeddings)
+    averaged = [val / count for val in averaged]
+    
+    return averaged
 
 class OllamaClient:
     """Client for interacting with Ollama API."""
@@ -280,6 +397,9 @@ class OllamaClient:
         Supports both new (/api/embed) and legacy (/api/embeddings) Ollama API versions.
         Auto-detects which version works and caches the result for future calls.
         
+        If text exceeds the model's context limit (8192 tokens), it will be
+        automatically chunked and the resulting embeddings averaged.
+        
         Args:
             text: Text to embed
             model: Embedding model to use (defaults to configured embedding_model)
@@ -298,6 +418,71 @@ class OllamaClient:
         # Use provided model or default embedding model
         embedding_model = model or self.embedding_model
         
+        # Check if text needs chunking (exceeds ~8192 tokens)
+        if text and len(text) > SAFE_EMBEDDING_CHARS:
+            return self._embed_chunked(text, embedding_model, start_time)
+        
+        # Normal embedding for text within context limit
+        return self._embed_single(text, embedding_model, start_time)
+    
+    def _embed_chunked(self, text: str, embedding_model: str, start_time: Optional[float]) -> List[float]:
+        """
+        Handle embedding for text that exceeds context limit by chunking.
+        
+        Splits text into chunks, embeds each chunk, then averages the embeddings.
+        """
+        chunks = chunk_text_for_embedding(text)
+        
+        self.logger.info(
+            f"Text length ({len(text)} chars, ~{len(text)//CHARS_PER_TOKEN} tokens) "
+            f"exceeds embedding limit. Chunking into {len(chunks)} pieces."
+        )
+        
+        # Embed each chunk
+        chunk_embeddings = []
+        for i, chunk in enumerate(chunks):
+            self.logger.debug(f"Embedding chunk {i+1}/{len(chunks)} ({len(chunk)} chars)")
+            try:
+                emb = self._embed_single(chunk, embedding_model, None)  # Don't log timing per chunk
+                if emb:
+                    chunk_embeddings.append(emb)
+                else:
+                    self.logger.warning(f"Chunk {i+1} returned empty embedding")
+            except Exception as e:
+                self.logger.error(f"Failed to embed chunk {i+1}: {e}")
+                # Continue with other chunks rather than failing completely
+        
+        if not chunk_embeddings:
+            self.logger.error("All chunks failed to embed")
+            return []
+        
+        # Average the chunk embeddings
+        averaged = average_embeddings(chunk_embeddings)
+        
+        self.logger.info(
+            f"Successfully embedded {len(chunk_embeddings)}/{len(chunks)} chunks, "
+            f"averaged to single {len(averaged)}-dim vector"
+        )
+        
+        # Log the overall operation
+        if self.llm_logging_enabled and start_time:
+            self._log_llm_interaction('embed_chunked', {
+                'model': embedding_model,
+                'method': 'embed_chunked',
+                'original_length': len(text),
+                'num_chunks': len(chunks),
+                'successful_chunks': len(chunk_embeddings),
+                'embedding_dimension': len(averaged),
+                'timing': {'total_duration_seconds': time.time() - start_time},
+                'status': 'success'
+            })
+        
+        return averaged
+    
+    def _embed_single(self, text: str, embedding_model: str, start_time: Optional[float]) -> List[float]:
+        """
+        Embed a single text chunk (must be within context limit).
+        """
         # Determine which API version to try based on cached result
         if self._embedding_api_version == 'new':
             return self._embed_new_api(text, embedding_model, start_time)

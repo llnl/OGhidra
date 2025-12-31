@@ -1680,16 +1680,30 @@ public class GhidraMCPPlugin extends Plugin {
 
     /**
      * Convert a list of strings into one big newline-delimited string, applying offset & limit.
+     * Includes metadata header with total count and pagination info.
      */
     private String paginateList(List<String> items, int offset, int limit) {
+        int total = items.size();
         int start = Math.max(0, offset);
-        int end   = Math.min(items.size(), offset + limit);
+        int end   = Math.min(total, offset + limit);
 
-        if (start >= items.size()) {
-            return ""; // no items in range
+        if (start >= total) {
+            return String.format("[Total: %d] [Showing: 0 items - offset %d exceeds total]", total, offset);
         }
+        
         List<String> sub = items.subList(start, end);
-        return String.join("\n", sub);
+        String content = String.join("\n", sub);
+        
+        // Build metadata header
+        StringBuilder header = new StringBuilder();
+        header.append(String.format("[Total: %d] [Showing: %d-%d]", total, start + 1, end));
+        
+        // Add next page hint if more items exist
+        if (end < total) {
+            header.append(String.format(" [Next: offset=%d, limit=%d]", end, limit));
+        }
+        
+        return header.toString() + "\n" + content;
     }
 
     /**
