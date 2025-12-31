@@ -221,7 +221,7 @@ python3 --version
 ### Step 1: Clone the Repository
 
 ```bash
-git clone https://github.com/yourusername/OGhidra.git
+git clone https://github.com/llnl/OGhidra
 cd OGhidra
 ```
 
@@ -247,16 +247,7 @@ pip install -r requirements.txt
 
 ### Step 4: Configure Environment Variables
 
-1. **Copy the example configuration**:
-   ```bash
-   # On Windows:
-   copy .envexample .env
-   
-   # On Linux/Mac:
-   cp .envexample .env
-   ```
-
-2. **Edit `.env` file** with your preferred text editor and configure (or leave as is):
+1. **Edit `.env` file** with your preferred text editor and configure (or leave as is):
 
    ```env
    # Ollama Configuration
