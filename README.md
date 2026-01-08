@@ -73,7 +73,7 @@ Before installing OGhidra, you need to set up three core components: **Ghidra**,
 ### System Requirements
 
 **Python Version**:
-- **Recommended**: Python 3.12 or Python 3.13 
+- **Required**: Python 3.12+
 - **Check your version**: Run `python --version` or `python3 --version`
 
 **Hardware Requirements**:
