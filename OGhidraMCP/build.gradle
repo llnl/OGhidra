@@ -3,7 +3,7 @@
 apply plugin: 'java'
 
 // Point to Ghidra installation
-def ghidraInstallDir = file(System.env.GHIDRA_INSTALL_DIR ?: "C:/Users/Era/Desktop/OGhidra/ghidra_11.3.2_PUBLIC")
+def ghidraInstallDir = file(System.env.GHIDRA_INSTALL_DIR ?: "<PATH_TO_GHIDRA_INSTALLATION>")
 
 // Check if Ghidra installation is valid
 if (!ghidraInstallDir.exists()) {
