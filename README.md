@@ -68,7 +68,7 @@ graph TD
 
 ## Pre-Installation Requirements
 
-Before installing OGhidra, you need to set up three core components: **Ghidra**, **GhidraMCP**, and **Ollama**.
+Before installing OGhidra, you need to set up three core components: **Ghidra**, **OGhidraMCP**, and **Ollama**
 
 ### System Requirements
 
@@ -77,6 +77,7 @@ Before installing OGhidra, you need to set up three core components: **Ghidra**,
 - **Check your version**: Run `python --version` or `python3 --version`
 
 **Hardware Requirements**:
+Recommended: Make sure your VRAM can support the entire model to prevent excessive wait times due to memory swapping. 
 - **RAM**: 
   - Minimum 8GB (for lightweight models like `gemma3:27b`)
   - 32GB+ recommended for large models (`gpt-oss:120b`)
