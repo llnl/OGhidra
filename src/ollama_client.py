@@ -154,6 +154,7 @@ class OllamaClient:
         self.default_system_prompt = getattr(config, 'default_system_prompt', '')
         self.temperature = getattr(config, 'temperature', 0.7)
         self.max_tokens = getattr(config, 'max_tokens', 2000)
+        self.timeout = getattr(config, 'timeout', 120)  # Default 120 seconds for LLM requests
         self.logger = logging.getLogger("ollama-client")
         self.model_map = config.model_map
         
@@ -169,6 +170,10 @@ class OllamaClient:
         
         # Embedding API version: None = auto-detect, 'new' = /api/embed, 'old' = /api/embeddings
         self._embedding_api_version = None
+        
+        # Print loaded configuration values for verification (always visible)
+        request_delay = getattr(config, 'request_delay', 0.0)
+        print(f"[OllamaClient] Initialized: timeout={self.timeout}s, request_delay={request_delay}s, model={self.default_model}")
         
         if self.llm_logging_enabled:
             self._setup_llm_logger()
@@ -284,7 +289,7 @@ class OllamaClient:
         }
         
         try:
-            response = requests.post(url, json=payload)
+            response = requests.post(url, json=payload, timeout=self.timeout)
             response.raise_for_status()
             data = response.json()
             response_text = data.get('response', '')
@@ -383,7 +388,7 @@ class OllamaClient:
         url = f"{self.base_url}/api/tags"
         
         try:
-            response = requests.get(url)
+            response = requests.get(url, timeout=self.timeout)
             response.raise_for_status()
             return [model['name'] for model in response.json()['models']]
         except requests.exceptions.RequestException as e:
@@ -528,7 +533,7 @@ class OllamaClient:
         }
         
         try:
-            response = requests.post(url, json=payload)
+            response = requests.post(url, json=payload, timeout=self.timeout)
             if response.status_code == 400:
                 # Log the actual error response for debugging
                 try:
@@ -568,7 +573,7 @@ class OllamaClient:
         }
         
         try:
-            response = requests.post(url, json=payload)
+            response = requests.post(url, json=payload, timeout=self.timeout)
             if response.status_code == 400:
                 # Log the actual error response for debugging
                 try:

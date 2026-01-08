@@ -9,6 +9,7 @@ import re
 import struct
 import base64
 from typing import Dict, Any, List, Optional, Tuple
+from urllib.parse import urlparse
 
 import httpx
 
@@ -31,22 +32,59 @@ class GhidraMCPClient:
         self.client = httpx.Client(timeout=config.timeout)
         self.api_version = None
         self.ollama_client = ollama_client
+        
+        # Instance management
+        self.active_instances = {}  # port -> info_dict
+        self.current_instance_port = None
+        
+        # Parse default port from config.base_url
+        try:
+            parsed = urlparse(str(config.base_url))
+            if parsed.port:
+                self.default_port = parsed.port
+                # We'll set this as active initially, but verify it later
+                self.current_instance_port = self.default_port
+                self.active_instances[self.default_port] = {"url": str(config.base_url).rstrip('/')}
+            else:
+                self.default_port = 8080
+                self.current_instance_port = 8080
+        except Exception:
+            self.default_port = 8080
+            self.current_instance_port = 8080
+            
         logger.info(f"Initialized GhidraMCP client at: {config.base_url}")
         
         # Try to detect API version and available endpoints
         self._detect_api()
+        
+        # Auto-discover other instances on startup
+        try:
+            self.instances_list()
+        except AttributeError:
+            # Methods might not be added yet if doing partial update
+            pass
     
     def _detect_api(self):
         """Detect the API version and available endpoints."""
         try:
             # Try to get available methods
             response = self.safe_get("methods", {"offset": 0, "limit": 1})
-            if response and not response[0].startswith("Error"):
+            # Check if response is valid (list of strings, not error strings)
+            if response and isinstance(response, list) and not (response and (response[0].startswith("Error") or response[0].startswith("Request failed"))):
                 logger.info("Successfully connected to GhidraMCP API")
+                # Update info for current instance
+                if self.current_instance_port:
+                    self._update_instance_info(self.current_instance_port)
             else:
                 logger.warning(f"Failed to connect to GhidraMCP API: {response}")
         except Exception as e:
             logger.warning(f"Error detecting API: {str(e)}")
+
+    def _get_base_url(self) -> str:
+        """Get the base URL for the current active instance."""
+        if self.current_instance_port and self.current_instance_port in self.active_instances:
+            return self.active_instances[self.current_instance_port]["url"]
+        return str(self.config.base_url).rstrip('/')
     
     def safe_get(self, endpoint: str, params: Dict[str, Any] = None) -> List[str]:
         """
@@ -64,7 +102,7 @@ class GhidraMCPClient:
             
         # Ensure proper URL construction by removing trailing slash from base_url
         # and ensuring endpoint doesn't start with slash
-        base_url = str(self.config.base_url).rstrip('/')
+        base_url = self._get_base_url()
         endpoint = endpoint.lstrip('/')
         url = f"{base_url}/{endpoint}"
         
@@ -95,7 +133,7 @@ class GhidraMCPClient:
         """
         # Ensure proper URL construction by removing trailing slash from base_url
         # and ensuring endpoint doesn't start with slash
-        base_url = str(self.config.base_url).rstrip('/')
+        base_url = self._get_base_url()
         endpoint = endpoint.lstrip('/')
         url = f"{base_url}/{endpoint}"
         
@@ -141,7 +179,7 @@ class GhidraMCPClient:
         """
         try:
             # Use the same URL construction pattern as other methods
-            base_url = str(self.config.base_url).rstrip('/')
+            base_url = self._get_base_url()
             url = f"{base_url}/methods"
             
             response = self.client.get(url, params={"offset": 0, "limit": 1})
@@ -1003,3 +1041,168 @@ class GhidraMCPClient:
             lines.append("")
         
         return "\n".join(lines)
+
+    # =========================================================================
+    # Instance Management
+    # 
+    # Multi-instance discovery and management architecture adapted from:
+    # GhydraMCP - https://github.com/starsong/GhydraMCP
+    # Authors: starsong and contributors
+    # 
+    # This allows the AI to discover and interact with multiple Ghidra instances
+    # simultaneously, each analyzing a different binary on a unique port.
+    # =========================================================================
+
+    def instances_list(self) -> str:
+        """
+        List all active Ghidra instances and auto-discover new ones on localhost.
+        
+        Returns:
+            Formatted string listing instances and their status
+        """
+        # Range of ports to scan (standard GhidraMCP ports)
+        # Port 8080 is often default, 8192+ are dynamic allocations
+        ports_to_scan = [8080, 8081] + list(range(8192, 8200))
+        
+        self._discover_instances_internal(ports_to_scan)
+        
+        if not self.active_instances:
+            return "No active Ghidra instances found. Make sure Ghidra is running with the MCP plugin enabled."
+            
+        result = ["=== Active Ghidra Instances ==="]
+        for port, info in self.active_instances.items():
+            status = "(CURRENT)" if port == self.current_instance_port else ""
+            program = info.get("file", "Unknown binary")
+            project = info.get("project", "Unknown project")
+            result.append(f"• Port {port}: {program} [{project}] {status}")
+            
+        result.append("\nUse 'instances_use(port=...)' to switch between instances.")
+        return "\n".join(result)
+
+    def instances_discover(self, host: str = "localhost", start_port: int = 8192, end_port: int = 8200) -> str:
+        """
+        Discover Ghidra instances on a specific host and port range.
+        
+        Args:
+            host: Hostname to scan (default: localhost)
+            start_port: Start of port range
+            end_port: End of port range
+            
+        Returns:
+            Discovery results
+        """
+        ports = list(range(start_port, end_port + 1))
+        # Add common default ports if not in range
+        if 8080 not in ports: ports = [8080] + ports
+        
+        self._discover_instances_internal(ports, host=host)
+        return self.instances_list()
+
+    def instances_use(self, port: int) -> str:
+        """
+        Switch the active Ghidra instance to the specified port.
+        
+        Args:
+            port: The port number of the instance to use
+            
+        Returns:
+            Confirmation message
+        """
+        try:
+            port = int(port)
+        except ValueError:
+            return f"Error: Port must be an integer, got '{port}'"
+
+        if port not in self.active_instances:
+            # Try to discover it first just in case
+            self._discover_instances_internal([port])
+            
+        if port in self.active_instances:
+            self.current_instance_port = port
+            info = self.active_instances[port]
+            
+            # Recache info to be sure
+            self._update_instance_info(port)
+            info = self.active_instances[port]
+            
+            return f"Switched to Ghidra instance on port {port} analyzing '{info.get('file', 'unknown')}'"
+        else:
+            return f"Error: No Ghidra instance found on port {port}. Use 'instances_list' to see available instances."
+
+    def instances_current(self) -> str:
+        """
+        Get information about the currently active Ghidra instance.
+        
+        Returns:
+            Instance information
+        """
+        if not self.current_instance_port or self.current_instance_port not in self.active_instances:
+            if not self.active_instances:
+                 return "No active instance selected and no instances found."
+            # Fallback to first available if none selected but some exist
+            default_port = next(iter(self.active_instances))
+            self.current_instance_port = default_port
+            return f"No instance explicitly selected. Defaulting to port {default_port}.\n" + self.instances_current()
+            
+        info = self.active_instances[self.current_instance_port]
+        result = [
+            f"=== Current Instance: Port {self.current_instance_port} ===",
+            f"Binary: {info.get('file', 'Unknown')}",
+            f"Project: {info.get('project', 'Unknown')}",
+            f"URL: {info.get('url')}",
+            f"Plugin Version: {info.get('plugin_version', 'Unknown')}"
+        ]
+        return "\n".join(result)
+
+    def _discover_instances_internal(self, ports: List[int], host: str = "localhost") -> int:
+        """Internal helper to scan ports and update active_instances."""
+        count = 0
+        
+        for port in ports:
+            url = f"http://{host}:{port}"
+            try:
+                # Check plugin version endpoint which is standard in GhidraMCP
+                resp = self.client.get(f"{url}/plugin-version", timeout=0.2)
+                if resp.status_code == 200:
+                    self._update_instance_info(port, url)
+                    count += 1
+            except Exception:
+                continue
+        return count
+
+    def _update_instance_info(self, port: int, url: str = None):
+        """Update information for a specific instance."""
+        if not url:
+            # If we don't know the URL, assume localhost if it was default
+            if port in self.active_instances:
+                url = self.active_instances[port]["url"]
+            else:
+                url = f"http://localhost:{port}"
+
+        info = {"url": url}
+        
+        try:
+            # Get program info
+            resp = self.client.get(f"{url}/program", timeout=1.0)
+            if resp.status_code == 200:
+                data = resp.json()
+                if "result" in data and isinstance(data["result"], dict):
+                    res = data["result"]
+                    info["file"] = res.get("name", "Unknown")
+                    info["program_id"] = res.get("programId", "")
+                    
+                    # Parse project from programId if possible
+                    pid = res.get("programId", "")
+                    if ":" in pid:
+                        info["project"] = pid.split(":")[0]
+                
+                # Check plugin version too
+                ver_resp = self.client.get(f"{url}/plugin-version", timeout=1.0)
+                if ver_resp.status_code == 200:
+                    ver_data = ver_resp.json()
+                    if "result" in ver_data and isinstance(ver_data["result"], dict):
+                         info["plugin_version"] = ver_data["result"].get("plugin_version", "unknown")
+        except Exception:
+            pass
+            
+        self.active_instances[port] = info

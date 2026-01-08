@@ -9,7 +9,7 @@ OGhidra bridges Large Language Models (LLMs) via Ollama with the Ghidra reverse 
 
 [![OGhidra Introduction](https://img.youtube.com/vi/hBD92FUgR0Y/0.jpg)](https://www.youtube.com/watch?v=hBD92FUgR0Y)
 
-<img width="779" height="550" alt="design" src="https://github.com/user-attachments/assets/85ee1c09-a146-45ab-94fa-cd3debd82996" />
+
 
 ## What is OGhidra?
 
@@ -18,7 +18,19 @@ OGhidra combines the power of local LLMs with Ghidra's reverse engineering capab
 - **Automate reverse engineering workflows** - Rename functions, analyze patterns, generate reports
 - **Use local AI models** - Complete privacy with models running on your own hardware
 - **Deep Data Inspection** - Leverage the custom OGhidraMCP plugin to read raw bytes and analyze memory directly
+- **Multi-Instance Analysis** - Run multiple Ghidra instances simultaneously, analyzing different binaries in parallel
 - **Work with modern GUI or CLI** - Choose the interface that suits your workflow
+
+```mermaid
+graph TD
+    A[Query] --> B[Planning Phase]
+    B --> C{Execution Phase}
+    C -- Tool Calls --> D[Ghidra/Ollama]
+    D --> C
+    C --> E[Review Phase]
+    E --> F[Final Response]
+```
+
 
 ## Use Cases
 
@@ -27,6 +39,7 @@ OGhidra combines the power of local LLMs with Ghidra's reverse engineering capab
 - **Code Understanding**: Get AI-powered explanations of complex decompiled code
 - **Bulk Operations**: Rename hundreds of functions with intelligent AI suggestions
 - **Report Generation**: Create comprehensive security assessments and software reports
+- **Parallel Analysis**: Load entire file systems or dependencies to cross verify findings
 
 ## Table of Contents
 
@@ -106,8 +119,10 @@ OGhidraMCP is an extended version of GhidraMCP with additional capabilities for 
 | **Modified By** | ezrealenoch |
 
 **Additional Features in OGhidraMCP:**
+- **Multi-Instance Support**: Run multiple Ghidra instances simultaneously, each analyzing different binaries on unique ports (8080, then 8192-8202). Enables parallel analysis workflows and AI agents to interact with multiple binaries at once.
 - `read_bytes`: Read raw bytes from memory addresses for AI analysis of data structures, magic bytes, and encrypted content
 - `scan_function_pointer_tables`: Algorithmic scanning for vtables, dispatch tables, and jump tables
+- **Enhanced API Endpoints**: Discovery endpoints (`/plugin-version`, `/program`) for instance management and compatibility with multi-instance architectures
 
 **Installation:**
 1. Locate the plugin in `OGhidraMCP/dist/ghidra_11.3.2_PUBLIC_20251223_OGhidraMCP.zip`
@@ -145,11 +160,13 @@ If you prefer the original plugin without modifications:
 2. **Configure the server port** (optional):
    - Go to `Edit` → `Tool Options` → `GhidraMCP HTTP Server`
    - Default port is `8080` - change if needed
+   - **Multi-Instance Mode**: If port 8080 is already in use, the plugin automatically tries ports 8192-8202, allowing multiple Ghidra instances to run simultaneously
    - Click `OK`
 
 3. **Verify the server is running**:
    - With a project open, the GhidraMCP server should start automatically
-   - Check Ghidra's console for "GhidraMCP server started" message
+   - Check Ghidra's console for "GhidraMCP HTTP server started on port XXXX" message
+   - The port number will be shown in the console (may differ from configured port if using multi-instance mode)
 
 ### Step 3: Install Ollama
 
@@ -217,15 +234,32 @@ python --version
 python3 --version
 ```
 
-
 ### Step 1: Clone the Repository
 
 ```bash
-git clone https://github.com/llnl/OGhidra
+git clone https://github.com/yourusername/OGhidra.git
 cd OGhidra
 ```
 
-### Step 2: Create Python Virtual Environment (Recommended)
+### Step 2: Install Python Dependencies
+
+Choose one of the following options:
+
+**Option A: Using UV (Recommended Suggestion Thanks jstasiak)**
+
+[UV](https://docs.astral.sh/uv/) is a modern, fast Python package manager. If you have it installed:
+
+```bash
+# Install dependencies and create virtual environment automatically
+uv sync
+
+# Run OGhidra (uv run handles the virtual environment for you)
+uv run main.py --interactive
+```
+
+> **install UV** [https://docs.astral.sh/uv/getting-started/installation/](https://docs.astral.sh/uv/getting-started/installation/)
+
+**Option B: Using pip (Traditional)**
 
 ```bash
 # Create virtual environment
@@ -237,17 +271,23 @@ python -m venv venv
 
 # On Linux/Mac:
 source venv/bin/activate
-```
 
-### Step 3: Install Python Dependencies
-
-```bash
+# Install dependencies
 pip install -r requirements.txt
 ```
 
-### Step 4: Configure Environment Variables
+### Step 3: Configure Environment Variables
 
-1. **Edit `.env` file** with your preferred text editor and configure (or leave as is):
+1. **Copy the example configuration**:
+   ```bash
+   # On Windows:
+   copy .envexample .env
+   
+   # On Linux/Mac:
+   cp .envexample .env
+   ```
+
+2. **Edit `.env` file** with your preferred text editor and configure (or leave as is):
 
    ```env
    # Ollama Configuration
@@ -288,7 +328,7 @@ pip install -r requirements.txt
    OLLAMA_REQUEST_DELAY=0.0
    ```
 
-### Step 5: Verify Installation
+### Step 4: Verify Installation
 
 1. **Ensure Ghidra is running** with a project open and GhidraMCP plugin enabled
 
@@ -299,6 +339,10 @@ pip install -r requirements.txt
 
 3. **Launch OGhidra CLI** in interactive mode to test:
    ```bash
+   # If using UV:
+   uv run main.py --interactive
+   
+   # If using pip (with venv activated):
    python main.py --interactive
    ```
 
@@ -321,6 +365,10 @@ The graphical interface provides the most intuitive experience with visual feedb
 
 **Launch the GUI**:
 ```bash
+# If using UV:
+uv run main.py --ui
+
+# If using pip (with venv activated):
 python main.py --ui
 ```
 
@@ -372,6 +420,10 @@ For advanced users, scripting, and automation workflows.
 
 **Launch CLI Mode**:
 ```bash
+# If using UV:
+uv run main.py --interactive
+
+# If using pip (with venv activated):
 python main.py --interactive
 ```
 
@@ -388,6 +440,10 @@ python main.py --interactive
 | `models` | `models` | Show available Ollama models |
 | `cag` | `cag` | Display CAG status and cache information |
 | `memory-stats` | `memory-stats` | View session memory statistics |
+| `instances_list` | `instances_list` | List all active Ghidra instances |
+| `instances_discover` | `instances_discover start_port=8192 end_port=8200` | Discover Ghidra instances on port range |
+| `instances_use` | `instances_use port=8192` | Switch to a different Ghidra instance |
+| `instances_current` | `instances_current` | Show current instance information |
 | `help` | `help` | Show command help |
 | `exit` / `quit` | `exit` | Exit interactive mode |
 
@@ -508,6 +564,67 @@ OGhidra> generate a comprehensive security report for this binary
 
 ---
 
+## Multi-Instance Support
+
+OGhidraMCP supports running multiple Ghidra instances simultaneously, each analyzing different binaries. This enables powerful parallel analysis workflows where you can:
+
+- **Analyze multiple binaries at once**: Open different binaries in separate Ghidra windows, each on its own port
+- **Compare binaries side-by-side**: Use AI to analyze similarities and differences between multiple executables
+- **Parallel batch processing**: Process multiple files concurrently with AI assistance
+
+### How Multi-Instance Works
+
+1. **Automatic Port Allocation**: When you open a Ghidra instance with OGhidraMCP:
+   - First instance tries port **8080** (default)
+   - If 8080 is taken, it automatically uses ports **8192-8202** (dynamic allocation)
+   - Each instance gets a unique port automatically
+
+2. **Instance Discovery**: OGhidra automatically discovers all running Ghidra instances on startup and can switch between them.
+
+3. **Instance Management Commands** (CLI Mode):
+   ```bash
+   # List all active Ghidra instances
+   instances_list
+   
+   # Discover instances on a specific port range
+   instances_discover start_port=8192 end_port=8200
+   
+   # Switch to a different instance
+   instances_use port=8192
+   
+   # Show current instance information
+   instances_current
+   ```
+
+### Example Multi-Instance Workflow
+
+```bash
+# Start OGhidra
+python main.py --interactive
+
+# List discovered instances
+OGhidra> instances_list
+=== Active Ghidra Instances ===
+• Port 8080: malware.exe [Project1] (CURRENT)
+• Port 8192: benign.exe [Project2]
+• Port 8193: library.dll [Project3]
+
+# Switch to analyze a different binary
+OGhidra> instances_use port=8192
+Switched to Ghidra instance on port 8192 analyzing 'benign.exe'
+
+# Now all queries will target the benign.exe binary
+OGhidra> analyze the main function
+[AI analyzes benign.exe's main function]
+
+# Switch back to malware
+OGhidra> instances_use port=8080
+```
+
+**Note**: Multi-instance architecture is inspired by the [GhydraMCP](https://github.com/starsong/GhydraMCP) project by starsong and contributors.
+
+---
+
 ## Server Configuration
 
 For distributed setups (e.g., running Ollama on a GPU server), configure remote servers through the GUI.
@@ -541,6 +658,16 @@ This allows you to:
 ---
 
 ## Advanced Features
+
+### Multi-Instance Analysis
+
+OGhidraMCP's multi-instance architecture allows you to run multiple Ghidra windows simultaneously, each analyzing a different binary. This is particularly useful for:
+
+- **Comparative Analysis**: Compare malware variants, library versions, or patched binaries side-by-side
+- **Batch Processing**: Analyze multiple files in parallel with AI assistance
+- **Workflow Efficiency**: Keep different analysis contexts open without switching projects
+
+The system automatically handles port allocation and instance discovery. See the [Multi-Instance Support](#multi-instance-support) section for detailed usage instructions.
 
 ### Session Memory & RAG (Retrieval-Augmented Generation)
 
@@ -645,7 +772,12 @@ Always start troubleshooting with a health check:
 
 **CLI**:
 ```bash
+# If using UV:
+uv run main.py --interactive
+
+# If using pip (with venv activated):
 python main.py --interactive
+
 # Then type:
 health
 ```
@@ -668,9 +800,16 @@ For setup assistance or questions:
 - Open an issue on GitHub
 - Check existing documentation in the repository
 
-## Contributing
-
 We welcome contributions to OGhidra! Please see our [Contributing Guidelines](CONTRIBUTING.md) for details on how to submit pull requests, report issues, and request features.
+
+## Acknowledgments
+
+OGhidra builds upon and credits the following excellent projects:
+
+- **[GhidraMCP](https://github.com/LaurieWired/GhidraMCP)** by [LaurieWired](https://github.com/LaurieWired) - The foundation of our Ghidra HTTP plugin
+- **[GhydraMCP](https://github.com/starsong/GhydraMCP)** by [starsong](https://github.com/starsong) and contributors - Multi-instance architecture that enables simultaneous analysis of multiple binaries across different Ghidra windows
+
+These projects made it possible to create a robust bridge between AI models and Ghidra's powerful reverse engineering capabilities.
 
 License
 ----------------

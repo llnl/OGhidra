@@ -37,3 +37,9 @@ Modification/Annotation:
 - set_disassembly_comment(address, comment): Add/Set a comment in the assembly view at a specific address.
 - set_function_prototype(function_address, prototype): Set the function signature/prototype.
 - set_local_variable_type(function_address, variable_name, new_type): Change the data type of a local variable.
+
+Instance Management:
+- instances_list(): List all active Ghidra instances and their status (binary name, project). Also discovers new instances on localhost.
+- instances_discover(host, start_port, end_port): Discover instances on a specific host/port range.
+- instances_use(port): Switch the active working instance to the one on the specified port.
+- instances_current(): Get information about the currently active instance.

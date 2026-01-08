@@ -804,9 +804,91 @@ def get_config() -> BridgeConfig:
             if 'ollama' not in config_data:
                 config_data['ollama'] = {}
             config_data['ollama']['agentic_loop_enabled'] = os.getenv('AGENTIC_LOOP_ENABLED').lower() == 'true'
+        
+        # Load Ollama timeout setting
+        if os.getenv('OLLAMA_TIMEOUT'):
+            if 'ollama' not in config_data:
+                config_data['ollama'] = {}
+            try:
+                config_data['ollama']['timeout'] = int(os.getenv('OLLAMA_TIMEOUT'))
+            except ValueError:
+                pass  # Use default if invalid value
+        
+        # Load Ollama request delay setting
+        if os.getenv('OLLAMA_REQUEST_DELAY'):
+            if 'ollama' not in config_data:
+                config_data['ollama'] = {}
+            try:
+                config_data['ollama']['request_delay'] = float(os.getenv('OLLAMA_REQUEST_DELAY'))
+            except ValueError:
+                pass  # Use default if invalid value
+        
+        # Load Ollama embedding model
+        if os.getenv('OLLAMA_EMBEDDING_MODEL'):
+            if 'ollama' not in config_data:
+                config_data['ollama'] = {}
+            config_data['ollama']['embedding_model'] = os.getenv('OLLAMA_EMBEDDING_MODEL')
+        
+        # Load show reasoning setting
+        if os.getenv('OLLAMA_SHOW_REASONING'):
+            if 'ollama' not in config_data:
+                config_data['ollama'] = {}
+            config_data['ollama']['show_reasoning'] = os.getenv('OLLAMA_SHOW_REASONING').lower() == 'true'
+        
+        # Load context budget settings
+        if os.getenv('CONTEXT_BUDGET'):
+            if 'ollama' not in config_data:
+                config_data['ollama'] = {}
+            try:
+                config_data['ollama']['context_budget'] = int(os.getenv('CONTEXT_BUDGET'))
+            except ValueError:
+                pass  # Use default if invalid value
+        
+        if os.getenv('CONTEXT_BUDGET_EXECUTION'):
+            if 'ollama' not in config_data:
+                config_data['ollama'] = {}
+            try:
+                config_data['ollama']['context_budget_execution'] = float(os.getenv('CONTEXT_BUDGET_EXECUTION'))
+            except ValueError:
+                pass  # Use default if invalid value
+        
+        # Load result handling settings
+        if os.getenv('ENABLE_RESULT_SUMMARIZATION'):
+            if 'ollama' not in config_data:
+                config_data['ollama'] = {}
+            config_data['ollama']['enable_result_summarization'] = os.getenv('ENABLE_RESULT_SUMMARIZATION').lower() == 'true'
+        
+        if os.getenv('RESULT_CACHE_ENABLED'):
+            if 'ollama' not in config_data:
+                config_data['ollama'] = {}
+            config_data['ollama']['result_cache_enabled'] = os.getenv('RESULT_CACHE_ENABLED').lower() == 'true'
+        
+        if os.getenv('TIERED_CONTEXT_ENABLED'):
+            if 'ollama' not in config_data:
+                config_data['ollama'] = {}
+            config_data['ollama']['tiered_context_enabled'] = os.getenv('TIERED_CONTEXT_ENABLED').lower() == 'true'
             
+        # Load Ghidra configuration
         if os.getenv('GHIDRA_BASE_URL'):
             config_data['ghidra'] = {'base_url': os.getenv('GHIDRA_BASE_URL')}
+        
+        if os.getenv('GHIDRA_TIMEOUT'):
+            if 'ghidra' not in config_data:
+                config_data['ghidra'] = {}
+            try:
+                config_data['ghidra']['timeout'] = int(os.getenv('GHIDRA_TIMEOUT'))
+            except ValueError:
+                pass  # Use default if invalid value
+        
+        if os.getenv('GHIDRA_MOCK_MODE'):
+            if 'ghidra' not in config_data:
+                config_data['ghidra'] = {}
+            config_data['ghidra']['mock_mode'] = os.getenv('GHIDRA_MOCK_MODE').lower() == 'true'
+        
+        if os.getenv('GHIDRA_API_PATH'):
+            if 'ghidra' not in config_data:
+                config_data['ghidra'] = {}
+            config_data['ghidra']['api_path'] = os.getenv('GHIDRA_API_PATH')
             
         _config_instance = BridgeConfig(**config_data)
     return _config_instance 

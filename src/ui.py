@@ -4193,6 +4193,22 @@ class OGhidraUI:
         
         # Start health monitoring
         self._start_health_monitoring()
+        
+        # Display startup configuration info
+        self._show_startup_info()
+    
+    def _show_startup_info(self):
+        """Display configuration info on startup."""
+        ollama_config = self.config.ollama
+        timeout = getattr(ollama_config, 'timeout', 120)
+        request_delay = getattr(ollama_config, 'request_delay', 0.0)
+        model = getattr(ollama_config, 'model', 'unknown')
+        
+        startup_msg = (
+            f"Ollama Config: timeout={timeout}s, request_delay={request_delay}s, model={model}\n"
+            f"Ready for queries."
+        )
+        self.response_panel.add_response("System", startup_msg)
     
     def _setup_ui(self):
         """Setup the main UI layout."""

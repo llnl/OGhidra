@@ -18,10 +18,14 @@ version = "1.0"
 ext.ghidraVersion = "11.3.2"
 
 // Java version matching Ghidra 11.3.2
-sourceCompatibility = 21
-targetCompatibility = 21
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(25)
+    }
+}
+// sourceCompatibility = 21
+// targetCompatibility = 21
 
 repositories {
     mavenCentral()
 }
-
