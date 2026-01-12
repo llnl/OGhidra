@@ -727,6 +727,29 @@ graph TD
 
 This architecture prevents AI hallucination and ensures reliable tool execution.
 
+### Agentic Orchestration Improvements
+
+OGhidra's AI investigation loop includes efficiency enhancements:
+
+| Feature | Description |
+|---------|-------------|
+| **Tool Batching** | Groups related commands into single turns, reducing round-trips |
+| **Capability-First Mapping** | High-level discovery before deep analysis |
+| **Anti-Looping** | Duplicate tool calls blocked; cached results served |
+| **Completed Steps Tracking** | Prevents repetition via dynamic injection |
+
+### Knowledge Artifacts (Experimental)
+
+The AI can persist findings across steps using text-based artifacts:
+
+```
+ARTIFACT: [network] C2_IP = 192.168.1.50
+ARTIFACT: [crypto] AES_KEY = 0xDEADBEEF
+ARTIFACT: [function] Decryptor = 0x180045000
+```
+
+Artifacts are automatically parsed, stored in session memory, and displayed in future prompts.
+
 ---
 
 ## Troubleshooting

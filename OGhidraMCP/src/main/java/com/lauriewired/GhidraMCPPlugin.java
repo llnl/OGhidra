@@ -257,7 +257,10 @@ public class GhidraMCPPlugin extends Plugin {
         });
 
         server.createContext("/list_functions", exchange -> {
-            sendResponse(exchange, listFunctions());
+            Map<String, String> qparams = parseQueryParams(exchange);
+            int offset = parseIntOrDefault(qparams.get("offset"), 0);
+            int limit = parseIntOrDefault(qparams.get("limit"), 100);
+            sendResponse(exchange, listFunctions(offset, limit));
         });
 
         server.createContext("/decompile_function", exchange -> {
@@ -882,19 +885,19 @@ public class GhidraMCPPlugin extends Plugin {
     /**
      * List all functions in the database
      */
-    private String listFunctions() {
+    private String listFunctions(int offset, int limit) {
         Program program = getCurrentProgram();
         if (program == null)
             return "No program loaded";
 
-        StringBuilder result = new StringBuilder();
+        List<String> functions = new ArrayList<>();
         for (Function func : program.getFunctionManager().getFunctions(true)) {
-            result.append(String.format("%s at %s\n",
+            functions.add(String.format("%s at %s",
                     func.getName(),
                     func.getEntryPoint()));
         }
-
-        return result.toString();
+        
+        return paginateList(functions, offset, limit);
     }
 
     /**

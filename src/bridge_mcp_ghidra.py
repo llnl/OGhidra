@@ -169,11 +169,15 @@ def get_current_function() -> str:
     return "\n".join(safe_get("get_current_function"))
 
 @mcp.tool()
-def list_functions() -> list:
+def list_functions(offset: int = 0, limit: int = 100) -> list:
     """
-    List all functions in the database.
+    List all functions in the database with pagination.
+    
+    Args:
+        offset: Offset to start from (default: 0)
+        limit: Maximum number of results (default: 100)
     """
-    return safe_get("list_functions")
+    return safe_get("list_functions", {"offset": offset, "limit": limit})
 
 @mcp.tool()
 def decompile_function_by_address(address: str) -> str:

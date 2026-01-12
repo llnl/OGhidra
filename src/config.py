@@ -220,10 +220,19 @@ class OllamaConfig(BaseModel):
             "type": "function",
             "function": {
                 "name": "list_functions",
-                "description": "List all functions in the database",
+                "description": "List all functions in the database with pagination. Returns function names and addresses. Use offset and limit to navigate through results. Returns pagination metadata showing total count and next page info.",
                 "parameters": {
                     "type": "object",
-                    "properties": {}
+                    "properties": {
+                        "offset": {
+                            "type": "integer",
+                            "description": "Offset to start from (default: 0)"
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Maximum number of results (default: 100, recommended: 50-100)"
+                        }
+                    }
                 }
             }
         },
@@ -441,118 +450,65 @@ class OllamaConfig(BaseModel):
         }
     ])
     
-    # Best practices for function calls
-    FUNCTION_CALL_BEST_PRACTICES: ClassVar[str] = """# COMMON ERRORS TO AVOID:
-# - DO use snake_case for function names and parameter names (e.g., decompile_function, old_name).
-# - Parameter 'address' for tools like decompile_function_by_address, rename_function_by_address, and disassemble_function refers to the numerical memory address.
-# - DO NOT use the "FUN_" prefix when providing an address to tools expecting a numerical address (e.g., use address="14024DA90", not address="FUN_14024DA90").
-# - DO NOT use "0x" prefix when providing an address (e.g., use address="14024DA90", not address="0x14024DA90").
-# - DO ensure a function exists (e.g., via search_functions_by_name or get_current_function) before trying to decompile or rename it by name.
-# - For decompile_function (by name), use the full function name (e.g., name="FUN_14024DA90", or name="main").
-# - For decompile_function_by_address and disassemble_function, use the numerical address (e.g., address="14024DA90").
-# - Be precise with tool selection: decompile_function is for names, decompile_function_by_address and disassemble_function are for numerical addresses.
-# - Use get_xrefs_to / get_function_xrefs to find what functions reference the current one; use get_xrefs_from to see which functions it calls.
-
-# DATA VS CODE ADDRESSES:
-# - read_bytes() is for reading raw memory at ANY address (data, strings, tables, etc.).
-# - disassemble_function() and decompile_function_by_address() are ONLY for CODE addresses (functions).
-# - If you want to inspect data/strings/tables, use read_bytes(), NOT disassemble or decompile.
-# - If a read_bytes result shows readable ASCII text, that is often sufficient - no need to disassemble it.
-
-# DUPLICATE TOOL CALLS:
-# - If a tool call shows "[Already executed in step_L{loop}_{step}]", do NOT re-call that tool.
-# - The step ID format is step_L{loop}_{step} (e.g., step_L1_5 = Loop 1, Step 5).
-# - Use get_cached_result(result_id="step_L1_5") to retrieve the full result from that step.
-# - The result excerpt provided in the skip message often contains the key information you need.
-"""
-    
-    # System prompt for each phase
+    # System prompts for different model phases
     planning_system_prompt: str = """
-    You are a Planning Assistant for Ghidra reverse engineering tasks.
-    USER GOAL: **{user_task_description}**
-    Your task is to create a plan using the available Ghidra tools. Carefully consider the user's query and select the most appropriate tools to achieve their goal.
-
-    ⚠️  Avoid unnecessary enumeration:
-    • Do NOT start every plan with `list_functions()` or other broad listings unless the user explicitly asks for them or you truly need a complete catalogue.
-    • Prefer targeted calls (e.g., `get_current_function`, `get_xrefs_to`, `decompile_function_by_address`) that directly advance the user’s request.
-
-    Always ask yourself: "Will this tool materially help answer the user's question?" before including it in the plan.
-
-    Available tools are listed in the "Available Tools" section above. Use those exact tool names and parameter conventions.
-
-    RECOMMENDED WORKFLOWS:
-    * For tasks based on a function's behavior (e.g., "rename this function based on what it does"):
-      Your plan should have three distinct steps in this order:
-      1. `get_current_function()`: To identify the target function.
-      2. `analyze_function()`: To understand its behavior. (You can leave params empty to analyze the current function).
-      3. `rename_function(old_name="...", new_name="...")`: To perform the final action with the correct names.
-
-    * Investigating an interesting string:
-      1. `list_strings(filter="<substring>")`  # locate the string addresses
-      2. `get_xrefs_to(address="<addr>")`      # see where the string is referenced
-      3. `decompile_function_by_address(address="<addr>")`  # inspect referencing code
-      4. `analyze_function()`  # summarise findings
-
-    OUTPUT FORMAT:
-    PLAN:
-    TOOL: <tool_name> PARAMS: <param1>="<value1>", <param2>=<value2>
-
-    RULES:
-    1. Start with "PLAN:"
-    2. Each tool call must be on a new line starting with "TOOL: "
-    3. Use exact tool names and parameter names as listed above.
-    4. String values for parameters must be enclosed in double quotes.
-    5. Numerical values for parameters should not be quoted.
-    6. If a tool takes no parameters (e.g., list_functions), use " PARAMS: " with nothing after it.
-
-    ⚠️  Avoid unnecessary enumeration:
-    • Do NOT start every plan with `list_functions()` or other broad listings unless the user explicitly asks for them or you truly need a complete catalogue.
-    • Prefer targeted calls (e.g., `get_current_function`, `get_xrefs_to`, `decompile_function_by_address`) that directly advance the user’s request.
-
-    EXAMPLES:
-    PLAN:
-    TOOL: list_functions PARAMS: 
-    TOOL: list_methods PARAMS: offset=0, limit=50
-    TOOL: decompile_function PARAMS: name="main"
-    TOOL: decompile_function_by_address PARAMS: address="14001050"
-    TOOL: list_imports PARAMS: offset=0, limit=50
-    TOOL: search_functions_by_name PARAMS: query="init", offset=0, limit=10
-    TOOL: analyze_function PARAMS: address="14001050"
-
-    IMPORTANT: Only create the plan. Do not generate explanatory text before "PLAN:" or after the tool calls. Focus solely on constructing the tool execution sequence.
-    If the user asks for something not directly supported by a tool (e.g., "find all calls to function X"), plan steps that would help gather relevant information (e.g., decompile related functions, search for function names that might handle strings). Do NOT invent tools.
+    You are an expert Reverse Engineering Planning Agent.
+    Your goal is to create a logical, step-by-step plan to investigate a binary using Ghidra.
+    
+    CRITICAL INSTRUCTION:
+    - If you discover specific constants, keys, or IPs, output them as ARTIFACTS (see below).
+    - Always batch discovery tools (list_imports, list_exports) in the first step.
     """
     
-    execution_system_prompt: str = f"""
+    execution_system_prompt: str = """
     You are a Tool Execution Assistant for Ghidra reverse engineering tasks.
-    Your primary goal is to solve the user's task: **{{user_task_description}}**
+    Your primary goal is to solve the user's task.
     
-    Your task is to select and execute EXACTLY ONE tool at a time to make progress toward the goal.
-
+    ⚡ KNOWLEDGE MANAGEMENT:
+    When you find a hardcoded string, encryption key, IP address, or important function address,
+    output it on a separate line in this format:
+    
+    ARTIFACT: [category] key = value
+    
+    Examples:
+    ARTIFACT: [network] C2_IP = 192.168.1.50
+    ARTIFACT: [crypto] AES_KEY = 0xDEADBEEF
+    ARTIFACT: [function] Decryptor = 0x180045000
+    
+    This saves the fact permanently (it will appear in "KNOWN ARTIFACTS" in future steps).
+    
+    ⚡ BATCHING & EFFICIENCY:
+    - EXECUTE MULTIPLE TOOLS IN ONE RESPONSE.
+    - Batch: list_imports, list_exports, list_strings.
+    
     PROGRESSIVE EXECUTION PATTERN:
-    1. Information gathering (get_current_function, analyze_function)
-    2. Action execution (rename_function, decompile_function, etc.)
-    3. Goal completion (GOAL ACHIEVED)
+    1. **Capability Mapping**: (list_imports, list_segments) - Understand potential behavior.
+    2. **Target Acquisition**: (list_strings filter="...", get_xrefs_to) - Find interesting entry points.
+    3. **Deep Analysis**: (decompile_function, analyze_function) - Verify logic.
+    4. **Action**: (rename_function) - Document findings.
+    5. **Goal Completion**: (GOAL ACHIEVED)
     
     CRITICAL GUIDANCE:
-    - Do NOT default to `list_functions()` unless specifically needed
-    - When renaming: ALWAYS use the function name from the most recent get_current_function() output
-    - NEVER rename a function to the SAME NAME (e.g., processData -> processData is useless)
-    - Choose DIFFERENT, more descriptive names based on the function's actual purpose
-    - If you receive an ERROR about duplicate commands, pick a *different* tool or change parameters
+    - **Capability First**: Don't assume malware; prove functionality.
+    - **Batch Read-Only**: ALWAYS batch `list_*` and `get_*` calls together.
+    - **Naming**: NEVER rename a function to the SAME NAME.
+    - **Duplicates**: If a tool was just run, use `get_cached_result` or move to the next step.
 
-    HANDLING CACHED/SKIPPED RESULTS:
-    - If a tool result shows "[Already executed in step_L<loop>_<step>]", the result is ALREADY AVAILABLE.
-    - The step ID format is step_L<loop>_<step> (e.g., step_L1_5 = Loop 1, Step 5).
-    - The excerpt in the skip message contains key info. Use it directly - do NOT re-call the tool.
-    - If you need the full result, use get_cached_result(result_id="step_L1_5") to retrieve it.
-    - Never call the same tool with identical parameters twice in a session.
-    
     COMPLETION:
     - If the goal is met or no suitable tool exists, output "GOAL ACHIEVED"
-    - Otherwise, execute the next appropriate tool using the format shown in "Available Tools" section above
+    - Otherwise, execute the next appropriate tool(s).
 
     {{FUNCTION_CALL_BEST_PRACTICES}}
+"""
+    
+    # Best practices for function calls
+    FUNCTION_CALL_BEST_PRACTICES: ClassVar[str] = """# COMMON ERRORS TO AVOID:
+# - DO use snake_case for function names.
+# - DO batch read-only commands (list_*, get_*) together in a single response.
+# - Parameter 'address' for tools like decompile_function_by_address refers to the numerical memory address.
+# - DO NOT use the "FUN_" prefix for numerical addresses.
+# - DO NOT use the "0x" prefix for numerical addresses.
+# - DUPLICATE TOOL CALLS: Use get_cached_result(result_id=...) if a result is already available.
 """
     
     evaluation_system_prompt: str = """

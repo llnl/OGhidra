@@ -404,14 +404,18 @@ class GhidraMCPClient:
         result = self.safe_get("get_current_function")
         return "\n".join(result)
     
-    def list_functions(self) -> List[str]:
+    def list_functions(self, offset: int = 0, limit: int = 100) -> List[str]:
         """
-        List all functions in the database.
+        List all functions in the database with pagination.
+        
+        Args:
+            offset: Offset to start from (default: 0)
+            limit: Maximum number of results (default: 100)
         
         Returns:
-            List of functions
+            List of functions with pagination metadata
         """
-        return self.safe_get("list_functions")
+        return self.safe_get("list_functions", {"offset": offset, "limit": limit})
     
     def decompile_function_by_address(self, address: str) -> str:
         """

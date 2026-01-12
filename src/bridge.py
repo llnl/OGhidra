@@ -245,23 +245,39 @@ class Bridge:
             content: The update content to display
             also_print: Whether to also print to terminal (default True)
         """
-        # Print to terminal if requested
         if also_print:
             if update_type.upper() == 'REASONING':
-                print(f"\n{content}\n")
-            elif update_type.upper() == 'CYCLE':
-                print(f"\n{'='*70}")
-                print(content)
-                print(f"{'='*70}")
+                pass # Don't double print reasoning as it's often long
             else:
-                print(content)
+                print(f"[{update_type}] {content}")
+                
+        # Send to UI callback if registered
+        if self._ui_cot_callback:
+            self._ui_cot_callback(update_type, content)
+
+    def _parse_and_save_artifacts(self, response: str):
+        """
+        Parse text-based artifacts from LLM response.
+        Format: ARTIFACT: [category] key = value
+        """
+        import re
+        # Regex to capture: ARTIFACT: [cat] key = value
+        # Tolerates missing brackets or whitespace variations
+        pattern = r"ARTIFACT:\s*(?:\[(\w+)\])?\s*([^=]+)\s*=\s*(.+)"
         
-        # Send to UI callback if available
-        if hasattr(self, '_ui_cot_callback') and self._ui_cot_callback is not None:
-            try:
-                self._ui_cot_callback(update_type, content)
-            except Exception as e:
-                self.logger.debug(f"Could not emit CoT to UI: {e}")
+        matches = re.finditer(pattern, response, re.IGNORECASE)
+        count = 0
+        for match in matches:
+            category = match.group(1) or "general"
+            key = match.group(2).strip()
+            value = match.group(3).strip()
+            
+            self.session.add_knowledge(key, value, category)
+            self.logger.info(f"💾 Parsed Artifact: [{category}] {key} = {value}")
+            count += 1
+            
+        if count > 0:
+            self._emit_cot("Memory", f"Saved {count} knowledge artifacts")
     
     def _load_capabilities_text(self) -> Optional[str]:
         """Load the capabilities text from the file if the flag is set."""
@@ -438,6 +454,42 @@ You can help analyze binary files by executing commands through GhidraMCP."""
         
         # Generate user prompt with conversation history ALWAYS at the end
         user_prompt = structured_prompt.build_user_prompt(max_history_items=self.config.context_limit)
+
+        # --- INJECT KNOWLEDGE ARTIFACTS ---
+        knowledge_summary = self.session.get_knowledge_summary()
+        if knowledge_summary:
+            user_prompt = knowledge_summary + "\n\n" + user_prompt
+        # ----------------------------------
+        
+        # --- INJECT COMPLETED STEPS SUMMARY ---
+        # Get all unique executed tools from session for this goal
+        executed_tools = self.session.get_all_tool_executions() 
+        if executed_tools:
+            # Create a compact summary of what has been done
+            completed_summary = ["\n## COMPLETED STEPS (DO NOT REPEAT):"]
+            
+            # Group by tool name for cleaner display
+            tools_by_name = {}
+            for tool in executed_tools:
+                name = tool.tool_name
+                # Skip pagination tools from the summary to avoid clutter
+                if name in ["list_functions", "list_imports", "list_exports", "list_strings"]:
+                    params_str = f"offset={tool.parameters.get('offset', '?')}"
+                else:
+                    # Format parameters compactly
+                    params_str = ", ".join([f"{k}={v}" for k,v in tool.parameters.items()])
+                
+                if name not in tools_by_name:
+                    tools_by_name[name] = []
+                tools_by_name[name].append(params_str)
+            
+            for name, params_list in tools_by_name.items():
+                # Limit to last 3 calls per tool to save context
+                params_display = "; ".join(params_list[-3:] if len(params_list) > 3 else params_list)
+                completed_summary.append(f"- {name}: {params_display}")
+                
+            user_prompt += "\n".join(completed_summary) + "\n"
+        # -------------------------------------
         
         return (system_prompt, user_prompt)
     
@@ -1322,6 +1374,10 @@ You can help analyze binary files by executing commands through GhidraMCP."""
             # Generate execution step with properly separated prompts
             response = self.ollama.generate_with_phase(user_prompt, phase="execution", system_prompt=system_prompt)
             logging.info(f"Received response from Ollama: {response[:100]}...")
+            
+            # --- PARSE ARTIFACTS (Text-Based) ---
+            self._parse_and_save_artifacts(response)
+            # ------------------------------------
             
             # Extract commands to execute
             commands = self.command_parser.extract_commands(response)

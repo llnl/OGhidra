@@ -218,11 +218,8 @@ class CommandParser:
         # Make a copy to avoid modifying the original
         validated_params = params.copy()
         
-        # Special handling for list_functions - it takes no parameters
-        if command_name == "list_functions":
-            if params:  # If any parameters were provided
-                logger.warning(f"list_functions() takes no parameters, but received: {params}. Parameters will be ignored.")
-                return {}  # Return empty dict for no parameters
+        # list_functions now supports pagination parameters (offset, limit)
+        # No special handling needed - parameters are accepted
         
         # Map alias commands to canonical ones and normalise parameters
         alias_mapping = {

@@ -312,59 +312,70 @@ class ExecutionPhaseResults(BaseModel):
         tool_counts = {}
         for exec_result in self.tool_executions:
             tool_counts[exec_result.tool_name] = tool_counts.get(exec_result.tool_name, 0) + 1
-        
+
         summary_lines = [
             f"Total steps executed: {self.total_steps}",
             f"Tools used: {', '.join([f'{tool}({count}x)' for tool, count in tool_counts.items()])}"
         ]
-        
         return "\n".join(summary_lines)
 
 
+class KnowledgeArtifact(BaseModel):
+    """A saved knowledge artifact ("sticky note") for the session."""
+    key: str
+    value: str
+    category: str = "general"
+    tags: List[str] = Field(default_factory=list)
+    timestamp: datetime = Field(default_factory=datetime.now)
+
+    def format_for_prompt(self) -> str:
+        """Format artifact for prompt injection."""
+        return f"- [{self.category}] {self.key}: {self.value}"
+
+
 class SessionMemory(BaseModel):
-    """
-    Complete session memory with structured storage.
-    
-    This replaces the ad-hoc dictionary-based context management.
-    """
-    session_id: str
-    started_at: datetime = Field(default_factory=datetime.now)
-    last_updated: datetime = Field(default_factory=datetime.now)
-    
-    # Structured storage
+    """Complete session memory including conversation and state."""
     messages: List[ConversationMessage] = Field(default_factory=list)
     tool_executions: List[ToolExecution] = Field(default_factory=list)
     analysis_state: AnalysisState = Field(default_factory=AnalysisState)
+    start_time: datetime = Field(default_factory=datetime.now)
+    knowledge_base: List[KnowledgeArtifact] = Field(default_factory=list)  # New Knowledge Base
     
-    # Metadata
-    total_tokens_used: int = 0
-    total_tool_calls: int = 0
-    
-    def add_message(self, role: MessageRole, content: str, metadata: Optional[Dict] = None):
+    def add_message(self, role: MessageRole, content: str, metadata: Dict[str, Any] = None):
         """Add a message to the conversation history."""
-        msg = ConversationMessage(
+        self.messages.append(ConversationMessage(
             role=role,
             content=content,
             metadata=metadata or {}
-        )
-        self.messages.append(msg)
-        self.last_updated = datetime.now()
+        ))
     
-    def add_tool_execution(self, tool_name: str, parameters: Dict[str, Any], 
-                          result: Optional[str] = None, success: bool = True,
-                          error: Optional[str] = None, reasoning: Optional[str] = None):
+    def add_tool_execution(self, tool_name: str, parameters: Dict[str, Any], result: str, success: bool, reasoning: str = None):
         """Record a tool execution."""
-        execution = ToolExecution(
+        self.tool_executions.append(ToolExecution(
             tool_name=tool_name,
             parameters=parameters,
             result=result,
             success=success,
-            error=error,
             reasoning=reasoning
-        )
-        self.tool_executions.append(execution)
-        self.total_tool_calls += 1
-        self.last_updated = datetime.now()
+        ))
+        
+    def add_knowledge(self, key: str, value: str, category: str = "general", tags: List[str] = None):
+        """Add a persistent knowledge artifact."""
+        self.knowledge_base.append(KnowledgeArtifact(
+            key=key,
+            value=value,
+            category=category,
+            tags=tags or []
+        ))
+
+    def get_knowledge_summary(self) -> str:
+        """Get formatted summary of all knowledge artifacts."""
+        if not self.knowledge_base:
+            return ""
+        
+        section = "## 🧠 KNOWN KNOWLEDGE ARTIFACTS\n"
+        items = [k.format_for_prompt() for k in self.knowledge_base]
+        return section + "\n".join(items)
     
     def get_recent_messages(self, limit: int = 10, 
                            role_filter: Optional[List[MessageRole]] = None) -> List[ConversationMessage]:
@@ -377,6 +388,11 @@ class SessionMemory(BaseModel):
     def get_recent_tool_executions(self, limit: int = 5) -> List[ToolExecution]:
         """Get recent tool executions."""
         return self.tool_executions[-limit:]
+    
+    def get_all_tool_executions(self) -> List[ToolExecution]:
+        """Get all tool executions in the session."""
+        return self.tool_executions
+
     
     def build_structured_prompt(self, goal: str, current_plan: Optional[str] = None,
                                 cag_context: Optional[CAGContext] = None,
