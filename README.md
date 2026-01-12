@@ -21,6 +21,7 @@ OGhidra combines the power of local LLMs with Ghidra's reverse engineering capab
 - **Multi-Instance Analysis** - Run multiple Ghidra instances simultaneously, analyzing different binaries in parallel
 - **Work with modern GUI or CLI** - Choose the interface that suits your workflow
 
+
 ```mermaid
 graph TD
     A[Query] --> B[Planning Phase]
