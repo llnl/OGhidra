@@ -5217,12 +5217,12 @@ class OGhidraUI:
             if dialog.result:
                 # Configuration was saved successfully
                 # Update the clients with new configuration
-                self.bridge.ollama.base_url = str(self.config.ollama.base_url)
+                self.bridge.ollama.base_url = str(self.config.ollama.base_url).rstrip('/')
                 self.bridge.ollama.default_model = self.config.ollama.model
                 
                 # Update Ghidra client configuration
                 if hasattr(self.bridge, 'ghidra_client') and self.bridge.ghidra_client:
-                    self.bridge.ghidra_client.config.base_url = self.config.ghidra.base_url
+                    self.bridge.ghidra_client.config.base_url = str(self.config.ghidra.base_url).rstrip('/')
                 
                 messagebox.showinfo("Configuration Updated", 
                                   "Server configuration has been updated.\n\n"
