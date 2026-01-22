@@ -298,8 +298,26 @@ class ContextManager:
                  execution_fraction: float = 0.5,
                  enable_summarization: bool = True,
                  enable_caching: bool = True,
-                 enable_tiered_context: bool = True):
+                 enable_tiered_context: bool = True,
+                 max_detailed_steps: int = 10,
+                 current_loop_max_chars: int = 4000,
+                 prev_loop_max_chars: int = 800,
+                 older_loop_max_chars: int = 200):
+        """
+        Initialize the ContextManager with configurable limits.
         
+        Args:
+            ollama_client: LLM client for summarization
+            context_budget: Total context budget in tokens
+            execution_fraction: Fraction of budget for execution results
+            enable_summarization: Use LLM-based summarization
+            enable_caching: Enable result caching
+            enable_tiered_context: Enable tiered context compression
+            max_detailed_steps: Sliding window size (recent steps with full detail)
+            current_loop_max_chars: Max chars for current loop results
+            prev_loop_max_chars: Max chars for previous loop bullet summaries
+            older_loop_max_chars: Max chars for older loop one-line refs
+        """
         self.ollama_client = ollama_client
         self.enable_summarization = enable_summarization
         self.enable_caching = enable_caching
@@ -313,8 +331,20 @@ class ContextManager:
         self.recent_results: List[CachedResult] = []
         self.max_recent_detailed = 3  # Last 3 get full detail
         
-        logger.info(f"ContextManager initialized with budget={context_budget}, "
-                   f"summarization={enable_summarization}, caching={enable_caching}")
+        # Tiered context limits based on loop age (chars) - all from config
+        self.CURRENT_LOOP_MAX_CHARS = current_loop_max_chars
+        self.PREV_LOOP_MAX_CHARS = prev_loop_max_chars
+        self.OLDER_LOOP_CHARS = older_loop_max_chars
+        
+        # Sliding window settings - from config
+        self.MAX_DETAILED_STEPS = max_detailed_steps
+        
+        # Track current loop for tiered context
+        self.current_loop = 1
+        
+        logger.info(f"ContextManager initialized: budget={context_budget}, "
+                   f"sliding_window={max_detailed_steps}, "
+                   f"tiered_chars=[{current_loop_max_chars}/{prev_loop_max_chars}/{older_loop_max_chars}]")
     
     def process_result(self, tool_name: str, parameters: Dict[str, Any], 
                        result: str, goal: str = "") -> Tuple[str, CachedResult]:
@@ -583,5 +613,506 @@ Summary:"""
         return (f"Context Manager Status:\n"
                 f"  {self.budget.get_usage_summary()}\n"
                 f"  Cached results: {len(self.result_cache.cache) if self.result_cache else 0}\n"
-                f"  Recent results: {len(self.recent_results)}")
+                f"  Recent results: {len(self.recent_results)}\n"
+                f"  Current loop: {self.current_loop}")
+    
+    def set_current_loop(self, loop_number: int) -> None:
+        """Set the current loop number for tiered context."""
+        self.current_loop = loop_number
+        logger.debug(f"ContextManager: Current loop set to {loop_number}")
+    
+    def get_tiered_display_content(self, 
+                                    result: str, 
+                                    result_loop: int,
+                                    tool_name: str,
+                                    step_id: str = None) -> str:
+        """
+        Get appropriately summarized content based on loop age.
+        
+        Tiering strategy:
+        - Current loop: Full details (limited to CURRENT_LOOP_MAX_CHARS)
+        - Previous loop: Bullet-point summaries (PREV_LOOP_MAX_CHARS)
+        - Older loops: One-line references with get_cached_result hint
+        
+        Args:
+            result: The full result text
+            result_loop: Which loop this result came from
+            tool_name: Name of the tool (for smart truncation)
+            step_id: Optional step ID for cache references
+            
+        Returns:
+            Appropriately compressed content string
+        """
+        if not self.enable_tiered_context:
+            return self._smart_truncate(result, self.CURRENT_LOOP_MAX_CHARS, tool_name)
+        
+        loop_age = self.current_loop - result_loop
+        
+        if loop_age <= 0:
+            # Current loop: full details with character limit
+            if len(result) <= self.CURRENT_LOOP_MAX_CHARS:
+                return result
+            return self._smart_truncate(result, self.CURRENT_LOOP_MAX_CHARS, tool_name)
+        
+        elif loop_age == 1:
+            # Previous loop: bullet-point summary
+            return self._create_bullet_summary(result, tool_name, self.PREV_LOOP_MAX_CHARS)
+        
+        else:
+            # Older loops: one-line reference
+            if step_id:
+                return f"[{tool_name}] {len(result):,} chars - use get_cached_result(\"{step_id}\") for details"
+            else:
+                # Extract first meaningful line as hint
+                first_line = result.split('\n')[0][:self.OLDER_LOOP_CHARS]
+                return f"[{tool_name}] {first_line}... ({len(result):,} chars)"
+    
+    def _create_bullet_summary(self, result: str, tool_name: str, max_chars: int) -> str:
+        """
+        Create a bullet-point summary of a result.
+        
+        Extracts key information like:
+        - Function names and addresses
+        - Error messages
+        - Important patterns
+        """
+        lines = result.split('\n')
+        bullets = []
+        char_count = 0
+        
+        # Priority patterns to include
+        priority_patterns = [
+            'function', 'error', 'fail', 'success', 'found', 
+            'address', '0x', 'call', 'return', 'import', 'export'
+        ]
+        
+        for line in lines:
+            line = line.strip()
+            if not line or len(line) < 5:
+                continue
+            
+            # Check if line contains priority content
+            line_lower = line.lower()
+            is_priority = any(p in line_lower for p in priority_patterns)
+            
+            if is_priority or len(bullets) < 3:  # Always include first 3 non-empty lines
+                # Truncate long lines
+                if len(line) > 80:
+                    line = line[:77] + "..."
+                
+                bullet = f"• {line}"
+                
+                if char_count + len(bullet) + 1 > max_chars:
+                    break
+                
+                bullets.append(bullet)
+                char_count += len(bullet) + 1
+        
+        if not bullets:
+            # Fallback: just truncate
+            return self._smart_truncate(result, max_chars, tool_name)
+        
+        summary = '\n'.join(bullets)
+        remaining = len(lines) - len(bullets)
+        if remaining > 0:
+            summary += f"\n  ...({remaining} more lines)"
+        
+        return summary
+    
+    def format_results_with_sliding_window(self, 
+                                            tool_executions: List[Any],
+                                            current_loop: int,
+                                            goal: str = "") -> str:
+        """
+        Format results with sliding window: recent steps get full detail,
+        older steps get compressed.
+        
+        Args:
+            tool_executions: List of tool execution results
+            current_loop: Current loop number
+            goal: Investigation goal (for relevance scoring)
+            
+        Returns:
+            Formatted string suitable for prompt inclusion
+        """
+        if not tool_executions:
+            return "No tool executions recorded."
+        
+        self.set_current_loop(current_loop)
+        sections = []
+        total = len(tool_executions)
+        
+        for i, tool_exec in enumerate(tool_executions, 1):
+            # Determine if this is a recent step (within sliding window)
+            is_recent = i > total - self.MAX_DETAILED_STEPS
+            
+            # Get tool info
+            tool_name = getattr(tool_exec, 'tool_name', str(tool_exec))
+            parameters = getattr(tool_exec, 'parameters', {})
+            result = str(getattr(tool_exec, 'result', str(tool_exec)))
+            result_loop = getattr(tool_exec, 'loop_number', current_loop)
+            step_id = f"step_L{result_loop}_{i}"
+            
+            if is_recent:
+                # Recent steps: use tiered context based on loop age
+                display_content = self.get_tiered_display_content(
+                    result, result_loop, tool_name, step_id
+                )
+                
+                section = f"\n### {step_id}: {tool_name}\n"
+                param_str = ", ".join([f'{k}="{v}"' for k, v in parameters.items()])
+                section += f"Parameters: {param_str}\n"
+                section += f"Result:\n{display_content}\n"
+            else:
+                # Older steps: compressed summary with cache hint
+                section = f"\n• {step_id}: {tool_name} - "
+                if len(result) > 100:
+                    section += f"{len(result):,} chars [use get_cached_result(\"{step_id}\")]"
+                else:
+                    section += result[:100]
+            
+            sections.append(section)
+            
+            # Track budget usage
+            self.budget.add_usage('execution', section)
+        
+        return ''.join(sections)
+
+
+class RelevanceRanker:
+    """
+    Rank tool execution results by relevance to user goal.
+    
+    Uses a scoring system based on:
+    - Goal term matches in result text
+    - Tool type priority (decompilation > analysis > lists)
+    - Error/success indicators
+    """
+    
+    # Map tool names to categories for grouping
+    CATEGORY_MAP = {
+        'decompile_function': 'decompilation',
+        'decompile_function_by_address': 'decompilation',
+        'disassemble_function': 'disassembly',
+        'analyze_function': 'analysis',
+        'list_functions': 'functions',
+        'list_methods': 'functions',
+        'search_functions_by_name': 'functions',
+        'list_strings': 'strings',
+        'list_imports': 'imports',
+        'list_exports': 'exports',
+        'get_xrefs_to': 'xrefs',
+        'get_xrefs_from': 'xrefs',
+        'get_function_xrefs': 'xrefs',
+        'read_bytes': 'raw_bytes',
+        'list_segments': 'segments',
+        'rename_function': 'modifications',
+        'rename_function_by_address': 'modifications',
+        'get_cached_result': 'cache',
+    }
+    
+    # Priority scores by category (higher = more important)
+    CATEGORY_PRIORITY = {
+        'decompilation': 10,
+        'analysis': 9,
+        'xrefs': 7,
+        'disassembly': 6,
+        'strings': 5,
+        'imports': 5,
+        'exports': 4,
+        'functions': 3,
+        'raw_bytes': 3,
+        'segments': 2,
+        'modifications': 1,
+        'cache': 0,
+        'other': 2,
+    }
+    
+    def __init__(self, top_n_per_category: int = 10):
+        self.top_n = top_n_per_category
+        self.logger = logging.getLogger("ollama-ghidra-bridge.ranker")
+    
+    def rank_results(self, tool_executions: List[Any], goal: str) -> Dict[str, List[Any]]:
+        """
+        Rank and group tool execution results by category.
+        
+        Args:
+            tool_executions: List of ToolExecution objects
+            goal: User's investigation goal
+            
+        Returns:
+            Dict mapping category -> list of (score, tool_exec) tuples, sorted by score
+        """
+        goal_tokens = self._tokenize(goal)
+        
+        # Score and categorize all results
+        categorized: Dict[str, List[Tuple[float, Any]]] = {}
+        
+        for tool_exec in tool_executions:
+            tool_name = getattr(tool_exec, 'tool_name', str(tool_exec))
+            result_text = str(getattr(tool_exec, 'result', ''))
+            
+            # Determine category
+            category = self.CATEGORY_MAP.get(tool_name, 'other')
+            
+            # Score the result
+            score = self._score_result(tool_name, result_text, goal_tokens)
+            
+            if category not in categorized:
+                categorized[category] = []
+            categorized[category].append((score, tool_exec))
+        
+        # Sort each category by score (descending) and take top N
+        ranked: Dict[str, List[Any]] = {}
+        for category, items in categorized.items():
+            sorted_items = sorted(items, key=lambda x: x[0], reverse=True)
+            ranked[category] = [item[1] for item in sorted_items[:self.top_n]]
+        
+        self.logger.debug(f"Ranked results: {[(cat, len(items)) for cat, items in ranked.items()]}")
+        return ranked
+    
+    def _tokenize(self, text: str) -> set:
+        """Extract meaningful tokens from text."""
+        # Simple tokenization: lowercase, split on non-alphanumeric, filter short tokens
+        import re
+        tokens = re.findall(r'\b[a-zA-Z0-9_]{3,}\b', text.lower())
+        return set(tokens)
+    
+    def _score_result(self, tool_name: str, result_text: str, goal_tokens: set) -> float:
+        """
+        Score a single result based on relevance.
+        
+        Scoring factors:
+        - Goal term matches (major factor)
+        - Category priority (minor factor)
+        - Error indicators (penalty)
+        - Result length (slight bonus for substantial content)
+        """
+        score = 0.0
+        
+        # Category priority
+        category = self.CATEGORY_MAP.get(tool_name, 'other')
+        score += self.CATEGORY_PRIORITY.get(category, 2)
+        
+        # Goal term matches
+        result_lower = result_text.lower()
+        matches = sum(1 for token in goal_tokens if token in result_lower)
+        score += matches * 3  # Each match is worth 3 points
+        
+        # Bonus for substantial content (not too short, not too long)
+        result_len = len(result_text)
+        if 100 < result_len < 5000:
+            score += 2
+        elif result_len >= 5000:
+            score += 1  # Still good but may be verbose
+        
+        # Penalty for errors
+        if 'error' in result_lower[:200] or 'failed' in result_lower[:200]:
+            score -= 5
+        
+        # Bonus for key security terms
+        security_terms = ['password', 'token', 'key', 'auth', 'encrypt', 'decrypt', 
+                         'privilege', 'admin', 'root', 'inject', 'shellcode', 'exploit']
+        for term in security_terms:
+            if term in result_lower:
+                score += 2
+        
+        return score
+    
+    def format_ranked_for_prompt(self, ranked_results: Dict[str, List[Any]], 
+                                  max_chars_per_category: int = 3000) -> str:
+        """
+        Format ranked results for inclusion in consolidation prompt.
+        
+        Args:
+            ranked_results: Output from rank_results()
+            max_chars_per_category: Max chars to show per category
+            
+        Returns:
+            Formatted string suitable for prompt
+        """
+        sections = []
+        
+        # Order categories by priority
+        sorted_categories = sorted(
+            ranked_results.keys(),
+            key=lambda c: self.CATEGORY_PRIORITY.get(c, 0),
+            reverse=True
+        )
+        
+        for category in sorted_categories:
+            items = ranked_results[category]
+            if not items:
+                continue
+            
+            section_lines = [f"\n## {category.upper()} ({len(items)} results)"]
+            char_count = 0
+            
+            for tool_exec in items:
+                tool_name = getattr(tool_exec, 'tool_name', str(tool_exec))
+                result = str(getattr(tool_exec, 'result', ''))
+                params = getattr(tool_exec, 'parameters', {})
+                
+                # Truncate if needed
+                remaining = max_chars_per_category - char_count
+                if remaining < 200:
+                    section_lines.append(f"\n... [{len(items) - items.index(tool_exec)} more {category} results]")
+                    break
+                
+                if len(result) > remaining:
+                    result = result[:remaining - 50] + f"\n... [Truncated]"
+                
+                param_str = ", ".join(f'{k}="{v}"' for k, v in params.items())
+                section_lines.append(f"\n### {tool_name}({param_str})")
+                section_lines.append(result)
+                char_count += len(result) + 50
+            
+            sections.append("\n".join(section_lines))
+        
+        return "\n".join(sections)
+
+
+class CorrelationHintBuilder:
+    """
+    Build cross-tool correlation hints by finding addresses mentioned in multiple tool results.
+    
+    This addresses the key concern about missing patterns that require correlating
+    multiple data streams (e.g., matching string addresses with function addresses).
+    """
+    
+    def __init__(self, min_mentions: int = 2):
+        """
+        Args:
+            min_mentions: Minimum number of tool mentions to surface a correlation
+        """
+        self.min_mentions = min_mentions
+        self.logger = logging.getLogger("ollama-ghidra-bridge.correlator")
+        
+        # Patterns for address extraction
+        import re
+        self.address_patterns = [
+            re.compile(r'\b0x([0-9a-fA-F]{6,16})\b'),  # 0x prefix
+            re.compile(r'\b([0-9a-fA-F]{8,16})\b'),     # Raw hex (8+ digits)
+            re.compile(r'FUN_([0-9a-fA-F]{8,16})'),     # Ghidra function format
+        ]
+    
+    def build_hints(self, tool_executions: List[Any]) -> List[Dict[str, Any]]:
+        """
+        Find addresses mentioned across multiple tool results.
+        
+        Args:
+            tool_executions: List of ToolExecution objects
+            
+        Returns:
+            List of correlation hints as dicts:
+            [{"address": "140001234", "mentions": ["strings: '...'", "xref: ..."], "significance": "HIGH"}]
+        """
+        # Map: normalized_address -> list of (tool_name, context_snippet)
+        address_mentions: Dict[str, List[Tuple[str, str]]] = {}
+        
+        for tool_exec in tool_executions:
+            tool_name = getattr(tool_exec, 'tool_name', str(tool_exec))
+            result = str(getattr(tool_exec, 'result', ''))
+            
+            # Extract addresses and their context
+            addresses_found = self._extract_addresses_with_context(result, tool_name)
+            
+            for addr, context in addresses_found:
+                normalized = self._normalize_address(addr)
+                if normalized not in address_mentions:
+                    address_mentions[normalized] = []
+                
+                # Avoid duplicate mentions from same tool
+                if not any(m[0] == tool_name for m in address_mentions[normalized]):
+                    address_mentions[normalized].append((tool_name, context))
+        
+        # Build hints for addresses with multiple mentions
+        hints = []
+        for addr, mentions in address_mentions.items():
+            if len(mentions) >= self.min_mentions:
+                hint = {
+                    "address": f"0x{addr}",
+                    "mentions": [f"{tool}: {ctx}" for tool, ctx in mentions[:5]],
+                    "significance": self._assess_significance(mentions)
+                }
+                hints.append(hint)
+        
+        # Sort by significance
+        significance_order = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
+        hints.sort(key=lambda h: (significance_order.get(h["significance"], 2), -len(h["mentions"])))
+        
+        self.logger.info(f"Built {len(hints)} correlation hints from {len(tool_executions)} tool results")
+        return hints
+    
+    def _extract_addresses_with_context(self, text: str, tool_name: str) -> List[Tuple[str, str]]:
+        """Extract addresses and surrounding context from text."""
+        results = []
+        
+        for pattern in self.address_patterns:
+            for match in pattern.finditer(text):
+                addr = match.group(1) if match.lastindex else match.group(0)
+                
+                # Get context (50 chars before and after)
+                start = max(0, match.start() - 50)
+                end = min(len(text), match.end() + 50)
+                context = text[start:end].replace('\n', ' ').strip()
+                
+                # Truncate long context
+                if len(context) > 80:
+                    context = context[:77] + "..."
+                
+                results.append((addr, context))
+        
+        return results
+    
+    def _normalize_address(self, addr: str) -> str:
+        """Normalize address to lowercase hex without prefix."""
+        addr = addr.lower().replace('0x', '').lstrip('0') or '0'
+        return addr.zfill(8)  # Pad to 8 chars minimum
+    
+    def _assess_significance(self, mentions: List[Tuple[str, str]]) -> str:
+        """Assess the significance of a correlation."""
+        tools = {m[0] for m in mentions}
+        
+        # HIGH: Multiple high-value tool types
+        high_value = {'decompile_function', 'decompile_function_by_address', 
+                     'get_xrefs_to', 'get_xrefs_from', 'analyze_function'}
+        high_matches = len(tools & high_value)
+        
+        if high_matches >= 2:
+            return "HIGH"
+        elif high_matches >= 1 and len(tools) >= 3:
+            return "HIGH"
+        elif len(tools) >= 3:
+            return "MEDIUM"
+        else:
+            return "LOW"
+    
+    def format_for_prompt(self, hints: List[Dict[str, Any]], max_hints: int = 15) -> str:
+        """
+        Format correlation hints for inclusion in consolidation prompt.
+        
+        Args:
+            hints: List of correlation hint dicts
+            max_hints: Maximum hints to include
+            
+        Returns:
+            Formatted string for prompt
+        """
+        if not hints:
+            return ""
+        
+        lines = ["\n## Cross-Tool Correlations"]
+        lines.append("The following addresses appear in multiple tool results, suggesting potential patterns:\n")
+        
+        for i, hint in enumerate(hints[:max_hints]):
+            sig = hint["significance"]
+            addr = hint["address"]
+            mentions = "; ".join(hint["mentions"])
+            lines.append(f"- **[{sig}] {addr}**: {mentions}")
+        
+        if len(hints) > max_hints:
+            lines.append(f"\n... and {len(hints) - max_hints} more correlations")
+        
+        return "\n".join(lines)
 

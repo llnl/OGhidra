@@ -62,7 +62,6 @@ class MemoryHealthCheck:
         result["cag_enabled"] = self.config.cag_enabled
         if self.config.cag_enabled:
             result["cag_knowledge_cache_enabled"] = self.config.cag_knowledge_cache_enabled
-            result["cag_session_cache_enabled"] = self.config.cag_session_cache_enabled
             result["cag_token_limit"] = self.config.cag_token_limit
         
         return result
@@ -245,7 +244,6 @@ class MemoryHealthCheck:
         print(f"  - Enabled: {'Yes ✅' if config.get('cag_enabled', False) else 'No ❌'}")
         if config.get('cag_enabled', False):
             print(f"  - Knowledge cache: {'Enabled ✅' if config.get('cag_knowledge_cache_enabled', False) else 'Disabled ❌'}")
-            print(f"  - Session cache: {'Enabled ✅' if config.get('cag_session_cache_enabled', False) else 'Disabled ❌'}")
             print(f"  - Token limit: {config.get('cag_token_limit', 'Unknown')}")
         
         # Vector embeddings

@@ -10,7 +10,6 @@ import logging
 from typing import Dict, Any, Optional, List, Tuple
 
 from .knowledge_cache import GhidraKnowledgeCache
-from .session_cache import SessionCache
 from .init_dirs import ensure_cag_directories
 from .vector_store import create_vector_store_from_docs
 
@@ -24,21 +23,20 @@ class CAGManager:
     with the Bridge to augment prompts with relevant cached information.
     """
     
-    def __init__(self, config):
+    def __init__(self, config, session=None):
         """
         Initialize the CAG manager.
         
         Args:
             config: Configuration object
+            session: Optional SessionMemory object
         """
         self.config = config
+        self.session = session
         
         # Knowledge base configuration
         self.enable_kb = getattr(config, 'enable_knowledge_base', True)
         self.kb_dir = getattr(config, 'knowledge_base_dir', 'knowledge_base')
-        
-        # Session cache for context-aware generation
-        self.session_cache = SessionCache()
         
         # Memory manager for enhanced context
         self.memory_manager = None
@@ -112,14 +110,14 @@ class CAGManager:
                 total_tokens += knowledge_tokens
                 logger.debug(f"Added knowledge context ({knowledge_tokens} tokens)")
         
-        # Add session cache if enabled
-        if self.session_cache:
+        # Add session context if enabled and session memory is available
+        if self.session:
             # Adjust token limit based on remaining tokens
             session_token_limit = token_limit - total_tokens
             
             if session_token_limit > 200:  # Only if we have enough tokens left
-                pruned_cache = self.session_cache.prune_cache_for_query(query, session_token_limit)
-                session_section = self.session_cache.format_pruned_cache(pruned_cache)
+                pruned_context = self._prune_session_for_query(query, session_token_limit)
+                session_section = self._format_session_context(pruned_context)
                 
                 if session_section:
                     session_tokens = len(session_section) // 4  # Rough approximation
@@ -137,12 +135,12 @@ class CAGManager:
     
     def update_session_from_bridge_context(self, context_history: List[Dict[str, Any]]) -> None:
         """
-        Update the session cache from the Bridge's context history.
+        Update the session context from the Bridge's context history.
         
         Args:
             context_history: List of context items from the Bridge
         """
-        if not self.session_cache:
+        if not self.session:
             return
         
         # Context could be a list of dictionaries or a list
@@ -153,7 +151,7 @@ class CAGManager:
             
         for item in context_history:
             if isinstance(item, dict) and "role" in item and "content" in item:
-                self.session_cache.add_context_item(item["role"], item["content"])
+                self.session.add_message(item["role"], item["content"])
             else:
                 logger.warning(f"Unexpected context item format: {item}")
                 continue
@@ -167,10 +165,22 @@ class CAGManager:
             name: Function name
             decompiled_code: Decompiled code
         """
-        if not self.session_cache:
+        if not self.session:
             return
             
-        self.session_cache.add_decompiled_function(address, name, decompiled_code)
+        # Update session analysis state
+        if hasattr(self.session, 'analysis_state'):
+            self.session.analysis_state.functions_decompiled.add(name)
+            if address and address != "unknown":
+                self.session.analysis_state.functions_decompiled.add(address)
+        
+        # Add to tool executions for retrieval
+        self.session.add_tool_execution(
+            tool_name="decompile_function",
+            parameters={"name": name, "address": address},
+            result=decompiled_code,
+            success=True
+        )
     
     def update_from_function_rename(self, old_name_or_address: str, new_name: str) -> None:
         """
@@ -180,15 +190,20 @@ class CAGManager:
             old_name_or_address: Old function name or address
             new_name: New function name
         """
-        if not self.session_cache:
+        if not self.session:
             return
             
-        # Determine if this is an address or name (simple heuristic)
-        entity_type = "function"
-        if all(c in "0123456789abcdefABCDEF" for c in old_name_or_address.replace("0x", "")):
-            entity_type = "function_address"
+        # Update session analysis state
+        if hasattr(self.session, 'analysis_state'):
+            self.session.analysis_state.functions_renamed[old_name_or_address] = new_name
             
-        self.session_cache.add_renamed_entity(old_name_or_address, new_name, entity_type)
+        # Add to tool executions
+        self.session.add_tool_execution(
+            tool_name="rename_function",
+            parameters={"old_name": old_name_or_address, "new_name": new_name},
+            result=f"Successfully renamed to {new_name}",
+            success=True
+        )
     
     def update_from_analysis_result(self, query: str, context: str, result: str) -> None:
         """
@@ -199,16 +214,24 @@ class CAGManager:
             context: Context used for the analysis
             result: Analysis result
         """
-        if not self.session_cache:
+        if not self.session:
             return
             
-        self.session_cache.add_analysis_result(query, context, result)
+        # Update analysis state cache
+        if hasattr(self.session, 'analysis_state'):
+            self.session.analysis_state.cached_results[query] = result
+            
+        # Add to tool executions
+        self.session.add_tool_execution(
+            tool_name="analyze_function",
+            parameters={"query": query, "context": context},
+            result=result,
+            success=True
+        )
     
     def save_session(self) -> None:
-        """Save the session cache to disk."""
-        if self.session_cache:
-            self.session_cache.save_to_disk()
-            logger.info("Session cache saved to disk")
+        """Save the session memory (handled by Bridge/MemoryManager)."""
+        pass
     
     def find_similar_analysis(self, query: str) -> Optional[str]:
         """
@@ -220,23 +243,41 @@ class CAGManager:
         Returns:
             Similar analysis result or None
         """
-        if not self.session_cache:
+        if not self.session:
             return None
             
-        return self.session_cache.find_similar_analysis(query)
+        # Search in analysis_state cached results
+        if hasattr(self.session, 'analysis_state') and self.session.analysis_state.cached_results:
+            query_words = set(query.lower().split())
+            best_match = None
+            best_score = 0
+            
+            for past_query, result in self.session.analysis_state.cached_results.items():
+                past_words = set(past_query.lower().split())
+                if not past_words: continue
+                
+                score = len(query_words.intersection(past_words)) / len(query_words.union(past_words))
+                if score > 0.5 and score > best_score:
+                    best_score = score
+                    best_match = result
+            return best_match
+            
+        return None
     
     def get_available_sessions(self) -> List[str]:
         """
-        Get a list of available session IDs.
+        Get a list of available session IDs (handled by MemoryManager).
         
         Returns:
             List of session IDs
         """
-        return SessionCache.list_available_sessions()
+        if self.memory_manager:
+            return [s.session_id for s in self.memory_manager.get_recent_sessions(100)]
+        return []
     
     def load_session(self, session_id: str) -> bool:
         """
-        Load a session from disk.
+        Load a session from disk (handled by Bridge/MemoryManager).
         
         Args:
             session_id: ID of the session to load
@@ -244,10 +285,7 @@ class CAGManager:
         Returns:
             True if successful, False otherwise
         """
-        if not self.session_cache:
-            return False
-            
-        return self.session_cache.load_from_disk(session_id)
+        return False
     
     def get_debug_info(self) -> Dict[str, Any]:
         """
@@ -258,7 +296,7 @@ class CAGManager:
         """
         info = {
             "enable_kb": self.enable_kb,
-            "session_cache": None
+            "session": None
         }
         
         # Add cache statistics if bridge is available
@@ -310,13 +348,14 @@ class CAGManager:
                     "common_workflows": len(getattr(self.vector_store, 'common_workflows', []))
                 }
             
-        if self.session_cache:
-            info["session_cache"] = {
-                "session_id": self.session_cache.session_id,
-                "context_history": len(self.session_cache.context_history),
-                "decompiled_functions": len(self.session_cache.decompiled_functions),
-                "renamed_entities": len(self.session_cache.renamed_entities),
-                "analysis_results": len(self.session_cache.analysis_results)
+        if self.session:
+            info["session"] = {
+                "session_id": getattr(self.session, 'session_id', 'unknown'),
+                "messages": len(self.session.messages),
+                "tool_executions": len(self.session.tool_executions),
+                "decompiled_functions": len(self.session.analysis_state.functions_decompiled) if hasattr(self.session, 'analysis_state') else 0,
+                "renamed_entities": len(self.session.analysis_state.functions_renamed) if hasattr(self.session, 'analysis_state') else 0,
+                "analysis_results": len(self.session.analysis_state.cached_results) if hasattr(self.session, 'analysis_state') else 0
             }
             
         return info
@@ -438,10 +477,10 @@ class CAGManager:
                     from src.bridge import Bridge
                     
                     cag_texts = [doc["text"] for doc in cag_docs]
-                    cag_embeddings_list = Bridge.get_ollama_embeddings(cag_texts)
+                    cag_embeddings_list = Bridge.get_embeddings(cag_texts)
                     
                     if not cag_embeddings_list:
-                        logging.warning("No Ollama embedding model available. Using existing vectors only.")
+                        logging.warning("No embedding model available. Using existing vectors only.")
                         from .vector_store import SimpleVectorStore
                         return SimpleVectorStore(existing_docs, existing_vectors)
                     
@@ -502,7 +541,7 @@ class CAGManager:
         Returns:
             Tuple of (should_skip, reason)
         """
-        if not self.session_cache:
+        if not self.session:
             return False, ""
         
         # Create command signature for comparison
@@ -510,13 +549,13 @@ class CAGManager:
         current_signature = f"{command_name}({param_signature})"
         
         # Check recent context history for identical commands
-        recent_context = self.session_cache.context_history[-context_window:] if len(self.session_cache.context_history) > context_window else self.session_cache.context_history
+        recent_messages = self.session.messages[-context_window:] if len(self.session.messages) > context_window else self.session.messages
         
         identical_count = 0
         similar_count = 0
         last_identical = None
         
-        for item in reversed(recent_context):
+        for item in reversed(recent_messages):
             if item.role == "tool_call":
                 if current_signature in item.content:
                     identical_count += 1
@@ -536,14 +575,14 @@ class CAGManager:
         # For decompile_function, check if we already have this function cached
         if command_name == "decompile_function":
             func_identifier = params.get("name") or params.get("address", "current")
-            if func_identifier in self.session_cache.decompiled_functions:
+            if hasattr(self.session, 'analysis_state') and func_identifier in self.session.analysis_state.functions_decompiled:
                 return True, f"Function '{func_identifier}' already decompiled in this session"
         
         return False, ""
     
     def get_cached_command_result(self, command_name: str, params: Dict[str, Any]) -> Optional[str]:
         """
-        Get a cached result for a command from the session cache.
+        Get a cached result for a command from the session memory.
         
         Args:
             command_name: The command name
@@ -552,23 +591,28 @@ class CAGManager:
         Returns:
             Cached result or None if not found
         """
-        if not self.session_cache:
+        if not self.session:
             return None
         
-        # For decompiled functions, check our cache
+        # For decompiled functions, search tool executions
         if command_name == "decompile_function":
             func_identifier = params.get("name") or params.get("address", "current")
-            if func_identifier in self.session_cache.decompiled_functions:
-                func_data = self.session_cache.decompiled_functions[func_identifier]
-                return func_data.decompiled_code
+            for tool_exec in reversed(self.session.tool_executions):
+                if tool_exec.tool_name == "decompile_function" and (
+                    tool_exec.parameters.get("name") == func_identifier or 
+                    tool_exec.parameters.get("address") == func_identifier
+                ):
+                    return tool_exec.result
         
-        # For analysis results, find similar queries
+        # For analysis results, search tool executions or cached results
         if command_name == "analyze_function":
             func_identifier = params.get("name") or params.get("address", "current")
-            # Look for analysis results related to this function
-            for analysis in self.session_cache.analysis_results:
-                if func_identifier in analysis.query or func_identifier in analysis.context:
-                    return analysis.result
+            if hasattr(self.session, 'analysis_state') and func_identifier in self.session.analysis_state.cached_results:
+                return self.session.analysis_state.cached_results[func_identifier]
+            
+            for tool_exec in reversed(self.session.tool_executions):
+                if tool_exec.tool_name == "analyze_function" and func_identifier in str(tool_exec.parameters):
+                    return tool_exec.result
         
         return None
     
@@ -584,15 +628,15 @@ class CAGManager:
         Returns:
             Enhanced prompt with memory context
         """
-        if not self.session_cache:
+        if not self.session:
             return ""
         
         memory_context = []
         
         # Add context about recent operations
-        if len(self.session_cache.context_history) > 0:
+        if len(self.session.messages) > 0:
             recent_operations = []
-            for item in self.session_cache.context_history[-5:]:  # Last 5 operations
+            for item in self.session.messages[-5:]:  # Last 5 operations
                 if item.role == "tool_call":
                     recent_operations.append(item.content)
             
@@ -604,19 +648,19 @@ class CAGManager:
         # Add context about available cached data
         cache_info = []
         
-        if self.session_cache.decompiled_functions:
-            func_names = list(self.session_cache.decompiled_functions.keys())[:3]  # Show first 3
-            cache_info.append(f"DECOMPILED FUNCTIONS AVAILABLE: {', '.join(func_names)}")
-            if len(self.session_cache.decompiled_functions) > 3:
-                cache_info.append(f"(and {len(self.session_cache.decompiled_functions) - 3} more)")
-        
-        if self.session_cache.renamed_entities:
-            rename_count = len(self.session_cache.renamed_entities)
-            cache_info.append(f"FUNCTIONS RENAMED: {rename_count}")
-        
-        if self.session_cache.analysis_results:
-            analysis_count = len(self.session_cache.analysis_results)
-            cache_info.append(f"ANALYSIS RESULTS CACHED: {analysis_count}")
+        if hasattr(self.session, 'analysis_state'):
+            state = self.session.analysis_state
+            if state.functions_decompiled:
+                func_names = list(state.functions_decompiled)[:3]
+                cache_info.append(f"DECOMPILED FUNCTIONS AVAILABLE: {', '.join(func_names)}")
+                if len(state.functions_decompiled) > 3:
+                    cache_info.append(f"(and {len(state.functions_decompiled) - 3} more)")
+            
+            if state.functions_renamed:
+                cache_info.append(f"FUNCTIONS RENAMED: {len(state.functions_renamed)}")
+            
+            if state.cached_results:
+                cache_info.append(f"ANALYSIS RESULTS CACHED: {len(state.cached_results)}")
         
         if cache_info:
             memory_context.append("CACHED DATA AVAILABLE:")
@@ -649,13 +693,13 @@ class CAGManager:
         Returns:
             Guidance string
         """
-        if not self.session_cache:
+        if not self.session:
             return ""
         
         guidance = []
         
         if command_name == "get_current_function":
-            recent_calls = sum(1 for item in self.session_cache.context_history[-10:] 
+            recent_calls = sum(1 for item in self.session.messages[-10:] 
                              if item.role == "tool_call" and "get_current_function" in item.content)
             if recent_calls >= 2:
                 guidance.append("⚠️  get_current_function has been called multiple times recently.")
@@ -663,14 +707,17 @@ class CAGManager:
         
         elif command_name == "decompile_function":
             func_identifier = params.get("name") or params.get("address", "current")
-            if func_identifier in self.session_cache.decompiled_functions:
+            if hasattr(self.session, 'analysis_state') and func_identifier in self.session.analysis_state.functions_decompiled:
                 guidance.append(f"✅ Function '{func_identifier}' is already decompiled and cached.")
                 guidance.append("Use the cached result instead of decompiling again.")
         
         elif command_name == "analyze_function":
             # Check if we have similar analysis
-            similar_analyses = [a for a in self.session_cache.analysis_results 
-                              if any(word in a.query.lower() for word in ["analyze", "function", "behavior"])]
+            similar_analyses = []
+            if hasattr(self.session, 'analysis_state'):
+                similar_analyses = [q for q in self.session.analysis_state.cached_results.keys()
+                                  if any(word in q.lower() for word in ["analyze", "function", "behavior"])]
+            
             if similar_analyses:
                 guidance.append(f"📋 {len(similar_analyses)} similar analysis result(s) available in cache.")
                 guidance.append("Consider if additional analysis is needed or if cached results suffice.")
@@ -679,41 +726,149 @@ class CAGManager:
     
     def update_command_execution(self, command_name: str, params: Dict[str, Any], result: str) -> None:
         """
-        Update the session cache with a completed command execution.
+        Update the session context with a completed command execution.
         
         Args:
             command_name: The executed command
             params: Command parameters
             result: Command result
         """
-        if not self.session_cache:
+        if not self.session:
             return
         
         # Add the command execution to context
         param_str = ", ".join([f'{k}="{v}"' for k, v in params.items()]) if params else ""
         tool_call = f"EXECUTE: {command_name}({param_str})"
-        self.session_cache.add_context_item("tool_call", tool_call)
+        self.session.add_message("tool_call", tool_call)
         
         # Add the result
-        self.session_cache.add_context_item("tool_result", result)
+        self.session.add_message("tool_result", result)
         
         # Update specific caches based on command type
         if command_name == "decompile_function":
-            func_identifier = params.get("name") or params.get("address", "current")
-            if func_identifier and func_identifier != "current":
-                self.session_cache.add_decompiled_function(
-                    address=params.get("address", "unknown"),
-                    name=func_identifier,
-                    decompiled_code=result
-                )
+            self.update_from_function_decompile(
+                address=params.get("address", "unknown"),
+                name=params.get("name") or "current",
+                decompiled_code=result
+            )
         
         elif command_name == "rename_function":
-            old_name = params.get("old_name", "")
-            new_name = params.get("new_name", "")
-            if old_name and new_name:
-                self.session_cache.add_renamed_entity(old_name, new_name, "function")
+            self.update_from_function_rename(
+                old_name_or_address=params.get("old_name", ""),
+                new_name=params.get("new_name", "")
+            )
         
         elif command_name == "analyze_function":
             func_identifier = params.get("name") or params.get("address", "current")
             query = f"analyze_function for {func_identifier}"
-            self.session_cache.add_analysis_result(query, str(params), result) 
+            self.update_from_analysis_result(query, str(params), result)
+
+    def _prune_session_for_query(self, query: str, token_limit: int = 4000) -> Dict[str, Any]:
+        """
+        Prune the session context to fit within token limits while retaining relevant information.
+        """
+        pruned_cache = {
+            "messages": [],
+            "decompiled_functions": {},
+            "renamed_entities": {},
+            "analysis_results": []
+        }
+        
+        if not self.session:
+            return pruned_cache
+            
+        # Start with recent messages
+        total_tokens = 0
+        for msg in reversed(self.session.messages[-10:]):
+            msg_tokens = len(msg.content) // 4
+            if total_tokens + msg_tokens <= token_limit:
+                pruned_cache["messages"].insert(0, msg)
+                total_tokens += msg_tokens
+            else:
+                break
+                
+        # Add analysis results similar to the query
+        if hasattr(self.session, 'analysis_state'):
+            query_words = set(query.lower().split())
+            for past_query, result in self.session.analysis_state.cached_results.items():
+                past_words = set(past_query.lower().split())
+                if not past_words: continue
+                
+                score = len(query_words.intersection(past_words)) / len(query_words.union(past_words))
+                if score > 0.4:
+                    res_tokens = len(result) // 4
+                    if total_tokens + res_tokens <= token_limit:
+                        pruned_cache["analysis_results"].append({"query": past_query, "result": result})
+                        total_tokens += res_tokens
+                        
+            # Add decompiled functions mentioned in query or recent context
+            for func_name in self.session.analysis_state.functions_decompiled:
+                if func_name.lower() in query.lower():
+                    # Find the code in tool_executions
+                    for tool_exec in reversed(self.session.tool_executions):
+                        if tool_exec.tool_name == "decompile_function" and (
+                            tool_exec.parameters.get("name") == func_name or 
+                            tool_exec.parameters.get("address") == func_name
+                        ):
+                            code_tokens = len(tool_exec.result) // 4
+                            if total_tokens + code_tokens <= token_limit:
+                                pruned_cache["decompiled_functions"][func_name] = tool_exec.result
+                                total_tokens += code_tokens
+                            break
+                            
+            # Add renamed entities
+            pruned_cache["renamed_entities"] = self.session.analysis_state.functions_renamed
+            
+        return pruned_cache
+
+    def _format_session_context(self, pruned_cache: Dict[str, Any]) -> str:
+        """
+        Format the pruned session context as a string for prompt inclusion.
+        """
+        sections = []
+        
+        # Format messages
+        if pruned_cache["messages"] and len(pruned_cache["messages"]) > 2:
+            context_section = "## Prior Context:\n\n"
+            items_to_show = pruned_cache["messages"][:-1]
+            for item in items_to_show[-5:]:
+                role_label = item.role.value.capitalize() if hasattr(item.role, 'value') else str(item.role).capitalize()
+                prefix = f"**{role_label}**: "
+                content = item.content[:500] + "..." if len(item.content) > 500 else item.content
+                content = content.replace("\n", "\n  ")
+                context_section += f"{prefix}{content}\n\n"
+            sections.append(context_section)
+            
+        # Format decompiled functions
+        if pruned_cache["decompiled_functions"]:
+            functions_section = "## Previously Decompiled Functions:\n\n"
+            for name, code in pruned_cache["decompiled_functions"].items():
+                functions_section += f"### Function: {name}\n\n"
+                functions_section += "```c\n"
+                max_lines = 30
+                code_lines = code.split("\n")
+                if len(code_lines) > max_lines:
+                    trimmed_code = "\n".join(code_lines[:15]) + "\n// ... [trimmed] ...\n" + "\n".join(code_lines[-15:])
+                    functions_section += trimmed_code
+                else:
+                    functions_section += code
+                functions_section += "\n```\n\n"
+            sections.append(functions_section)
+            
+        # Format renamed entities
+        if pruned_cache["renamed_entities"]:
+            rename_section = "## Entity Renames Performed:\n\n"
+            for old_name, new_name in pruned_cache["renamed_entities"].items():
+                rename_section += f"* Function: `{old_name}` → `{new_name}`\n"
+            sections.append(rename_section)
+            
+        # Format analysis results
+        if pruned_cache["analysis_results"]:
+            analysis_section = "## Previous Analyses:\n\n"
+            for analysis in pruned_cache["analysis_results"]:
+                analysis_section += f"### Analysis: {analysis['query'][:50]}...\n\n"
+                analysis_section += f"{analysis['result']}\n\n"
+            sections.append(analysis_section)
+            
+        return "\n".join(sections)
+ 

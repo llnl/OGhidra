@@ -103,24 +103,69 @@ class ServerConfigDialog:
         title_label = ttk.Label(main_frame, text="Server Configuration", font=('TkDefaultFont', 12, 'bold'))
         title_label.pack(pady=(0, 20))
         
-        # Ollama configuration
-        ollama_frame = ttk.LabelFrame(main_frame, text="Ollama Server", padding=10)
-        ollama_frame.pack(fill='x', pady=(0, 10))
+        # --- Provider Selection ---
+        provider_frame = ttk.Frame(main_frame)
+        provider_frame.pack(fill='x', pady=(0, 10))
         
-        ttk.Label(ollama_frame, text="Base URL:").grid(row=0, column=0, sticky='w', pady=5)
+        ttk.Label(provider_frame, text="LLM Provider:").pack(side='left', padx=(0, 10))
+        
+        # Determine current provider
+        current_provider = getattr(self.config, 'llm_provider', 'ollama')
+        self.provider_var = tk.StringVar(value=current_provider)
+        
+        self.provider_combo = ttk.Combobox(
+            provider_frame, 
+            textvariable=self.provider_var, 
+            values=['ollama', 'google'],
+            state='readonly',
+            width=20
+        )
+        self.provider_combo.pack(side='left')
+        self.provider_combo.bind('<<ComboboxSelected>>', self._on_provider_changed)
+
+        # --- External (Generic) Configuration ---
+        self.external_frame = ttk.LabelFrame(main_frame, text="External Provider Configuration", padding=10)
+        
+        # Provider Type
+        ttk.Label(self.external_frame, text="Provider Type:").grid(row=0, column=0, sticky='w', pady=5)
+        self.ext_provider_var = tk.StringVar(value=getattr(self.config.external, 'provider', 'google'))
+        self.ext_provider_combo = ttk.Combobox(self.external_frame, textvariable=self.ext_provider_var, values=['google'], state='readonly', width=47)
+        self.ext_provider_combo.grid(row=0, column=1, sticky='ew', padx=(10, 0), pady=5)
+
+        ttk.Label(self.external_frame, text="API Key:").grid(row=1, column=0, sticky='w', pady=5)
+        self.ext_key_var = tk.StringVar(value=getattr(self.config.external, 'api_key', ''))
+        ext_key_entry = ttk.Entry(self.external_frame, textvariable=self.ext_key_var, width=50, show="*")
+        ext_key_entry.grid(row=1, column=1, sticky='ew', padx=(10, 0), pady=5)
+        
+        ttk.Label(self.external_frame, text="Model:").grid(row=2, column=0, sticky='w', pady=5)
+        self.ext_model_var = tk.StringVar(value=getattr(self.config.external, 'model', 'gemini-1.5-flash'))
+        ext_model_entry = ttk.Entry(self.external_frame, textvariable=self.ext_model_var, width=50)
+        ext_model_entry.grid(row=2, column=1, sticky='ew', padx=(10, 0), pady=5)
+
+        ttk.Label(self.external_frame, text="Embedding Model:").grid(row=3, column=0, sticky='w', pady=5)
+        self.ext_embed_var = tk.StringVar(value=getattr(self.config.external, 'embedding_model', 'text-embedding-004'))
+        ext_embed_entry = ttk.Entry(self.external_frame, textvariable=self.ext_embed_var, width=50)
+        ext_embed_entry.grid(row=3, column=1, sticky='ew', padx=(10, 0), pady=5)
+        
+        self.external_frame.columnconfigure(1, weight=1)
+        
+        # --- Ollama Configuration ---
+        self.ollama_frame = ttk.LabelFrame(main_frame, text="Ollama Server", padding=10)
+        
+        ttk.Label(self.ollama_frame, text="Base URL:").grid(row=0, column=0, sticky='w', pady=5)
         self.ollama_url_var = tk.StringVar(value=str(self.config.ollama.base_url))
-        ollama_entry = ttk.Entry(ollama_frame, textvariable=self.ollama_url_var, width=50)
+        ollama_entry = ttk.Entry(self.ollama_frame, textvariable=self.ollama_url_var, width=50)
         ollama_entry.grid(row=0, column=1, sticky='ew', padx=(10, 0), pady=5)
         
-        ttk.Label(ollama_frame, text="Model:").grid(row=1, column=0, sticky='w', pady=5)
+        ttk.Label(self.ollama_frame, text="Model:").grid(row=1, column=0, sticky='w', pady=5)
         self.ollama_model_var = tk.StringVar(value=self.config.ollama.model)
-        model_entry = ttk.Entry(ollama_frame, textvariable=self.ollama_model_var, width=50)
+        model_entry = ttk.Entry(self.ollama_frame, textvariable=self.ollama_model_var, width=50)
         model_entry.grid(row=1, column=1, sticky='ew', padx=(10, 0), pady=5)
         
         # Embedding model selection
-        ttk.Label(ollama_frame, text="Embedding Model:").grid(row=2, column=0, sticky='w', pady=5)
+        ttk.Label(self.ollama_frame, text="Embedding Model:").grid(row=2, column=0, sticky='w', pady=5)
         self.embedding_model_var = tk.StringVar(value=getattr(self.config.ollama, 'embedding_model', 'nomic-embed-text'))
-        self.embedding_combo = ttk.Combobox(ollama_frame, textvariable=self.embedding_model_var, width=47, state='readonly')
+        self.embedding_combo = ttk.Combobox(self.ollama_frame, textvariable=self.embedding_model_var, width=47, state='readonly')
         self.embedding_combo.grid(row=2, column=1, sticky='ew', padx=(10, 0), pady=5)
         
         # Set default embedding model options (include code-centric model)
@@ -132,10 +177,10 @@ class ServerConfigDialog:
         )
         
         # Button to refresh available models
-        refresh_button = ttk.Button(ollama_frame, text="Refresh Models", command=self._refresh_models)
+        refresh_button = ttk.Button(self.ollama_frame, text="Refresh Models", command=self._refresh_models)
         refresh_button.grid(row=3, column=1, sticky='e', padx=(10, 0), pady=5)
         
-        ollama_frame.columnconfigure(1, weight=1)
+        self.ollama_frame.columnconfigure(1, weight=1)
         
         # GhidraMCP configuration
         ghidra_frame = ttk.LabelFrame(main_frame, text="GhidraMCP Server", padding=10)
@@ -148,9 +193,12 @@ class ServerConfigDialog:
         
         ghidra_frame.columnconfigure(1, weight=1)
         
+        # Initial visibility toggle
+        self._toggle_provider()
+        
         # Help text
         help_text = ttk.Label(main_frame, 
-                             text="Configure server URLs for distributed setups.\nDefault ports: Ollama (11434), GhidraMCP (8080)\nEmbedding model is used for RAG/vector operations.",
+                             text="Configure connections to LLM and Ghidra backend.\nSelect provider from the dropdown.",
                              font=('TkDefaultFont', 9),
                              foreground='gray')
         help_text.pack(pady=(10, 20))
@@ -173,6 +221,25 @@ class ServerConfigDialog:
         save_button = ttk.Button(right_frame, text="Save", command=self._save)
         save_button.pack(side='right')
     
+    def _on_provider_changed(self, event):
+        """Handle provider selection change."""
+        self._toggle_provider()
+
+    def _toggle_provider(self):
+        """Toggle visibility of provider frames."""
+        provider = self.provider_var.get()
+        if provider == 'google': # Alias for 'external' in UI logic
+            provider = 'external'
+            
+        if provider == 'external':
+            # External API selected
+            self.ollama_frame.pack_forget()
+            self.external_frame.pack(fill='x', pady=(0, 10), after=self.dialog.winfo_children()[0].winfo_children()[1]) 
+        else:
+            # Ollama selected
+            self.external_frame.pack_forget()
+            self.ollama_frame.pack(fill='x', pady=(0, 10), after=self.dialog.winfo_children()[0].winfo_children()[1])
+
     def _refresh_models(self):
         """Refresh the available embedding models from the Ollama server."""
         def fetch_models():
@@ -215,50 +282,78 @@ class ServerConfigDialog:
         def test():
             results = []
             
-            # Test Ollama
-            try:
-                import requests
-                response = requests.get(f"{self.ollama_url_var.get()}/api/tags", timeout=5)
-                if response.status_code == 200:
-                    results.append("Ollama: ✅ Connected")
-                    
-                    # Test embedding model specifically (try new API first, then legacy)
-                    embedding_model = self.embedding_model_var.get()
-                    if embedding_model:
-                        embed_success = False
-                        # Try new API (/api/embed) first
-                        try:
-                            embed_response = requests.post(
-                                f"{self.ollama_url_var.get()}/api/embed",
-                                json={"model": embedding_model, "input": "test"},
-                                timeout=10
-                            )
-                            if embed_response.status_code == 200:
-                                results.append(f"Embedding Model ({embedding_model}): ✅ Available")
-                                embed_success = True
-                        except Exception:
-                            pass
+            # Test LLM Provider
+            provider = self.provider_var.get()
+            if provider == 'google' or provider == 'external':
+                # Test External / Google
+                try:
+                    import requests
+                    api_key = self.ext_key_var.get()
+                    if not api_key:
+                        results.append("External API: ❌ API Key is missing")
+                    else:
+                        # Simple test for Google (since it's the only supported one currently)
+                        url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
+                        response = requests.get(url, timeout=5)
+                        if response.status_code == 200:
+                            results.append("External API (Google): ✅ Connected")
+                            # Verify model exists
+                            models = response.json().get('models', [])
+                            target_model = self.ext_model_var.get()
+                            model_found = any(target_model in m.get('name', '') for m in models)
+                            if model_found:
+                                results.append(f"Model ({target_model}): ✅ Available")
+                            else:
+                                results.append(f"Model ({target_model}): ⚠️ Not found in list (might still work)")
+                        else:
+                            results.append(f"External API: ❌ HTTP {response.status_code}")
+                except Exception as e:
+                    results.append(f"External API: ❌ {str(e)}")
+            else:
+                # Test Ollama
+                try:
+                    import requests
+                    response = requests.get(f"{self.ollama_url_var.get()}/api/tags", timeout=5)
+                    if response.status_code == 200:
+                        results.append("Ollama: ✅ Connected")
                         
-                        # Fallback to legacy API (/api/embeddings) if new API failed
-                        if not embed_success:
+                        # Test embedding model specifically (try new API first, then legacy)
+                        embedding_model = self.embedding_model_var.get()
+                        if embedding_model:
+                            embed_success = False
+                            # Try new API (/api/embed) first
                             try:
                                 embed_response = requests.post(
-                                    f"{self.ollama_url_var.get()}/api/embeddings",
-                                    json={"model": embedding_model, "prompt": "test"},
+                                    f"{self.ollama_url_var.get()}/api/embed",
+                                    json={"model": embedding_model, "input": "test"},
                                     timeout=10
                                 )
                                 if embed_response.status_code == 200:
-                                    results.append(f"Embedding Model ({embedding_model}): ✅ Available (legacy API)")
+                                    results.append(f"Embedding Model ({embedding_model}): ✅ Available")
                                     embed_success = True
                             except Exception:
                                 pass
-                        
-                        if not embed_success:
-                            results.append(f"Embedding Model ({embedding_model}): ❌ Not available")
-                else:
-                    results.append(f"Ollama: ❌ HTTP {response.status_code}")
-            except Exception as e:
-                results.append(f"Ollama: ❌ {str(e)}")
+                            
+                            # Fallback to legacy API (/api/embeddings) if new API failed
+                            if not embed_success:
+                                try:
+                                    embed_response = requests.post(
+                                        f"{self.ollama_url_var.get()}/api/embeddings",
+                                        json={"model": embedding_model, "prompt": "test"},
+                                        timeout=10
+                                    )
+                                    if embed_response.status_code == 200:
+                                        results.append(f"Embedding Model ({embedding_model}): ✅ Available (legacy API)")
+                                        embed_success = True
+                                except Exception:
+                                    pass
+                            
+                            if not embed_success:
+                                results.append(f"Embedding Model ({embedding_model}): ❌ Not available")
+                    else:
+                        results.append(f"Ollama: ❌ HTTP {response.status_code}")
+                except Exception as e:
+                    results.append(f"Ollama: ❌ {str(e)}")
             
             # Test GhidraMCP
             try:
@@ -288,10 +383,26 @@ class ServerConfigDialog:
             ghidra_url = AnyHttpUrl(self.ghidra_url_var.get())
             
             # Update config
+            # Update config
             self.config.ollama.base_url = ollama_url
             self.config.ollama.model = self.ollama_model_var.get()
             self.config.ollama.embedding_model = self.embedding_model_var.get()
             self.config.ghidra.base_url = ghidra_url
+            
+            # Google / External Config
+            self.config.external.provider = self.ext_provider_var.get()
+            self.config.external.api_key = self.ext_key_var.get()
+            self.config.external.model = self.ext_model_var.get()
+            self.config.external.embedding_model = self.ext_embed_var.get()
+            
+            # Provider
+            provider = self.provider_var.get()
+            # If user selected 'google' in dropdown, map to 'external' internally or keep alias if preferred
+            # We'll stick to 'external' internally mostly
+            if provider == 'google':
+                self.config.llm_provider = 'external'
+            else:
+                self.config.llm_provider = provider
             
             # Update the clients with new URLs
             # (No need to update _bridge_ref here; handled by main UI)
@@ -301,7 +412,13 @@ class ServerConfigDialog:
                 'OLLAMA_BASE_URL': str(ollama_url),
                 'OLLAMA_MODEL': self.ollama_model_var.get(),
                 'OLLAMA_EMBEDDING_MODEL': self.embedding_model_var.get(),
-                'GHIDRA_BASE_URL': str(ghidra_url)
+                'GHIDRA_BASE_URL': str(ghidra_url),
+                # New External Configs
+                'EXTERNAL_PROVIDER': self.ext_provider_var.get(),
+                'EXTERNAL_API_KEY': self.ext_key_var.get(),
+                'EXTERNAL_MODEL': self.ext_model_var.get(),
+                'EXTERNAL_EMBEDDING_MODEL': self.ext_embed_var.get(),
+                'LLM_PROVIDER': 'external' if provider == 'google' else provider
             })
             # ---
             
@@ -903,11 +1020,13 @@ class MemoryInfoPanel:
                         if legacy_count > 0:
                             stats.append(f"Legacy Vector Components: {legacy_count}")
                 
-                if 'session_cache' in debug_info:
-                    sc_info = debug_info['session_cache']
-                    stats.append(f"Session Entries: {sc_info.get('entry_count', 0)}")
-                    stats.append(f"Decompiled Functions: {sc_info.get('decompiled_functions', 0)}")
-                    stats.append(f"Analysis Results: {sc_info.get('analysis_results', 0)}")
+                if 'session' in debug_info:
+                    s_info = debug_info['session']
+                    stats.append(f"Session ID: {s_info.get('session_id', 'unknown')}")
+                    stats.append(f"Messages: {s_info.get('messages', 0)}")
+                    stats.append(f"Tool Executions: {s_info.get('tool_executions', 0)}")
+                    stats.append(f"Decompiled Functions: {s_info.get('decompiled_functions', 0)}")
+                    stats.append(f"Analysis Results: {s_info.get('analysis_results', 0)}")
                 
                 # Add cache statistics
                 if 'cache_stats' in debug_info and debug_info['cache_stats'] != "unavailable":
@@ -1216,25 +1335,29 @@ class RenamedFunctionsPanel:
                 progress_status.config(text=f"Loading {total_functions} functions into vectors...")
                 progress_dialog.update()
                 
-                # **OPTIMIZED: Batch processing approach with Ollama embeddings**
-                progress_status.config(text="Initializing local Ollama embeddings...")
+                # **OPTIMIZED: Batch processing approach with embeddings**
+                progress_status.config(text="Initializing embedding service...")
                 progress_dialog.update()
                 
-                # ✅ FIXED: Use Ollama embeddings instead of SentenceTransformer
+                # ✅ FIXED: Use generic embeddings from Bridge
                 try:
                     from src.bridge import Bridge
                     
-                    # Test Ollama embeddings availability
-                    test_embeddings = Bridge.get_ollama_embeddings(["test"])
+                    # Test embeddings availability
+                    test_embeddings = Bridge.get_embeddings(["test"])
                     if not test_embeddings:
                         # Get the configured embedding model name
-                        emb_model = getattr(self.bridge.config.ollama, 'embedding_model', 'nomic-embed-text')
-                        raise Exception(f"Ollama embedding model ({emb_model}) not available.\n\nPlease ensure:\n1. Ollama server is running\n2. Run: ollama pull {emb_model}")
+                        client_config = getattr(Bridge._ollama_client, 'config', None)
+                        emb_model = getattr(client_config, 'embedding_model', 'nomic-embed-text')
+                        provider = getattr(Bridge._ollama_client, 'provider', 'LLM')
+                        raise Exception(f"{provider} embedding model ({emb_model}) not available.\n\nPlease ensure your configuration is correct.")
                     
-                    emb_model = getattr(self.bridge.config.ollama, 'embedding_model', 'nomic-embed-text')
-                    logger.info(f"✅ Using Ollama embeddings ({emb_model}) for vector creation")
+                    client_config = getattr(Bridge._ollama_client, 'config', None)
+                    emb_model = getattr(client_config, 'embedding_model', 'nomic-embed-text')
+                    provider = getattr(Bridge._ollama_client, 'provider', 'Ollama')
+                    logger.info(f"✅ Using {provider} embeddings ({emb_model}) for vector creation")
                 except Exception as e:
-                    raise Exception(f"Ollama embedding model not available: {e}")
+                    raise Exception(f"Embedding service not available: {e}")
                 
                 # Process in batches for better performance
                 BATCH_SIZE = 50  # Process 50 functions at once
@@ -1245,10 +1368,10 @@ class RenamedFunctionsPanel:
                     batch_end = min(batch_start + BATCH_SIZE, total_functions)
                     batch = functions_to_process[batch_start:batch_end]
                     
-                    progress_status.config(text=f"Processing batch {batch_num + 1} of {num_batches} (Ollama)")
+                    progress_status.config(text=f"Processing batch {batch_num + 1} of {num_batches}")
                     progress_dialog.update()
                     
-                    # ✅ FIXED: Use Ollama batch embeddings instead of SentenceTransformer
+                    # ✅ FIXED: Use generic batch embeddings
                     # Filter out empty summaries which cause 400 errors
                     batch_texts = []
                     valid_batch = []
@@ -1266,10 +1389,10 @@ class RenamedFunctionsPanel:
                         continue
                     
                     batch = valid_batch  # Use only valid functions
-                    batch_embeddings_list = Bridge.get_ollama_embeddings(batch_texts)
+                    batch_embeddings_list = Bridge.get_embeddings(batch_texts)
                     
                     if not batch_embeddings_list:
-                        logger.error("Failed to generate embeddings with Ollama")
+                        logger.error("Failed to generate embeddings")
                         continue
                     
                     # Convert to numpy arrays for compatibility
@@ -2521,11 +2644,55 @@ class ToolButtonsPanel:
                 # Add initial message to response panel
                 self.response_panel.add_response(f"Smart Tool: {display_name}", f"Executing {tool_name}() and sending results to AI for analysis...")
                 
-                # Step 1: Call the specific Ghidra tool
+                # Step 1: Call the specific Ghidra tool (with pagination for list tools)
                 if hasattr(self.bridge.ghidra, tool_name):
                     tool_method = getattr(self.bridge.ghidra, tool_name)
+                    
                     try:
-                        raw_tool_result = tool_method(**(params or {}))
+                        # Check if this is a list tool that supports pagination
+                        is_list_tool = tool_name in ["list_imports", "list_exports", "list_strings", "list_functions", "list_methods"]
+                        
+                        if is_list_tool:
+                            self.response_panel.add_response("Progress", f"Retrieving all {tool_name.split('_')[1]} (paginated)...")
+                            
+                            all_items = []
+                            offset = (params or {}).get('offset', 0)
+                            limit = 200 # Use a consistent page size
+                            
+                            # Merge existing params if any
+                            base_params = (params or {}).copy()
+                            
+                            while True:
+                                current_params = base_params.copy()
+                                current_params.update({'offset': offset, 'limit': limit})
+                                
+                                batch_result = tool_method(**current_params)
+                                
+                                # Check for error
+                                if isinstance(batch_result, str) and batch_result.lower().startswith("error:"):
+                                    self.response_panel.add_response("Error", f"Failed to get batch at offset {offset}: {batch_result}")
+                                    break
+                                
+                                if not batch_result:
+                                    break
+                                    
+                                if isinstance(batch_result, list):
+                                    all_items.extend(batch_result)
+                                    if len(batch_result) < limit:
+                                        break
+                                else:
+                                    # Fallback for unexpected formats
+                                    all_items = batch_result
+                                    break
+                                    
+                                offset += limit
+                                self.response_panel.add_response("Progress", f"Collected {len(all_items)} items so far...")
+                                
+                            raw_tool_result = all_items
+                        else:
+                            # Standard single call for non-list tools
+                            raw_tool_result = tool_method(**(params or {}))
+                            
                     except TypeError as te:
                         self.response_panel.add_response("Error", f"Parameter mismatch: {te}")
                         return
@@ -3111,24 +3278,46 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                 self.response_panel.add_response(f"🚀 Smart Tool: {display_name}", f"Starting OPTIMIZED bulk function analysis with mode: {enumeration_mode}")
                 self.response_panel.add_response("⚡ Performance Enhancements", f"• Batch processing (size: {batch_size})\n• Deferred RAG vector creation\n• Optimized AI prompts\n• Enhanced progress tracking")
                 
-                # Step 1: Get all functions
+                # Step 1: Get all functions (with pagination)
                 try:
-                    self.response_panel.add_response("📋 Step 1", "Retrieving list of all functions...")
-                    all_functions_result = self.bridge.ghidra.list_functions()
+                    self.response_panel.add_response("📋 Step 1", "Retrieving list of all functions (paginated)...")
                     
-                    if isinstance(all_functions_result, str) and all_functions_result.lower().startswith("error:"):
-                        self.response_panel.add_response("Error", f"Failed to get function list: {all_functions_result}")
-                        return
+                    all_functions = []
+                    offset = 0
+                    limit = 200 # Process 200 functions per page
                     
-                    # Parse the function list
-                    if isinstance(all_functions_result, list):
-                        functions = all_functions_result
-                    elif isinstance(all_functions_result, str):
-                        # Split by newlines and filter out empty lines
-                        functions = [f.strip() for f in all_functions_result.split('\n') if f.strip()]
-                    else:
-                        self.response_panel.add_response("Error", f"Unexpected function list format: {type(all_functions_result)}")
-                        return
+                    while True:
+                        batch_result = self.bridge.ghidra.list_functions(offset=offset, limit=limit)
+                        
+                        if isinstance(batch_result, str) and batch_result.lower().startswith("error:"):
+                            self.response_panel.add_response("Error", f"Failed to get function list at offset {offset}: {batch_result}")
+                            break
+                        
+                        # Parse the batch
+                        if isinstance(batch_result, list):
+                            batch = batch_result
+                        elif isinstance(batch_result, str):
+                            batch = [f.strip() for f in batch_result.split('\n') if f.strip()]
+                        else:
+                            self.response_panel.add_response("Error", f"Unexpected function list format: {type(batch_result)}")
+                            break
+                        
+                        if not batch:
+                            break
+                            
+                        # Add to our collection
+                        all_functions.extend(batch)
+                        
+                        # Update progress
+                        self.response_panel.add_response("Step 1 Progress", f"Found {len(all_functions)} functions so far...")
+                        
+                        # Check if we've reached the end
+                        if len(batch) < limit:
+                            break
+                            
+                        offset += limit
+                    
+                    functions = all_functions
                     
                     # Filter out any invalid function names
                     valid_functions = [f for f in functions if f and not f.lower().startswith("error")]
@@ -5216,18 +5405,22 @@ class OGhidraUI:
             dialog = ServerConfigDialog(self.root, self.config)
             if dialog.result:
                 # Configuration was saved successfully
-                # Update the clients with new configuration
-                self.bridge.ollama.base_url = str(self.config.ollama.base_url).rstrip('/')
-                self.bridge.ollama.default_model = self.config.ollama.model
                 
-                # Update Ghidra client configuration
+                # Dynamically reload the LLM client to reflect changes (e.g. switching providers)
+                if hasattr(self.bridge, 'reload_llm_client'):
+                    self.bridge.reload_llm_client()
+                else:
+                    # Fallback for manual updates if method missing
+                    self.bridge.ollama.base_url = str(self.config.ollama.base_url).rstrip('/')
+                    self.bridge.ollama.default_model = self.config.ollama.model
+
+                # Update Ghidra client configuration (always manual update as it's less complex)
                 if hasattr(self.bridge, 'ghidra_client') and self.bridge.ghidra_client:
                     self.bridge.ghidra_client.config.base_url = str(self.config.ghidra.base_url).rstrip('/')
                 
                 messagebox.showinfo("Configuration Updated", 
-                                  "Server configuration has been updated.\n\n"
-                                  "Note: Some changes may require restarting the application "
-                                  "to take full effect.")
+                                  "Server configuration has been updated and reloaded.\n\n"
+                                  "You can now use the new provider/settings immediately.")
         except Exception as e:
             messagebox.showerror("Configuration Error", f"Failed to configure servers: {e}")
     

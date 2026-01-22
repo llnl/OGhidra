@@ -333,6 +333,86 @@ class KnowledgeArtifact(BaseModel):
         return f"- [{self.category}] {self.key}: {self.value}"
 
 
+class RankedResult(BaseModel):
+    """A tool execution result with relevance scoring for hybrid context management."""
+    tool_name: str
+    parameters: Dict[str, Any] = Field(default_factory=dict)
+    result: str
+    relevance_score: float = 0.0
+    category: str = "other"  # 'decompilation', 'strings', 'imports', 'xrefs', etc.
+    timestamp: datetime = Field(default_factory=datetime.now)
+    
+    def format_for_prompt(self, max_chars: int = 2000) -> str:
+        """Format for prompt with optional truncation."""
+        result_text = self.result
+        if len(result_text) > max_chars:
+            result_text = result_text[:max_chars] + f"\n... [Truncated {len(self.result) - max_chars} chars]"
+        return f"### {self.tool_name} (score: {self.relevance_score:.2f})\n{result_text}"
+
+
+class CorrelationHint(BaseModel):
+    """Cross-tool correlation hint based on shared addresses or patterns."""
+    address: str
+    mentions: List[str] = Field(default_factory=list)  # ["strings: 'admin'", "xref: FUN_X"]
+    significance: str = "MEDIUM"  # 'HIGH', 'MEDIUM', 'LOW'
+    
+    def format_for_prompt(self) -> str:
+        """Format for prompt inclusion."""
+        mentions_str = "; ".join(self.mentions[:5])  # Limit to 5 mentions
+        return f"- **{self.address}** ({self.significance}): {mentions_str}"
+
+
+class CycleConclusions(BaseModel):
+    """
+    Structured conclusions from an analysis phase.
+    
+    These conclusions are passed to the next planning phase to inform
+    the updated investigation plan. This enables per-cycle isolation
+    while maintaining continuity across the agentic loop.
+    """
+    cycle_number: int
+    binary_purpose: str = ""
+    key_findings: List[Dict[str, Any]] = Field(default_factory=list)
+    # Format: [{"address": "0x...", "finding": "...", "confidence": "HIGH/MEDIUM/LOW"}]
+    
+    investigation_gaps: List[str] = Field(default_factory=list)
+    # What still needs investigation
+    
+    recommended_next_steps: List[str] = Field(default_factory=list)
+    # Specific tools/actions for next cycle
+    
+    correlation_insights: List[str] = Field(default_factory=list)
+    # Cross-tool patterns discovered
+    
+    tools_executed: int = 0
+    timestamp: datetime = Field(default_factory=datetime.now)
+    
+    def format_for_planning(self) -> str:
+        """Format conclusions for next planning phase."""
+        sections = [
+            f"## Cycle {self.cycle_number} Conclusions",
+            f"\n### Binary Purpose\n{self.binary_purpose}" if self.binary_purpose else "",
+        ]
+        
+        if self.key_findings:
+            findings_lines = ["### Key Findings"]
+            for f in self.key_findings[:10]:  # Limit to 10
+                conf = f.get('confidence', 'MEDIUM')
+                findings_lines.append(f"- [{conf}] {f.get('address', '?')}: {f.get('finding', '')}")
+            sections.append("\n".join(findings_lines))
+        
+        if self.correlation_insights:
+            sections.append("### Correlation Insights\n" + "\n".join(f"- {i}" for i in self.correlation_insights[:5]))
+        
+        if self.investigation_gaps:
+            sections.append("### Investigation Gaps\n" + "\n".join(f"- {g}" for g in self.investigation_gaps[:5]))
+        
+        if self.recommended_next_steps:
+            sections.append("### Recommended Next Steps\n" + "\n".join(f"- {s}" for s in self.recommended_next_steps[:5]))
+        
+        return "\n\n".join(s for s in sections if s)
+
+
 class SessionMemory(BaseModel):
     """Complete session memory including conversation and state."""
     messages: List[ConversationMessage] = Field(default_factory=list)

@@ -21,9 +21,6 @@ def ensure_cag_directories():
     knowledge_dir = cag_dir / "knowledge"
     os.makedirs(knowledge_dir, exist_ok=True)
     
-    # Ensure session cache directory exists
-    session_cache_dir = Path("ghidra_session_cache")
-    os.makedirs(session_cache_dir, exist_ok=True)
     
     # Ensure knowledge cache directory exists
     knowledge_cache_dir = Path("ghidra_knowledge_cache")

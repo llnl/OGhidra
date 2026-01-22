@@ -170,8 +170,11 @@ public class GhidraMCPPlugin extends Plugin {
         });
 
         server.createContext("/decompile", exchange -> {
+            Map<String, String> qparams = parseQueryParams(exchange);
+            int offset = parseIntOrDefault(qparams.get("offset"), 0);
+            int limit = parseIntOrDefault(qparams.get("limit"), 100);
             String name = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
-            sendResponse(exchange, decompileFunctionByName(name));
+            sendResponse(exchange, decompileFunctionByName(name, offset, limit));
         });
 
         server.createContext("/renameFunction", exchange -> {
@@ -266,7 +269,9 @@ public class GhidraMCPPlugin extends Plugin {
         server.createContext("/decompile_function", exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             String address = qparams.get("address");
-            sendResponse(exchange, decompileFunctionByAddress(address));
+            int offset = parseIntOrDefault(qparams.get("offset"), 0);
+            int limit = parseIntOrDefault(qparams.get("limit"), 100);
+            sendResponse(exchange, decompileFunctionByAddress(address, offset, limit));
         });
 
         server.createContext("/disassemble_function", exchange -> {
@@ -423,8 +428,8 @@ public class GhidraMCPPlugin extends Plugin {
      * Authors: starsong and contributors
      * 
      * This implementation allows multiple Ghidra instances to run simultaneously,
-     * each on a unique port (8080, then 8192-8202), enabling AI agents to interact
-     * with multiple binaries in different Ghidra windows at the same time.
+     * each on a unique port. It prioritizes the lowest available port in a
+     * queue-like fashion.
      */
     private int findAvailablePort(int basePort) {
         // If user specifically requested something other than default 8080, respect it
@@ -435,9 +440,13 @@ public class GhidraMCPPlugin extends Plugin {
             Msg.warn(this, "Configured port " + basePort + " is in use. Falling back to dynamic allocation.");
         }
 
-        // Try default port 8080 first
-        if (isPortAvailable(DEFAULT_PORT))
-            return DEFAULT_PORT;
+        // Try standard ports sequentially (8080, 8081, 8082...)
+        for (int i = 0; i < 10; i++) {
+            int candidate = DEFAULT_PORT + i;
+            if (isPortAvailable(candidate)) {
+                return candidate;
+            }
+        }
 
         // Then try dynamic range 8192+
         for (int i = 0; i < MAX_PORT_ATTEMPTS; i++) {
@@ -447,7 +456,7 @@ public class GhidraMCPPlugin extends Plugin {
             }
         }
 
-        throw new RuntimeException("Could not find open port in range " + DYNAMIC_PORT_START + "+");
+        throw new RuntimeException("Could not find open port in range 8080-8089 or " + DYNAMIC_PORT_START + "+");
     }
 
     private boolean isPortAvailable(int port) {
@@ -605,7 +614,7 @@ public class GhidraMCPPlugin extends Plugin {
     // Logic for rename, decompile, etc.
     // ----------------------------------------------------------------------------------
 
-    private String decompileFunctionByName(String name) {
+    private String decompileFunctionByName(String name, int offset, int limit) {
         Program program = getCurrentProgram();
         if (program == null)
             return "No program loaded";
@@ -615,7 +624,7 @@ public class GhidraMCPPlugin extends Plugin {
             if (func.getName().equals(name)) {
                 DecompileResults result = decomp.decompileFunction(func, 30, new ConsoleTaskMonitor());
                 if (result != null && result.decompileCompleted()) {
-                    return result.getDecompiledFunction().getC();
+                    return paginateString(result.getDecompiledFunction().getC(), offset, limit);
                 } else {
                     return "Decompilation failed";
                 }
@@ -896,7 +905,7 @@ public class GhidraMCPPlugin extends Plugin {
                     func.getName(),
                     func.getEntryPoint()));
         }
-        
+
         return paginateList(functions, offset, limit);
     }
 
@@ -916,7 +925,7 @@ public class GhidraMCPPlugin extends Plugin {
     /**
      * Decompile a function at the given address
      */
-    private String decompileFunctionByAddress(String addressStr) {
+    private String decompileFunctionByAddress(String addressStr, int offset, int limit) {
         Program program = getCurrentProgram();
         if (program == null)
             return "No program loaded";
@@ -933,9 +942,11 @@ public class GhidraMCPPlugin extends Plugin {
             decomp.openProgram(program);
             DecompileResults result = decomp.decompileFunction(func, 30, new ConsoleTaskMonitor());
 
-            return (result != null && result.decompileCompleted())
+            String code = (result != null && result.decompileCompleted())
                     ? result.getDecompiledFunction().getC()
                     : "Decompilation failed";
+
+            return paginateString(code, offset, limit);
         } catch (Exception e) {
             return "Error decompiling function: " + e.getMessage();
         }
@@ -1835,6 +1846,36 @@ public class GhidraMCPPlugin extends Plugin {
     }
 
     /**
+     * Paginate a large string by splitting it into lines
+     */
+    private String paginateString(String content, int offset, int limit) {
+        if (content == null)
+            return "";
+        content = content.trim(); // Trim leading/trailing whitespace
+        String[] lines = content.split("\\r?\\n");
+        int total = lines.length;
+        int start = Math.max(0, offset);
+        int end = Math.min(total, offset + limit);
+
+        if (start >= total) {
+            return String.format("[Total Lines: %d] [Showing: 0 lines - offset %d exceeds total]", total, offset);
+        }
+
+        StringBuilder sb = new StringBuilder();
+        sb.append(String.format("[Total Lines: %d] [Showing Lines: %d-%d]\n", total, start + 1, end));
+
+        for (int i = start; i < end; i++) {
+            sb.append(lines[i]).append("\n");
+        }
+
+        if (end < total) {
+            sb.append(String.format("... [Next: offset=%d, limit=%d]", end, limit));
+        }
+
+        return sb.toString();
+    }
+
+    /**
      * Parse an integer from a string, or return defaultValue if null/invalid.
      */
     private int parseIntOrDefault(String val, int defaultValue) {
@@ -1890,8 +1931,11 @@ public class GhidraMCPPlugin extends Plugin {
 
     @Override
     public void dispose() {
+        if (activeInstances.containsKey(this.currentPort)) {
+            activeInstances.remove(this.currentPort);
+        }
         if (server != null) {
-            Msg.info(this, "Stopping GhidraMCP HTTP server...");
+            Msg.info(this, "Stopping GhidraMCP HTTP server on port " + this.currentPort + "...");
             server.stop(1); // Stop with a small delay (e.g., 1 second) for connections to finish
             server = null; // Nullify the reference
             Msg.info(this, "GhidraMCP HTTP server stopped.");

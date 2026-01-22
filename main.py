@@ -10,7 +10,7 @@ import json
 from dotenv import load_dotenv
 
 # Load environment variables from .env file if present
-load_dotenv()
+load_dotenv(override=True)
 
 # Import after loading environment variables
 from src.config import get_config, BridgeConfig
@@ -203,17 +203,18 @@ def run_interactive_mode(bridge: Bridge, config: BridgeConfig):
                         print(f"  Vector Store - Analysis Rules: {vs_info.get('analysis_rules', 0)}")
                         print(f"  Vector Store - Common Workflows: {vs_info.get('common_workflows', 0)}")
 
-                    # Session Cache status from cag_details
-                    session_cache_info = cag_details.get('session_cache')
-                    if session_cache_info:
-                        print(f"Session Cache Active: {'Yes' if session_cache_info else 'No'}")
-                        print(f"  Session ID: {session_cache_info.get('session_id', 'N/A')}")
-                        print(f"  Context History Items: {session_cache_info.get('context_history', 0)}")
-                        print(f"  Decompiled Functions: {session_cache_info.get('decompiled_functions', 0)}")
-                        print(f"  Renamed Entities: {session_cache_info.get('renamed_entities', 0)}")
-                        print(f"  Analysis Results Cached: {session_cache_info.get('analysis_results', 0)}")
+                    # Session Memory status from cag_details
+                    session_info = cag_details.get('session')
+                    if session_info:
+                        print(f"Session Memory Active: Yes")
+                        print(f"  Session ID: {session_info.get('session_id', 'N/A')}")
+                        print(f"  Messages: {session_info.get('messages', 0)}")
+                        print(f"  Tool Executions: {session_info.get('tool_executions', 0)}")
+                        print(f"  Decompiled Functions: {session_info.get('decompiled_functions', 0)}")
+                        print(f"  Renamed Entities: {session_info.get('renamed_entities', 0)}")
+                        print(f"  Analysis Results Cached: {session_info.get('analysis_results', 0)}")
                     else:
-                        print(f"Session Cache Active: No")
+                        print(f"Session Memory Active: No")
                     
                     # Token limit is part of BridgeConfig, not CAGManager debug info directly
                     # However, the cag_manager might have its own internal token limits for enhancement logic

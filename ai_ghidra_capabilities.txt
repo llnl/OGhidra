@@ -12,7 +12,7 @@ Information Gathering:
 - get_function_by_address(address): Get function details by address (Example: Use '0x1800011a8' format or '1800011a8').
 - get_current_address(): Get currently selected address in Ghidra UI.
 - get_current_function(): Get currently selected function in Ghidra UI.
-- list_functions(): List all functions with addresses.
+- list_functions(offset, limit): List all functions with addresses.
 - decompile_function(name): Decompile function by name.
 - decompile_function_by_address(address): Decompile function by address (Example: Use '0x1800011a8' format or '1800011a8').
 - disassemble_function(address): Get assembly listing for a function by address (Example: Use '0x1800011a8' format or '1800011a8').

@@ -85,18 +85,18 @@ class SessionEmbedder:
             # Local import to avoid circular import at module load time
             from .bridge import Bridge  # pylint: disable=import-outside-toplevel
 
-            ollama_embs = Bridge.get_ollama_embeddings([session_text], model=self.embedding_model)
+            ollama_embs = Bridge.get_embeddings([session_text], model=self.embedding_model)
             if ollama_embs:
                 emb_vec = np.array(ollama_embs[0], dtype=np.float32)
                 # Normalise to unit length for cosine similarity
                 norm = np.linalg.norm(emb_vec)
                 if norm != 0:
                     emb_vec = emb_vec / norm
-                logger.debug("Generated Ollama embedding for session %s", session.session_id)
+                logger.debug("Generated embedding for session %s", session.session_id)
                 return emb_vec
-            logger.warning("Ollama returned no embedding – falling back to placeholder vector")
+            logger.warning("LLM client returned no embedding – falling back to placeholder vector")
         except Exception as exc:  # pylint: disable=broad-except
-            logger.error("Failed to generate Ollama embedding: %s – falling back to placeholder", exc)
+            logger.error("Failed to generate embedding: %s – falling back to placeholder", exc)
 
         # ------------------------------------------------------------------
         # Fallback – previous deterministic random vector (ensures old flows

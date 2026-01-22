@@ -60,12 +60,12 @@ class SimpleVectorStore:
             logger.warning("No documents or embeddings available")
             return []
             
-        # Use Ollama embeddings from Bridge class
+        # Use embeddings from Bridge class
         try:
             from src.bridge import Bridge
-            query_embeddings = Bridge.get_ollama_embeddings([query])
+            query_embeddings = Bridge.get_embeddings([query])
             if not query_embeddings:
-                logger.warning("No Ollama embedding model available. Vector search disabled.")
+                logger.warning("No embedding model available. Vector search disabled.")
                 return []
             query_embedding = np.array(query_embeddings[0])
         except ImportError:
@@ -82,12 +82,29 @@ class SimpleVectorStore:
         else:
             # Fallback: brute-force cosine similarity
             similarities = []
-            for doc_embedding in self.embeddings:
+            
+            # Check dimensions first
+            query_dim = query_embedding.shape[0]
+            valid_indices = []
+            
+            for i, doc_embedding in enumerate(self.embeddings):
+                # Skip if dimension mismatch
+                if doc_embedding.shape[0] != query_dim:
+                    continue
+                    
                 similarity = np.dot(query_embedding, doc_embedding) / (
                     np.linalg.norm(query_embedding) * np.linalg.norm(doc_embedding)
                 )
                 similarities.append(similarity)
-            top_indices = np.argsort(similarities)[-top_k:][::-1]
+                valid_indices.append(i)
+                
+            if not similarities:
+                logger.warning(f"No compatible embeddings found (query dim: {query_dim}). Vectors might need re-indexing.")
+                return []
+                
+            # Map back to original indices
+            top_local_indices = np.argsort(similarities)[-top_k:][::-1]
+            top_indices = [valid_indices[i] for i in top_local_indices]
         
         # Return top-k documents with scores
         results = []
@@ -169,7 +186,7 @@ def create_vector_store_from_docs(documents: List[Dict[str, Any]]) -> Optional[S
         return SimpleVectorStore([], [])
         
     try:
-        # Use Ollama embeddings from Bridge class
+        # Use embeddings from Bridge class
         try:
             from src.bridge import Bridge
             
@@ -184,9 +201,9 @@ def create_vector_store_from_docs(documents: List[Dict[str, Any]]) -> Optional[S
                 texts.append(text)
                 valid_documents.append(doc)
             
-            embeddings_list = Bridge.get_ollama_embeddings(texts)
+            embeddings_list = Bridge.get_embeddings(texts)
             if not embeddings_list:
-                logger.warning("No Ollama embedding model available. Vector store creation disabled.")
+                logger.warning("No embedding model available. Vector store creation disabled.")
                 return None
             
             # Convert to numpy arrays

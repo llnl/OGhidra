@@ -13,6 +13,7 @@ import os
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
+from tenacity import Retrying, stop_after_attempt, wait_exponential, retry_if_exception
 
 
 # =============================================================================
@@ -131,6 +132,14 @@ def average_embeddings(embeddings: List[List[float]]) -> List[float]:
     
     return averaged
 
+def is_retryable_exception(e):
+    """Check if an exception is retryable (429, 503, or connection/timeout)."""
+    if isinstance(e, requests.exceptions.HTTPError):
+        # Retry on 429 (Rate Limit) and 503 (Service Unavailable)
+        return e.response is not None and e.response.status_code in [429, 503]
+    # Also retry on connection and timeout errors
+    return isinstance(e, (requests.exceptions.ConnectionError, requests.exceptions.Timeout))
+
 class OllamaClient:
     """Client for interacting with Ollama API."""
     
@@ -173,7 +182,8 @@ class OllamaClient:
         
         # Print loaded configuration values for verification (always visible)
         request_delay = getattr(config, 'request_delay', 0.0)
-        print(f"[OllamaClient] Initialized: timeout={self.timeout}s, request_delay={request_delay}s, model={self.default_model}")
+        self.max_retries = getattr(config, 'max_retries', 3)
+        print(f"[OllamaClient] Initialized: timeout={self.timeout}s, request_delay={request_delay}s, max_retries={self.max_retries}, model={self.default_model}")
         
         if self.llm_logging_enabled:
             self._setup_llm_logger()
@@ -289,8 +299,21 @@ class OllamaClient:
         }
         
         try:
-            response = requests.post(url, json=payload, timeout=self.timeout)
-            response.raise_for_status()
+            # Setup retryer
+            retryer = Retrying(
+                stop=stop_after_attempt(self.max_retries + 1),
+                wait=wait_exponential(multiplier=1, min=2, max=10),
+                retry=retry_if_exception(is_retryable_exception),
+                reraise=True
+            )
+            
+            # Execute request with retries
+            def do_post():
+                resp = requests.post(url, json=payload, timeout=self.timeout)
+                resp.raise_for_status()
+                return resp
+                
+            response = retryer(do_post)
             data = response.json()
             response_text = data.get('response', '')
             
@@ -533,7 +556,22 @@ class OllamaClient:
         }
         
         try:
-            response = requests.post(url, json=payload, timeout=self.timeout)
+            # Setup retryer
+            retryer = Retrying(
+                stop=stop_after_attempt(self.max_retries + 1),
+                wait=wait_exponential(multiplier=1, min=2, max=10),
+                retry=retry_if_exception(is_retryable_exception),
+                reraise=True
+            )
+            
+            # Execute request with retries
+            def do_post():
+                resp = requests.post(url, json=payload, timeout=self.timeout)
+                resp.raise_for_status()
+                return resp
+                
+            response = retryer(do_post)
+            
             if response.status_code == 400:
                 # Log the actual error response for debugging
                 try:
@@ -573,7 +611,22 @@ class OllamaClient:
         }
         
         try:
-            response = requests.post(url, json=payload, timeout=self.timeout)
+            # Setup retryer
+            retryer = Retrying(
+                stop=stop_after_attempt(self.max_retries + 1),
+                wait=wait_exponential(multiplier=1, min=2, max=10),
+                retry=retry_if_exception(is_retryable_exception),
+                reraise=True
+            )
+            
+            # Execute request with retries
+            def do_post():
+                resp = requests.post(url, json=payload, timeout=self.timeout)
+                resp.raise_for_status()
+                return resp
+                
+            response = retryer(do_post)
+            
             if response.status_code == 400:
                 # Log the actual error response for debugging
                 try:

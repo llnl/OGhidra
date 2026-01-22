@@ -217,17 +217,25 @@ class GhidraMCPClient:
         """
         return self.safe_get("classes", {"offset": offset, "limit": limit})
     
-    def decompile_function(self, name: str) -> str:
+    def decompile_function(self, name: str, offset: int = 0, limit: int = 100) -> str:
         """
         Decompile a specific function by name and return the decompiled C code.
         
         Args:
             name: Function name
+            offset: Line offset (default: 0)
+            limit: Max lines to return (default: 100)
             
         Returns:
             Decompiled C code
         """
-        return self.safe_post("decompile", name)
+        # The new server implementation accepts query params on the same endpoint, 
+        # but safe_post sends data as body. 
+        # We need to construct the URL with params manually or modify safe_post.
+        # Since safe_post handles URL construction, let's just append params to the endpoint 
+        # if the server handles them from query string while reading body.
+        endpoint = f"decompile?offset={offset}&limit={limit}"
+        return self.safe_post(endpoint, name)
     
     def rename_function(self, old_name: str, new_name: str) -> str:
         """
@@ -417,17 +425,23 @@ class GhidraMCPClient:
         """
         return self.safe_get("list_functions", {"offset": offset, "limit": limit})
     
-    def decompile_function_by_address(self, address: str) -> str:
+    def decompile_function_by_address(self, address: str, offset: int = 0, limit: int = 100) -> str:
         """
         Decompile a function at the given address.
         
         Args:
             address: Function address
+            offset: Line offset (default: 0)
+            limit: Max lines to return (default: 100)
             
         Returns:
             Decompiled function
         """
-        result = self.safe_get("decompile_function", {"address": address})
+        result = self.safe_get("decompile_function", {
+            "address": address,
+            "offset": offset,
+            "limit": limit
+        })
         return "\n".join(result)
     
     def analyze_function(self, address: str = None) -> str:

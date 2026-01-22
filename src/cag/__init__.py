@@ -6,7 +6,6 @@ the model to leverage persistent knowledge and session history without real-time
 """
 
 from .knowledge_cache import GhidraKnowledgeCache, FunctionSignature, BinaryPattern, AnalysisRule
-from .session_cache import SessionCache, DecompiledFunction, RenamedEntity, AnalysisResult, ContextItem
 from .manager import CAGManager
 
 __version__ = "0.1.0" 

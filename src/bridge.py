@@ -19,6 +19,7 @@ import os, json, logging, textwrap, inspect, sys, functools, itertools, math, ra
 
 from src.config import BridgeConfig
 from src.ollama_client import OllamaClient
+from src.external_client import ExternalClient
 from src.ghidra_client import GhidraMCPClient
 from src.command_parser import CommandParser
 from src.cag.manager import CAGManager
@@ -33,6 +34,7 @@ from src.models.memory import (
     ToolExecution
 )
 from src.context_manager import ContextManager
+from src.analysis_dump import AnalysisDumper
 from datetime import datetime
 
 # Configure logging
@@ -72,8 +74,25 @@ class Bridge:
         if Bridge._model_load_lock is None:
             Bridge._model_load_lock = threading.Lock()
         
+        # Select LLM Provider and Config
+        # Select LLM Provider and Config
+        self.provider = getattr(config, 'llm_provider', 'ollama')
+        
+        # Handle 'google' alias for backward compatibility
+        if self.provider == 'google':
+             self.provider = 'external'
+             
+        if self.provider == 'external':
+            self.llm_config = config.external
+            self.ollama = ExternalClient(config=self.llm_config)
+            self.logger.info(f"Using External Provider ({self.llm_config.provider}) as LLM")
+        else:
+            self.llm_config = config.ollama
+            self.ollama = OllamaClient(config=self.llm_config)
+            self.logger.info("Using Ollama as LLM provider")
+
         # Initialize clients
-        self.ollama = OllamaClient(config=config.ollama)
+        # Note: self.ollama is used as the generic LLM client name to avoid massive refactoring
         self.ghidra_client = GhidraMCPClient(config=config.ghidra, ollama_client=self.ollama)
         
         # Set Ollama client for embeddings
@@ -103,26 +122,40 @@ class Bridge:
         self.memory_manager = None
         
         # Context manager for intelligent result handling
+        # All size limits come from config (scales with CONTEXT_BUDGET)
         self.context_manager = ContextManager(
             ollama_client=self.ollama,
-            context_budget=self.config.ollama.context_budget,
-            execution_fraction=self.config.ollama.context_budget_execution,
-            enable_summarization=self.config.ollama.enable_result_summarization,
-            enable_caching=self.config.ollama.result_cache_enabled,
-            enable_tiered_context=self.config.ollama.tiered_context_enabled
+            context_budget=self.llm_config.context_budget,
+            execution_fraction=self.llm_config.context_budget_execution,
+            enable_summarization=self.llm_config.enable_result_summarization,
+            enable_caching=self.llm_config.result_cache_enabled,
+            enable_tiered_context=self.llm_config.tiered_context_enabled,
+            max_detailed_steps=getattr(self.llm_config, 'max_detailed_steps', 10),
+            current_loop_max_chars=getattr(self.llm_config, 'current_loop_max_chars', 4000),
+            prev_loop_max_chars=getattr(self.llm_config, 'prev_loop_max_chars', 800),
+            older_loop_max_chars=getattr(self.llm_config, 'older_loop_max_chars', 200)
         )
+        
+        # Analysis dumper for capturing raw context before truncation
+        self.analysis_dumper = AnalysisDumper()
         
         if self.enable_cag:
             try:
                 from .cag import CAGManager
-                self.cag_manager = CAGManager(config)
+                self.cag_manager = CAGManager(config, session=self.session)
                 # Set bridge reference for cache stats
                 self.cag_manager._bridge_ref = self
                 # Memory manager is part of CAG manager
                 self.memory_manager = self.cag_manager.memory_manager if hasattr(self.cag_manager, 'memory_manager') else None
+                
             except ImportError as e:
                 self.logger.warning(f"CAG dependencies not available: {e}. Running without CAG.")
                 self.enable_cag = False
+            except ImportError as e:
+                self.logger.warning(f"CAG dependencies not available: {e}. Running without CAG.")
+                self.enable_cag = False
+                
+
         
         # Analysis state tracking (legacy dict - now points to session's Pydantic model)
         # The actual state is stored in self.session.analysis_state (AnalysisState model)
@@ -166,6 +199,39 @@ class Bridge:
         self._ui_cot_callback = None
         
         self.logger.info("Bridge initialized successfully")
+
+    def reload_llm_client(self):
+        """Re-initializes the LLM client based on current configuration."""
+        self.logger.info("Reloading LLM client...")
+        
+        # Select LLM Provider and Config
+        self.provider = getattr(self.config, 'llm_provider', 'ollama')
+        
+        # Handle 'google' alias for backward compatibility
+        if self.provider == 'google':
+             self.provider = 'external'
+             
+        if self.provider == 'external':
+            self.llm_config = self.config.external
+            self.ollama = ExternalClient(config=self.llm_config)
+            self.logger.info(f"Switched to External Provider: {self.llm_config.provider}")
+        else:
+            self.llm_config = self.config.ollama
+            self.ollama = OllamaClient(config=self.llm_config)
+            self.logger.info("Switched to Ollama Provider")
+            
+        # Update dependencies
+        if hasattr(self, 'ghidra_client'):
+            self.ghidra_client.ollama_client = self.ollama
+            
+        if hasattr(self, 'context_manager'):
+            self.context_manager.ollama_client = self.ollama
+            # Update generic context settings if they changed
+            self.context_manager.context_budget = self.llm_config.context_budget
+            self.context_manager.execution_fraction = self.llm_config.context_budget_execution
+            
+        Bridge.set_ollama_client(self.ollama)
+        print(f"[Bridge] Client reloaded. Provider: {self.provider}")
         
     @classmethod
     def get_sentence_transformer(cls):
@@ -179,12 +245,12 @@ class Bridge:
         return None
     
     @classmethod
-    def get_ollama_embeddings(cls, texts: List[str], model: str = None) -> List[List[float]]:
-        """Get embeddings using local Ollama embedding model."""
+    def get_embeddings(cls, texts: List[str], model: str = None) -> List[List[float]]:
+        """Get embeddings using the configured LLM client's embedding service (Ollama or External)."""
         logger = logging.getLogger("ollama-ghidra-bridge")
         
         if not hasattr(cls, '_ollama_client') or cls._ollama_client is None:
-            logger.debug("Ollama client not initialized. Embeddings unavailable.")
+            logger.debug("LLM client not initialized. Embeddings unavailable.")
             return []
         
         # Filter out empty/None texts which cause 400 errors
@@ -199,8 +265,10 @@ class Bridge:
             logger.warning("No valid texts to embed after filtering")
             return []
         
-        # Use provided model or default from config
-        embedding_model = model or getattr(cls._ollama_client.config, 'embedding_model', 'nomic-embed-text')
+        # Use provided model or default from client config
+        # Use nomic-embed-text as default if config doesn't have it
+        client_config = getattr(cls._ollama_client, 'config', None)
+        embedding_model = model or getattr(client_config, 'embedding_model', 'nomic-embed-text')
             
         try:
             embeddings = []
@@ -212,11 +280,17 @@ class Bridge:
                     logger.debug(f"Failed to generate embedding for text: {text[:50]}...")
                     return []  # Return empty if any embedding fails
             
-            logger.debug(f"✅ Generated {len(embeddings)} embeddings using Ollama {embedding_model}")
+            provider_name = getattr(cls._ollama_client, 'provider', 'Ollama')
+            logger.debug(f"✅ Generated {len(embeddings)} embeddings using {provider_name} {embedding_model}")
             return embeddings
         except Exception as e:
-            logger.error(f"Failed to generate Ollama embeddings: {e}")
+            logger.error(f"Failed to generate embeddings: {e}")
             return []
+
+    @classmethod
+    def get_ollama_embeddings(cls, texts: List[str], model: str = None) -> List[List[float]]:
+        """DEPRECATED: Use get_embeddings instead. Legacy alias for backward compatibility."""
+        return cls.get_embeddings(texts, model)
 
     @classmethod
     def set_ollama_client(cls, ollama_client):
@@ -356,31 +430,31 @@ You can help analyze binary files by executing commands through GhidraMCP."""
         
         # 3. Phase-specific instructions (static rules)
         if phase == "planning":
-            phase_instructions = self.config.ollama.planning_system_prompt.replace(
+            phase_instructions = self.llm_config.planning_system_prompt.replace(
                 "{user_task_description}", "[User's goal will be provided in the user message]"
             )
             system_sections.append(phase_instructions)
         elif phase == "execution":
-            phase_instructions = self.config.ollama.execution_system_prompt.format(
+            phase_instructions = self.llm_config.execution_system_prompt.format(
                 user_task_description="[User's goal will be provided in the user message]",
-                FUNCTION_CALL_BEST_PRACTICES=self.config.ollama.FUNCTION_CALL_BEST_PRACTICES
+                FUNCTION_CALL_BEST_PRACTICES=self.llm_config.FUNCTION_CALL_BEST_PRACTICES
             )
             system_sections.append(phase_instructions)
         elif phase == "evaluation":
-            phase_instructions = self.config.ollama.evaluation_system_prompt.replace(
+            phase_instructions = self.llm_config.evaluation_system_prompt.replace(
                 "{user_task_description}", "[User's goal will be provided in the user message]"
             )
             system_sections.append(phase_instructions)
         elif phase == "analysis":
-            phase_instructions = self.config.ollama.analysis_system_prompt.replace(
+            phase_instructions = self.llm_config.analysis_system_prompt.replace(
                 "{user_task_description}", "[User's goal will be provided in the user message]"
             )
             system_sections.append(phase_instructions)
         elif phase == "review":
             # Review phase uses execution instructions + emphasis on quality
-            phase_instructions = self.config.ollama.execution_system_prompt.format(
+            phase_instructions = self.llm_config.execution_system_prompt.format(
                 user_task_description="[User's goal will be provided in the user message]",
-                FUNCTION_CALL_BEST_PRACTICES=self.config.ollama.FUNCTION_CALL_BEST_PRACTICES
+                FUNCTION_CALL_BEST_PRACTICES=self.llm_config.FUNCTION_CALL_BEST_PRACTICES
             )
             # Add review-specific guidance
             review_guidance = """
@@ -979,7 +1053,7 @@ You can help analyze binary files by executing commands through GhidraMCP."""
         """
         try:
             self.logger.info(f"🚀 Starting agentic query processing: '{query}'")
-            self.logger.info(f"📊 Config: max_agentic_cycles={self.config.ollama.max_agentic_cycles}, max_execution_steps={self.config.ollama.max_execution_steps}")
+            self.logger.info(f"📊 Config: max_agentic_cycles={self.llm_config.max_agentic_cycles}, max_execution_steps={self.llm_config.max_execution_steps}")
             
             # Store the query as our current goal
             self.current_goal = query
@@ -999,8 +1073,8 @@ You can help analyze binary files by executing commands through GhidraMCP."""
             self.add_to_context("user", query)
             
             # Get configuration
-            max_cycles = self.config.ollama.max_agentic_cycles
-            max_exec_steps = self.config.ollama.max_execution_steps
+            max_cycles = self.llm_config.max_agentic_cycles
+            max_exec_steps = self.llm_config.max_execution_steps
             
             best_response = ""
             all_cycle_results = []
@@ -1170,13 +1244,13 @@ You can help analyze binary files by executing commands through GhidraMCP."""
             self.logger.info(f"✅ Planning completed: {len(plan_response)} chars")
             
             # Check if execution loop is enabled
-            use_execution_loop = self.config.ollama.execution_loop_enabled
+            use_execution_loop = self.llm_config.execution_loop_enabled
             
             if use_execution_loop:
                 # NEW: Multi-tool execution loop
                 self.logger.info("🔄 Phase 2: Starting execution loop (multi-tool mode)")
                 self.current_workflow_stage = 'execution'
-                max_steps = self.config.ollama.max_execution_steps
+                max_steps = self.llm_config.max_execution_steps
                 exec_results = self._execution_loop(plan_response, max_steps=max_steps)
                 self.logger.info(f"✅ Execution loop completed: {exec_results.total_steps} steps")
                 
@@ -1233,7 +1307,7 @@ You can help analyze binary files by executing commands through GhidraMCP."""
             Result of processing the query
         """
         # Check if agentic loop is enabled
-        if self.config.ollama.agentic_loop_enabled:
+        if self.llm_config.agentic_loop_enabled:
             self.logger.info("🔄 Using multi-cycle agentic loop mode")
             return self.process_query_with_agentic_loop(query)
         else:
@@ -1578,7 +1652,7 @@ You can help analyze binary files by executing commands through GhidraMCP."""
         self.logger.info("Evaluating goal completion...")
         
         # Format the evaluation prompt with the user's task description
-        prompt = self.config.ollama.evaluation_system_prompt.format(
+        prompt = self.llm_config.evaluation_system_prompt.format(
             user_task_description=query
         )
         
@@ -1600,14 +1674,24 @@ You can help analyze binary files by executing commands through GhidraMCP."""
         Returns:
             Cleaned response text
         """
+        if not response:
+            return ""
+            
         # Remove "FINAL RESPONSE:" marker if present
         cleaned = re.sub(r'^FINAL RESPONSE:\s*', '', response, flags=re.IGNORECASE)
         
-        # Remove any trailing instructions or markers
+        # Remove any trailing executing instructions
         cleaned = re.sub(r'\n+\s*EXECUTE:.*$', '', cleaned, flags=re.MULTILINE)
         
-        # Remove any markdown formatting intended for the AI but not for display
-        cleaned = re.sub(r'^\s*```.*?```\s*$', '', cleaned, flags=re.MULTILINE | re.DOTALL)
+        # Handle code blocks wrapping the entire response
+        # Only strip if the response starts and ends with ```
+        cleaned = cleaned.strip()
+        if cleaned.startswith("```") and cleaned.endswith("```"):
+            # Check if it's just one big block
+            lines = cleaned.split('\n')
+            if len(lines) >= 2:
+                # Remove first and last line
+                cleaned = '\n'.join(lines[1:-1])
         
         return cleaned.strip()
 
@@ -1786,6 +1870,12 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
         
         self.logger.info(f"🔄 Starting execution loop (max {max_steps} steps)")
         
+        # Initialize analysis dumper for this loop
+        if hasattr(self, 'analysis_dumper') and self.analysis_dumper:
+            self.analysis_dumper.start_loop(self.current_loop_number)
+            self.analysis_dumper.set_goal(exec_results.goal)
+            self.analysis_dumper.set_plan(plan)
+        
         for step in range(1, max_steps + 1):
             self.logger.info(f"📍 Execution loop step {step}/{max_steps}")
             
@@ -1838,7 +1928,8 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
                     cmd_signature = f"{cmd_name}:{param_sig}"
                     
                     # Check for duplicate tool execution
-                    if cmd_signature in self.executed_tools:
+                    # EXCEPTION: Never skip get_cached_result - AI should always be able to fetch cached context
+                    if cmd_signature in self.executed_tools and cmd_name != "get_cached_result":
                         self.logger.warning(f"Skipping duplicate tool call: {cmd_name}({cmd_params})")
                         
                         # Get original step info for helpful message (now includes loop prefix)
@@ -1893,6 +1984,10 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
                     current_step = exec_results.total_steps + 1
                     loop_step_id = f"step_L{self.current_loop_number}_{current_step}"
                     
+                    # Capture full result in analysis dump BEFORE truncation
+                    was_truncated = False
+                    truncated_to = 0
+                    
                     # Dynamic truncation based on context budget
                     # Default: 15,000 chars (~3,750 tokens) - much larger than previous 6,000
                     max_result_chars = 15000
@@ -1902,9 +1997,22 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
                         max_result_chars = max(15000, remaining // 4)
                     
                     if len(result_str) > max_result_chars:
+                        was_truncated = True
+                        truncated_to = max_result_chars
                         result_str = result_str[:max_result_chars] + (
                             f"\n... [Truncated {len(result_str) - max_result_chars} chars. "
                             f"Use get_cached_result(result_id=\"{loop_step_id}\") for full content]"
+                        )
+                    
+                    # Add to analysis dump for manual review (captures full result)
+                    if hasattr(self, 'analysis_dumper') and self.analysis_dumper:
+                        self.analysis_dumper.add_execution(
+                            tool_name=cmd_name,
+                            parameters=cmd_params,
+                            result=full_result_str,  # Full result before truncation
+                            reasoning=reasoning,
+                            was_truncated=was_truncated,
+                            truncated_to=truncated_to
                         )
                     
                     # Add to execution results
@@ -2047,10 +2155,13 @@ If you are done, output ONLY "INVESTIGATION COMPLETE".
         """
         Analysis phase: Review all execution results and provide comprehensive analysis.
         
-        Uses context manager for intelligent result formatting with:
-        - Tiered context (recent results get more detail)
-        - Large result summarization
-        - Context budget enforcement
+        Uses a HYBRID approach with per-cycle isolation:
+        - Filters to current cycle's results only
+        - Applies relevance ranking (top-N per category)
+        - Builds correlation hints for cross-tool patterns
+        - Phase 3a: Consolidate findings into structured JSON
+        - Phase 3b: Synthesize final report from consolidated data
+        - Stores CycleConclusions for next planning phase
         
         Args:
             exec_results: Accumulated results from execution loop
@@ -2058,62 +2169,214 @@ If you are done, output ONLY "INVESTIGATION COMPLETE".
         Returns:
             Final analysis response
         """
-        self.logger.info("📊 Starting analysis phase with accumulated results")
+        self.logger.info("📊 Starting analysis phase (hybrid approach)")
+        
+        # Import the hybrid context components
+        from src.context_manager import RelevanceRanker, CorrelationHintBuilder
         
         # Reset context manager for fresh budget tracking
         self.context_manager.reset()
         
-        # Format results with context-aware truncation and summarization
-        formatted_results = self._format_results_with_context(exec_results)
+        # STEP 1: Filter to current cycle only
+        current_cycle = self.current_loop_number
+        current_cycle_executions = [
+            te for te in exec_results.tool_executions
+            if getattr(te, 'loop_number', current_cycle) == current_cycle
+        ]
+        self.logger.info(f"📍 Filtering to cycle {current_cycle}: {len(current_cycle_executions)}/{len(exec_results.tool_executions)} executions")
         
-        # Build prompt with context-managed execution results
-        system_prompt, _ = self._build_structured_prompt(phase="analysis")
+        # STEP 2: Apply relevance ranking
+        top_n = getattr(self.llm_config, 'top_n_per_category', 10)
+        ranker = RelevanceRanker(top_n_per_category=top_n)
+        ranked_results = ranker.rank_results(current_cycle_executions, exec_results.goal)
+        formatted_ranked = ranker.format_ranked_for_prompt(ranked_results)
         
-        user_prompt = f"""
-## Investigation Goal
-{exec_results.goal}
-
-## Execution Summary
-{exec_results.get_summary()}
-
-## Execution Results ({exec_results.total_steps} steps)
-{formatted_results}
-
-## Your Task
-
-Review ALL the execution results above and provide a comprehensive analysis that addresses the investigation goal.
-
-Focus on:
-1. What the target function/code does
-2. How it's used (callers/references)
-3. What it uses (callees/dependencies)
-4. Overall behavior and purpose
-5. Key findings and insights
-
-Provide a clear, detailed analysis. Start your response with "FINAL RESPONSE:" to mark it as the final output.
-"""
+        # STEP 3: Build correlation hints
+        min_mentions = getattr(self.llm_config, 'min_correlation_mentions', 2)
+        correlator = CorrelationHintBuilder(min_mentions=min_mentions)
+        correlation_hints = correlator.build_hints(current_cycle_executions)
+        formatted_hints = correlator.format_for_prompt(correlation_hints)
         
-        # Log context budget usage
-        self.logger.debug(self.context_manager.get_status())
+        self.logger.info(f"📊 Ranked: {sum(len(v) for v in ranked_results.values())} results across {len(ranked_results)} categories")
+        self.logger.info(f"🔗 Correlations: {len(correlation_hints)} cross-tool patterns found")
         
-        response = self.ollama.generate_with_phase(
-            user_prompt,
-            phase="analysis",
-            system_prompt=system_prompt
+        # STEP 4: Consolidate findings with ranked results + hints
+        consolidated_findings = self._consolidate_findings_hybrid(
+            exec_results=exec_results,
+            formatted_ranked=formatted_ranked,
+            formatted_hints=formatted_hints
         )
+        
+        # STEP 5: Synthesize final report and extract conclusions
+        response, cycle_conclusions = self._synthesize_report_with_conclusions(
+            findings=consolidated_findings,
+            goal=exec_results.goal,
+            cycle_number=current_cycle,
+            correlation_hints=correlation_hints
+        )
+        
+        # STEP 6: Store conclusions for next planning phase
+        if not hasattr(self, 'cycle_conclusions_history'):
+            self.cycle_conclusions_history = []
+        if cycle_conclusions:
+            self.cycle_conclusions_history.append(cycle_conclusions)
+            self.last_cycle_conclusions = cycle_conclusions
+            self.logger.info(f"📝 Stored conclusions for cycle {current_cycle}")
+        else:
+            self.logger.warning(f"⚠️ No conclusions generated for cycle {current_cycle}")
         
         # Clean up the response
         final_response = self._clean_final_response(response)
         
-        self.logger.info("✅ Analysis phase complete")
+        self.logger.info("✅ Analysis phase complete (hybrid approach)")
+        
+        # Save analysis dump for manual review
+        if hasattr(self, 'analysis_dumper') and self.analysis_dumper:
+            try:
+                # Add consolidated findings and conclusions to the dump
+                self.analysis_dumper.add_artifact("analysis", "consolidated_findings", json.dumps(consolidated_findings, indent=2))
+                self.analysis_dumper.add_artifact("analysis", "correlation_hints", json.dumps([h for h in correlation_hints[:10]], indent=2))
+                if cycle_conclusions:
+                    self.analysis_dumper.add_artifact("analysis", "cycle_conclusions", cycle_conclusions.format_for_planning())
+                dump_path = self.analysis_dumper.save()
+                self.logger.info(f"📝 Analysis dump saved to: {dump_path}")
+            except Exception as e:
+                self.logger.warning(f"Failed to save analysis dump: {e}")
+        
         return final_response
+    
+    def _consolidate_findings_hybrid(self, exec_results: ExecutionPhaseResults, 
+                                      formatted_ranked: str, formatted_hints: str) -> dict:
+        """
+        Phase 3a: Consolidate findings using ranked results and correlation hints.
+        
+        This replaces the original _consolidate_findings with hybrid context.
+        
+        Args:
+            exec_results: Full execution results (for metadata)
+            formatted_ranked: Pre-formatted ranked results by category
+            formatted_hints: Pre-formatted correlation hints
+            
+        Returns:
+            Structured dict with consolidated findings
+        """
+        self.logger.info("🔍 Phase 3a: Consolidating findings (hybrid)...")
+        
+        # Build prompt with ranked results + hints
+        consolidation_prompt = f"""
+## Task: Extract Structured Findings
+
+You are analyzing binary analysis results that have been ranked by relevance and include cross-tool correlations.
+
+## Investigation Goal
+{exec_results.goal}
+
+## Ranked Results ({exec_results.total_steps} total steps, showing top per category)
+{formatted_ranked}
+
+{formatted_hints}
+
+## Required Output Format
+
+Return ONLY valid JSON with this exact structure (no markdown, no explanation):
+
+{{
+  "binary_purpose": "Brief 1-2 sentence description of what the binary does",
+  "security_apis": [
+    {{"address": "0x...", "name": "API_Name", "context": "How it's used (1 sentence)"}}
+  ],
+  "investigation_leads": [
+    {{"address": "0x...", "observation": "What you observed", "hypothesis": "What this might indicate", "priority": "HIGH/MEDIUM/LOW", "next_step": "Specific action to verify"}}
+  ],
+  "artifacts": [
+    {{"address": "0x...", "type": "manifest/string/key", "value": "The actual content (truncated if long)"}}
+  ],
+  "key_functions": [
+    {{"address": "0x...", "name": "Function name", "purpose": "What it does"}}
+  ],
+  "investigation_gaps": [
+    "What aspect still needs investigation"
+  ],
+  "recommended_next_steps": [
+    "Specific action or tool to use next"
+  ]
+}}
+
+RULES:
+1. Include items based on EVIDENCE from the ranked results above
+2. PAY SPECIAL ATTENTION to the Cross-Tool Correlations - these are high-value patterns
+3. investigation_leads captures patterns you find interesting or suspicious
+4. investigation_gaps identifies what's still unknown
+5. recommended_next_steps suggests specific tools/actions for follow-up
+6. Limit each array to the 10 MOST IMPORTANT items
+7. Keep descriptions concise (under 100 chars)
+8. If no items for a category, use an empty array []
+9. Return ONLY the JSON object, nothing else
+"""
+        
+        system_prompt = """You are a binary analysis expert extracting structured findings.
+Output ONLY valid JSON. No markdown code blocks. No explanations. Just the JSON object."""
+        
+        try:
+            response = self.ollama.generate(
+                prompt=consolidation_prompt,
+                system_prompt=system_prompt
+            )
+            
+            # Clean response - remove any markdown code blocks if present
+            cleaned = response.strip()
+            if cleaned.startswith("```"):
+                lines = cleaned.split("\n")
+                lines = [l for l in lines if not l.startswith("```")]
+                cleaned = "\n".join(lines)
+            
+            # Try to parse JSON
+            findings = json.loads(cleaned)
+            
+            # Validate required keys
+            required_keys = ["binary_purpose", "security_apis", "investigation_leads", 
+                           "artifacts", "key_functions", "investigation_gaps", "recommended_next_steps"]
+            for key in required_keys:
+                if key not in findings:
+                    findings[key] = [] if key != "binary_purpose" else "Unknown"
+            
+            self.logger.info(f"✅ Consolidated (hybrid): {len(findings.get('security_apis', []))} APIs, "
+                           f"{len(findings.get('investigation_leads', []))} leads, "
+                           f"{len(findings.get('investigation_gaps', []))} gaps")
+            
+            return findings
+            
+        except json.JSONDecodeError as e:
+            self.logger.warning(f"JSON parse failed in hybrid consolidation: {e}")
+            return {
+                "binary_purpose": "Analysis consolidation failed - see raw results",
+                "security_apis": [],
+                "investigation_leads": [],
+                "artifacts": [],
+                "key_functions": [],
+                "investigation_gaps": ["Consolidation failed - check logs"],
+                "recommended_next_steps": ["Retry analysis"],
+                "_raw_response": response[:2000] if response else ""
+            }
+        except Exception as e:
+            self.logger.error(f"Hybrid consolidation failed: {e}")
+            return {
+                "binary_purpose": f"Consolidation error: {str(e)}",
+                "security_apis": [],
+                "investigation_leads": [],
+                "artifacts": [],
+                "key_functions": [],
+                "investigation_gaps": [],
+                "recommended_next_steps": []
+            }
     
     def _format_results_with_context(self, exec_results: ExecutionPhaseResults) -> str:
         """
         Format execution results with context-aware truncation and summarization.
         
         Uses the context manager to:
-        - Give recent results more detail (tiered context)
+        - Apply sliding window: last MAX_DETAILED_STEPS get full context
+        - Apply tiered summarization: current loop > previous loop > older loops
         - Summarize or truncate large results
         - Stay within context budget
         
@@ -2126,44 +2389,333 @@ Provide a clear, detailed analysis. Start your response with "FINAL RESPONSE:" t
         if not exec_results.tool_executions:
             return "No tool executions recorded."
         
+        # Set current loop for tiered context
+        self.context_manager.set_current_loop(self.current_loop_number)
+        
         sections = []
         total = len(exec_results.tool_executions)
         
+        # Determine sliding window boundary
+        sliding_window_start = max(0, total - self.context_manager.MAX_DETAILED_STEPS)
+        
         for i, tool_exec in enumerate(exec_results.tool_executions, 1):
-            # Determine detail level based on recency
-            is_recent = i > total - self.context_manager.max_recent_detailed
+            # Determine if within sliding window (recent steps)
+            is_in_sliding_window = (i - 1) >= sliding_window_start
             
-            # Process result through context manager
+            # Process result through context manager with tiered context
             result_text = str(tool_exec.result) if tool_exec.result else "No result"
-            display_content, cached = self.context_manager.process_result(
-                tool_name=tool_exec.tool_name,
-                parameters=tool_exec.parameters,
-                result=result_text,
-                goal=exec_results.goal
-            )
-            
-            # Build section with loop-prefixed step ID
             step_id = f"step_L{self.current_loop_number}_{i}"
-            section_lines = [f"\n### {step_id}: {tool_exec.tool_name}"]
             
-            # Add reasoning if present
-            if tool_exec.reasoning:
-                section_lines.append(f"Reasoning: {tool_exec.reasoning}")
+            # Get loop number for this result (default to current loop)
+            result_loop = getattr(tool_exec, 'loop_number', self.current_loop_number)
             
-            # Add parameters
-            param_str = ", ".join([f'{k}="{v}"' for k, v in tool_exec.parameters.items()])
-            section_lines.append(f"Parameters: {param_str}")
-            
-            # Add result
-            section_lines.append(f"Result:\n{display_content}")
-            
-            # Note if result was summarized
-            if cached and cached.is_summarized:
-                section_lines.append(f"[Full result cached as {cached.result_id}]")
-            
-            sections.append("\n".join(section_lines))
+            if is_in_sliding_window:
+                # Within sliding window: use tiered display based on loop age
+                display_content = self.context_manager.get_tiered_display_content(
+                    result=result_text,
+                    result_loop=result_loop,
+                    tool_name=tool_exec.tool_name,
+                    step_id=step_id
+                )
+                
+                # Build full section
+                section_lines = [f"\n### {step_id}: {tool_exec.tool_name}"]
+                
+                # Add reasoning if present
+                if tool_exec.reasoning:
+                    # Truncate long reasoning
+                    reasoning_text = tool_exec.reasoning[:150] + "..." if len(tool_exec.reasoning) > 150 else tool_exec.reasoning
+                    section_lines.append(f"Reasoning: {reasoning_text}")
+                
+                # Add parameters
+                param_str = ", ".join([f'{k}="{v}"' for k, v in tool_exec.parameters.items()])
+                section_lines.append(f"Parameters: {param_str}")
+                
+                # Add result
+                section_lines.append(f"Result:\n{display_content}")
+                
+                sections.append("\n".join(section_lines))
+            else:
+                # Outside sliding window: compressed one-liner with cache hint
+                section = f"\n• {step_id}: {tool_exec.tool_name} - "
+                if len(result_text) > 100:
+                    section += f"{len(result_text):,} chars [use get_cached_result(\"{step_id}\")]"
+                else:
+                    section += result_text[:100]
+                sections.append(section)
         
         return "\n".join(sections)
+    
+    def _consolidate_findings(self, exec_results: ExecutionPhaseResults) -> dict:
+        """
+        Phase 3a: Extract and structure key findings from execution results.
+        
+        This is the first step of two-phase analysis. It extracts key findings
+        into a structured JSON format, drastically reducing context size for
+        the subsequent synthesis step.
+        
+        Args:
+            exec_results: Accumulated results from execution loop
+            
+        Returns:
+            Structured dict with consolidated findings
+        """
+        self.logger.info("🔍 Phase 3a: Consolidating findings...")
+        
+        # Format results (compressed for consolidation)
+        formatted_results = self._format_results_with_context(exec_results)
+        
+        consolidation_prompt = f"""
+## Task: Extract Structured Findings
+
+You are analyzing binary analysis results. Extract the KEY findings into a structured JSON format.
+
+## Investigation Goal
+{exec_results.goal}
+
+## Execution Results ({exec_results.total_steps} steps)
+{formatted_results}
+
+## Required Output Format
+
+Return ONLY valid JSON with this exact structure (no markdown, no explanation):
+
+{{
+  "binary_purpose": "Brief 1-2 sentence description of what the binary does",
+  "security_apis": [
+    {{"address": "0x...", "name": "API_Name", "context": "How it's used (1 sentence)"}}
+  ],
+  "investigation_leads": [
+    {{"address": "0x...", "observation": "What you observed", "hypothesis": "What this might indicate", "priority": "HIGH/MEDIUM/LOW", "next_step": "Specific action to verify"}}
+  ],
+  "artifacts": [
+    {{"address": "0x...", "type": "manifest/string/key", "value": "The actual content (truncated if long)"}}
+  ],
+  "key_functions": [
+    {{"address": "0x...", "name": "Function name", "purpose": "What it does"}}
+  ]
+}}
+
+RULES:
+1. Include items based on EVIDENCE from the tool results above
+2. investigation_leads captures patterns YOU find interesting or suspicious:
+   - observation: What did you see in the data? (API call, string, pattern, behavior)
+   - hypothesis: What could this mean? (potential capability, vulnerability, behavior)
+   - priority: How security-relevant is this lead?
+   - next_step: What specific action would verify or disprove your hypothesis?
+3. Be autonomous - identify leads based on YOUR analysis, not a predefined list
+4. Include leads for anything that warrants deeper investigation
+5. Limit each array to the 10 MOST IMPORTANT items
+6. Keep descriptions concise (under 100 chars)
+7. If no items for a category, use an empty array []
+8. Return ONLY the JSON object, nothing else
+"""
+        
+        system_prompt = """You are a binary analysis expert extracting structured findings.
+Output ONLY valid JSON. No markdown code blocks. No explanations. Just the JSON object."""
+        
+        try:
+            response = self.ollama.generate(
+                prompt=consolidation_prompt,
+                system_prompt=system_prompt
+            )
+            
+            # Clean response - remove any markdown code blocks if present
+            cleaned = response.strip()
+            if cleaned.startswith("```"):
+                # Remove markdown code block
+                lines = cleaned.split("\n")
+                lines = [l for l in lines if not l.startswith("```")]
+                cleaned = "\n".join(lines)
+            
+            # Try to parse JSON
+            findings = json.loads(cleaned)
+            
+            # Validate required keys
+            required_keys = ["binary_purpose", "security_apis", "investigation_leads", "artifacts", "key_functions"]
+            for key in required_keys:
+                if key not in findings:
+                    findings[key] = [] if key != "binary_purpose" else "Unknown"
+            
+            self.logger.info(f"✅ Consolidated: {len(findings.get('security_apis', []))} APIs, "
+                           f"{len(findings.get('investigation_leads', []))} leads, "
+                           f"{len(findings.get('key_functions', []))} functions")
+            
+            return findings
+            
+        except json.JSONDecodeError as e:
+            self.logger.warning(f"JSON parse failed in consolidation: {e}")
+            # Return minimal structure with raw response for fallback
+            return {
+                "binary_purpose": "Analysis consolidation failed - see raw results",
+                "security_apis": [],
+                "investigation_leads": [],
+                "artifacts": [],
+                "key_functions": [],
+                "_raw_response": response[:2000] if response else ""
+            }
+        except Exception as e:
+            self.logger.error(f"Consolidation failed: {e}")
+            return {
+                "binary_purpose": f"Consolidation error: {str(e)}",
+                "security_apis": [],
+                "investigation_leads": [],
+                "artifacts": [],
+                "key_functions": []
+            }
+    
+    def _synthesize_report(self, findings: dict, goal: str) -> str:
+        """
+        Phase 3b: Generate final analysis report from consolidated findings.
+        
+        This is the second step of two-phase analysis. It receives the compact
+        structured findings (not raw results) and writes a complete report.
+        
+        Args:
+            findings: Consolidated findings dict from _consolidate_findings
+            goal: Original investigation goal
+            
+        Returns:
+            Final analysis report string
+        """
+        self.logger.info("📝 Phase 3b: Synthesizing final report...")
+        
+        # Format findings for the synthesis prompt
+        findings_text = json.dumps(findings, indent=2)
+        
+        synthesis_prompt = f"""
+## Task: Write Final Analysis Report
+
+Based on the consolidated findings below, write a comprehensive analysis report.
+
+## Original Goal
+{goal}
+
+## Consolidated Findings
+{findings_text}
+
+## Report Requirements
+
+Write a clear, well-structured report that:
+
+1. **Binary Purpose**: Describe what the binary does based on the findings
+2. **Security Assessment**: 
+   - Discuss investigation leads and their security implications
+   - Highlight HIGH priority leads that warrant further analysis
+   - Note any confirmed or strongly suspected security issues
+3. **Key Artifacts**: Reference important addresses and their significance
+4. **Recommended Next Steps**: What to investigate further based on the leads
+
+## Format
+
+Start your response with "FINAL RESPONSE:" and provide a complete analysis.
+Use markdown formatting. Include specific addresses where relevant.
+End with a clear conclusion - do NOT leave the report incomplete.
+"""
+
+        system_prompt = """You are writing a final binary analysis report.
+Be thorough but concise. Include specific addresses.
+IMPORTANT: You must provide a COMPLETE report with a conclusion. Do not truncate."""
+        
+        try:
+            response = self.ollama.generate(
+                prompt=synthesis_prompt,
+                system_prompt=system_prompt
+            )
+            
+            return response
+            
+        except Exception as e:
+            self.logger.error(f"Synthesis failed: {e}")
+            # Fallback: return findings as formatted text
+            return f"""FINAL RESPONSE:
+
+## Analysis Report (Synthesis Error)
+
+An error occurred during report synthesis: {str(e)}
+
+## Raw Consolidated Findings
+
+**Binary Purpose:** {findings.get('binary_purpose', 'Unknown')}
+
+**Security APIs Found:** {len(findings.get('security_apis', []))}
+**Vulnerabilities:** {len(findings.get('vulnerabilities', []))}
+**Key Functions:** {len(findings.get('key_functions', []))}
+
+Please review the analysis dump for complete details.
+"""
+
+    def _synthesize_report_with_conclusions(self, findings: dict, goal: str, 
+                                            cycle_number: int, 
+                                            correlation_hints: list) -> Tuple[str, Any]:
+        """
+        Phase 3b: Generate final report AND extract CycleConclusions for next planning.
+        
+        This method produces both the user-facing report and structured conclusions
+        that feed into the next cycle's planning phase.
+        
+        Args:
+            findings: Consolidated findings from hybrid consolidation
+            goal: Original investigation goal
+            cycle_number: Current cycle number
+            correlation_hints: List of correlation hint dicts
+            
+        Returns:
+            Tuple of (report_text, CycleConclusions)
+        """
+        from src.models.memory import CycleConclusions
+        
+        self.logger.info("📝 Phase 3b: Synthesizing report with conclusions...")
+        
+        # Generate the report using standard method
+        report = self._synthesize_report(findings, goal)
+        
+        # Extract CycleConclusions from findings
+        key_findings = []
+        
+        # Add security APIs as findings
+        for api in findings.get('security_apis', [])[:5]:
+            key_findings.append({
+                "address": api.get('address', 'unknown'),
+                "finding": f"API: {api.get('name', 'unknown')} - {api.get('context', '')}",
+                "confidence": "HIGH"
+            })
+        
+        # Add investigation leads as findings
+        for lead in findings.get('investigation_leads', [])[:5]:
+            key_findings.append({
+                "address": lead.get('address', 'unknown'),
+                "finding": f"{lead.get('observation', '')} - {lead.get('hypothesis', '')}",
+                "confidence": lead.get('priority', 'MEDIUM')
+            })
+        
+        # Extract correlation insights
+        correlation_insights = []
+        for hint in correlation_hints[:5]:
+            if hint.get('significance') in ['HIGH', 'MEDIUM']:
+                mentions_summary = ", ".join(m.split(":")[0] for m in hint.get('mentions', [])[:3])
+                correlation_insights.append(
+                    f"{hint.get('address', '?')} appears in: {mentions_summary}"
+                )
+        
+        # Build CycleConclusions
+        conclusions = CycleConclusions(
+            cycle_number=cycle_number,
+            binary_purpose=findings.get('binary_purpose', 'Unknown'),
+            key_findings=key_findings,
+            investigation_gaps=findings.get('investigation_gaps', []),
+            recommended_next_steps=findings.get('recommended_next_steps', []),
+            correlation_insights=correlation_insights,
+            tools_executed=len(findings.get('key_functions', []))  # Rough proxy
+        )
+        
+        self.logger.info(f"✅ Cycle {cycle_number} conclusions: "
+                        f"{len(key_findings)} findings, "
+                        f"{len(correlation_insights)} correlations, "
+                        f"{len(conclusions.investigation_gaps)} gaps")
+        
+        return report, conclusions
+
 
     def _evaluate_goal_achievement(
         self, 
@@ -2339,11 +2891,11 @@ Keywords: function analysis, reverse engineering, {old_name}, {new_name}, behavi
             # Add to vector store using CAG manager  
             if hasattr(self.cag_manager, 'vector_store') and self.cag_manager.vector_store:
                 try:
-                    # Generate embedding via Ollama
+                    # Generate embedding
                     content_text = function_doc['content']
-                    embeddings = Bridge.get_ollama_embeddings([content_text])
+                    embeddings = Bridge.get_embeddings([content_text])
                     if not embeddings:
-                        self.logger.warning("Ollama embedding unavailable – skipping RAG integration for function")
+                        self.logger.warning("Embedding service unavailable – skipping RAG integration for function")
                         return
                     import numpy as np
                     embedding = np.array(embeddings[0], dtype=np.float32)
@@ -3232,11 +3784,18 @@ Keywords: function analysis, reverse engineering, {old_name}, {new_name}, behavi
             goal: The goal to plan for
             
         Returns:
-            The prompt string
+            The prompt string (tuple of system_prompt, user_prompt)
         """
         # Get system and user prompts
         system_prompt, user_prompt = self._build_structured_prompt(phase="planning")
         user_prompt += f"\n\nGoal: {goal}\n"
+        
+        # Add previous cycle conclusions if available (hybrid context integration)
+        if hasattr(self, 'last_cycle_conclusions') and self.last_cycle_conclusions:
+            conclusions = self.last_cycle_conclusions
+            user_prompt += f"\n\n## Previous Cycle Conclusions (Cycle {conclusions.cycle_number})\n"
+            user_prompt += conclusions.format_for_planning()
+            user_prompt += "\n\n**Use these findings to refine your investigation plan.**\n"
         
         # Add function call best practices to system prompt
         if hasattr(config, 'FUNCTION_CALL_BEST_PRACTICES') and config.FUNCTION_CALL_BEST_PRACTICES:

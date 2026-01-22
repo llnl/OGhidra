@@ -19,8 +19,8 @@ OGhidra combines the power of local LLMs with Ghidra's reverse engineering capab
 - **Use local AI models** - Complete privacy with models running on your own hardware
 - **Deep Data Inspection** - Leverage the custom OGhidraMCP plugin to read raw bytes and analyze memory directly
 - **Multi-Instance Analysis** - Run multiple Ghidra instances simultaneously, analyzing different binaries in parallel
+- **Google Gemini API Integration** - Connect to powerful cloud models like Gemini 1.5 Pro and Flash
 - **Work with modern GUI or CLI** - Choose the interface that suits your workflow
-
 
 ```mermaid
 graph TD
@@ -309,7 +309,6 @@ pip install -r requirements.txt
    # CAG (Cache-Augmented Generation) Settings
    CAG_ENABLED=true
    CAG_KNOWLEDGE_CACHE_ENABLED=true
-   CAG_SESSION_CACHE_ENABLED=true
 
    # LLM Logging Configuration
    # Enable comprehensive logging of all LLM interactions (prompts, responses, timing, tokens)
@@ -641,6 +640,12 @@ For distributed setups (e.g., running Ollama on a GPU server), configure remote 
 3. Click **Test Connection** to verify
 4. Click **Save** - changes apply immediately without restart
 
+### Google API Configuration (Cloud)
+
+1.  Set `LLM_PROVIDER=external` and `EXTERNAL_PROVIDER=google` in your `.env`.
+2.  Add your API key: `EXTERNAL_API_KEY=AIza...`.
+3.  (Optional) Configure model: `EXTERNAL_MODEL=gemini-1.5-pro-latest`.
+
 ### Remote Ollama Setup Example
 
 ```env
@@ -702,7 +707,6 @@ CAG injects cached knowledge directly into AI prompts for better performance:
 ```env
 CAG_ENABLED=true
 CAG_KNOWLEDGE_CACHE_ENABLED=true
-CAG_SESSION_CACHE_ENABLED=true
 CAG_TOKEN_LIMIT=2000
 ```
 
@@ -750,6 +754,21 @@ ARTIFACT: [function] Decryptor = 0x180045000
 ```
 
 Artifacts are automatically parsed, stored in session memory, and displayed in future prompts.
+
+### Hybrid Context Management (New in v1.7)
+
+To solve the "context overload" problem in binary analysis, OGhidra now employs a sophisticated hybrid processing engine:
+
+1.  **Relevance Ranking**: Tool results are scored and ranked by relevance to your current goal, ensuring the AI sees the most critical information first (e.g., specific imports or strings) even when output is massive.
+2.  **Correlation Hints**: The system automatically detects addresses and values that appear across multiple different tool outputs (e.g., an address in an import list that is also referenced in a string). These "cross-tool correlations" are surfaced as high-priority hints.
+3.  **Cycle Conclusions**: At the end of each analysis cycle, the AI generates structured conclusions (Key Findings, Investigation Gaps) which are explicitly passed to the next planning phase, ensuring continuity and focus.
+
+### Google Gemini API Support
+
+OGhidra now supports the Google Gemini API, offering a powerful alternative to local models:
+- **Models**: Access Gemini 1.5 Pro, Flash, and Experimental models.
+- **Performance**: High-speed inference and massive context windows (up to 2M tokens).
+- **Configuration**: Simply set `LLM_PROVIDER=google` and `EXTERNAL_API_KEY` in your `.env`.
 
 ---
 
