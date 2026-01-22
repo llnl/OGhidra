@@ -1,0 +1,128 @@
+# =========================
+# Python
+# =========================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# =========================
+# Virtual Environments
+# =========================
+venv/
+.venv/
+env/
+ENV/
+.conda/
+
+# =========================
+# IDE / Editor
+# =========================
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+.settings/
+*.sublime-project
+*.sublime-workspace
+
+# =========================
+# Environment & Secrets
+# =========================
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+credentials.json
+secrets.yaml
+
+# =========================
+# Claude Code (Local AI Guidance)
+# =========================
+CLAUDE.md
+
+# =========================
+# Testing & Coverage
+# =========================
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+.hypothesis/
+
+# =========================
+# Logs
+# =========================
+*.log
+logs/
+oghidra_debug.log
+
+# =========================
+# OS Generated
+# =========================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# =========================
+# Gradle / Java Build (OGhidraMCP)
+# =========================
+OGhidraMCP/build/
+OGhidraMCP/.gradle/
+OGhidraMCP/bin/
+*.class
+*.jar
+!OGhidraMCP/lib/*.jar
+
+# =========================
+# Build Artifacts
+# =========================
+*.zip
+*.tar.gz
+*.rar
+
+# =========================
+# Benchmark Generated Data
+# =========================
+benchmark/ground_truth/*.json
+benchmark/reports/*.html
+benchmark/reports/*.csv
+benchmark/reports/*.json
+benchmark/reports/*.md
+benchmark/reports/figures/
+
+# =========================
+# Misc
+# =========================
+.cache/
+*.bak
+*.tmp
+*.temp

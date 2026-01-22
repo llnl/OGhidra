@@ -33,6 +33,7 @@ from src.models.memory import (
     ToolExecution
 )
 from src.context_manager import ContextManager
+from src.compaction import ResultCompactor, CompactionTier
 from datetime import datetime
 
 # Configure logging
@@ -110,6 +111,15 @@ class Bridge:
             enable_summarization=self.config.ollama.enable_result_summarization,
             enable_caching=self.config.ollama.result_cache_enabled,
             enable_tiered_context=self.config.ollama.tiered_context_enabled
+        )
+
+        # Result compactor for analysis phase (Claude Code-style compaction)
+        self.result_compactor = ResultCompactor(
+            ollama_client=self.ollama,
+            budget_chars=int(self.config.ollama.context_budget * 4 * 0.4),  # 40% of context for results
+            full_detail_count=3,      # Last 3 results at full detail
+            summary_count=7,          # Next 7 as summaries
+            enable_llm_summary=self.config.ollama.enable_result_summarization
         )
         
         if self.enable_cag:
@@ -2110,60 +2120,45 @@ Provide a clear, detailed analysis. Start your response with "FINAL RESPONSE:" t
     
     def _format_results_with_context(self, exec_results: ExecutionPhaseResults) -> str:
         """
-        Format execution results with context-aware truncation and summarization.
-        
-        Uses the context manager to:
-        - Give recent results more detail (tiered context)
-        - Summarize or truncate large results
-        - Stay within context budget
-        
+        Format execution results with Claude Code-style compaction.
+
+        Uses the ResultCompactor to:
+        - Keep recent results at full detail (Tier 0)
+        - Summarize older results to 2-3 sentences (Tier 1)
+        - Compress ancient results to statistics only (Tier 2)
+        - Enforce hard budget limits with graceful degradation
+
         Args:
             exec_results: Accumulated tool execution results
-            
+
         Returns:
             Formatted string suitable for prompt inclusion
         """
         if not exec_results.tool_executions:
             return "No tool executions recorded."
-        
-        sections = []
-        total = len(exec_results.tool_executions)
-        
-        for i, tool_exec in enumerate(exec_results.tool_executions, 1):
-            # Determine detail level based on recency
-            is_recent = i > total - self.context_manager.max_recent_detailed
-            
-            # Process result through context manager
-            result_text = str(tool_exec.result) if tool_exec.result else "No result"
-            display_content, cached = self.context_manager.process_result(
-                tool_name=tool_exec.tool_name,
-                parameters=tool_exec.parameters,
-                result=result_text,
-                goal=exec_results.goal
-            )
-            
-            # Build section with loop-prefixed step ID
-            step_id = f"step_L{self.current_loop_number}_{i}"
-            section_lines = [f"\n### {step_id}: {tool_exec.tool_name}"]
-            
-            # Add reasoning if present
-            if tool_exec.reasoning:
-                section_lines.append(f"Reasoning: {tool_exec.reasoning}")
-            
-            # Add parameters
-            param_str = ", ".join([f'{k}="{v}"' for k, v in tool_exec.parameters.items()])
-            section_lines.append(f"Parameters: {param_str}")
-            
-            # Add result
-            section_lines.append(f"Result:\n{display_content}")
-            
-            # Note if result was summarized
-            if cached and cached.is_summarized:
-                section_lines.append(f"[Full result cached as {cached.result_id}]")
-            
-            sections.append("\n".join(section_lines))
-        
-        return "\n".join(sections)
+
+        # Use the compactor for Claude Code-style hierarchical summarization
+        compacted_results, stats = self.result_compactor.compact(
+            tool_executions=exec_results.tool_executions,
+            goal=exec_results.goal
+        )
+
+        # Log compaction statistics
+        self.logger.info(f"📦 Compaction: {stats.summary()}")
+
+        # Format the compacted results for prompt inclusion
+        formatted = self.result_compactor.format_for_prompt(
+            compacted_results=compacted_results,
+            stats=stats,
+            include_stats_header=True
+        )
+
+        # Add key findings summary if available
+        findings_summary = self.result_compactor.create_findings_summary(compacted_results)
+        if findings_summary:
+            formatted = f"{findings_summary}\n\n{formatted}"
+
+        return formatted
 
     def _evaluate_goal_achievement(
         self, 
