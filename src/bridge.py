@@ -31,10 +31,17 @@ from src.models.memory import (
     StructuredPrompt,
     AnalysisState,
     ExecutionPhaseResults,
-    ToolExecution
+    ToolExecution,
+    ExecutionSignal,
+    ExecutionGate
 )
+from src.execution_gate import ExecutionGatekeeper
+from src.user_question import QuestionHandler
+from src.session_compactor import SessionCompactor
 from src.context_manager import ContextManager
 from src.analysis_dump import AnalysisDumper
+from src.coverage_tracker import CoverageTracker
+from src.lead_tracker import LeadTracker
 from datetime import datetime
 
 # Configure logging
@@ -198,6 +205,23 @@ class Bridge:
         # UI callback for chain of thought updates (set by UI if present)
         self._ui_cot_callback = None
         
+        # Interactive Execution Gate (OpenCode-inspired)
+        self.execution_gate = ExecutionGatekeeper(self.llm_config)
+        self._ui_gate_callback = None  # Set by UI for gate events
+        
+        # Question Tool — AI asks user mid-investigation (OpenCode-inspired)
+        self.question_handler = QuestionHandler()
+        self._ui_question_callback = None  # Set by UI for question display
+        
+        # Session Compactor — Smart context pruning (OpenCode-inspired)
+        self.session_compactor = SessionCompactor(self.llm_config, self.ollama)
+        
+        # Coverage Tracker        # Initialize coverage tracker
+        self.coverage_tracker = CoverageTracker()
+        
+        # Initialize lead tracker
+        self.lead_tracker = LeadTracker()
+        
         self.logger.info("Bridge initialized successfully")
 
     def reload_llm_client(self):
@@ -232,6 +256,35 @@ class Bridge:
             
         Bridge.set_ollama_client(self.ollama)
         print(f"[Bridge] Client reloaded. Provider: {self.provider}")
+    
+    def _get_max_result_chars(self) -> int:
+        """
+        Calculate max result characters based on context budget from config.
+        
+        The limit scales proportionally with CONTEXT_BUDGET from .env:
+        - Baseline: 10% of total execution character budget
+        - Dynamic: 25% of remaining execution budget (if higher than baseline)
+        - Minimum: 5000 chars to ensure basic functionality
+        - Fallback: 10000 chars when context_manager not available
+        
+        Returns:
+            Maximum number of characters allowed for a single result.
+        """
+        if self.context_manager and hasattr(self.context_manager, 'budget'):
+            budget = self.context_manager.budget
+            # Total execution chars = execution_budget * chars_per_token
+            total_exec_chars = budget.execution_budget * int(budget.chars_per_token)
+            # Baseline: 10% of total execution budget (scales with context window)
+            baseline_limit = max(5000, total_exec_chars // 10)
+            
+            # Dynamic: 25% of remaining execution budget
+            remaining = budget.get_remaining_execution_chars()
+            dynamic_limit = max(baseline_limit, remaining // 4)
+            
+            return dynamic_limit
+        else:
+            # Fallback when context_manager not available
+            return 10000
         
     @classmethod
     def get_sentence_transformer(cls):
@@ -328,6 +381,12 @@ class Bridge:
         # Send to UI callback if registered
         if self._ui_cot_callback:
             self._ui_cot_callback(update_type, content)
+
+    def _emit_gate(self, gate: ExecutionGate):
+        """Emit a gate event to terminal and UI."""
+        self._emit_cot("Gate", f"\u26a0\ufe0f EXECUTION PAUSED: {gate.reason} [trigger={gate.trigger}]")
+        if self._ui_gate_callback:
+            self._ui_gate_callback(gate)
 
     def _parse_and_save_artifacts(self, response: str):
         """
@@ -451,26 +510,49 @@ You can help analyze binary files by executing commands through GhidraMCP."""
             )
             system_sections.append(phase_instructions)
         elif phase == "review":
-            # Review phase uses execution instructions + emphasis on quality
-            phase_instructions = self.llm_config.execution_system_prompt.format(
-                user_task_description="[User's goal will be provided in the user message]",
-                FUNCTION_CALL_BEST_PRACTICES=self.llm_config.FUNCTION_CALL_BEST_PRACTICES
-            )
-            # Add review-specific guidance
-            review_guidance = """
+            # Review phase: Concise, focused on quality assessment and guidance
+            thoroughness = getattr(self.llm_config, 'review_thoroughness', 'standard')
+            
+            # Define thoroughness-specific criteria
+            if thoroughness == 'basic':
+                criteria_detail = """
+    - Basic: Quick sanity check - did we accomplish the user's goal at all?
+    - Focus: PASS/FAIL assessment only
+    - Depth: Minimal - just check if the main objective was addressed"""
+            elif thoroughness == 'thorough':
+                criteria_detail = """
+    - Thorough: Comprehensive deep review
+    - Focus: Detailed verification of all aspects, edge cases, and potential issues
+    - Depth: Full - scrutinize methodology, verify all claims, check for missing analysis"""
+            else:  # standard
+                criteria_detail = """
+    - Standard: Balanced review of completeness and quality
+    - Focus: Core objectives met, major gaps identified
+    - Depth: Moderate - verify key points and identify obvious issues"""
+            
+            review_instructions = f"""
+    You are a Quality Review Assistant for reverse engineering analysis.
     
-    CRITICAL FOR REVIEW PHASE:
-    - You MUST use the EXECUTE: format to call tools
-    - Do NOT use markdown code blocks like ```tool_code``` or ```tool_execution```
-    - CORRECT FORMAT: EXECUTE: tool_name(param1="value1", param2="value2")
-    - INCORRECT FORMATS: ```tool_code\ntool_name()```, tool_execution tool_name(), etc.
+    YOUR REVIEW TASK (Thoroughness: {thoroughness}):
+    1. Evaluate the completeness and accuracy of the analysis performed
+    2. Identify any gaps, errors, or areas that need improvement
+    3. Assess whether the stated goal has been fully achieved
+    4. Suggest specific next steps or phases if the analysis is incomplete
+    {criteria_detail}
     
-    If you want to call a tool, output ONLY:
-    EXECUTE: tool_name(param1="value1")
+    OUTPUT FORMAT:
+    Provide a structured review with:
+    1. **Status**: APPROVED or NEEDS_IMPROVEMENT
+    2. **Summary**: Brief assessment of what was accomplished
+    3. **Gaps/Issues**: List any problems or missing elements (skip if APPROVED)
+    4. **Next Steps**: Specific recommendations for improvement (if applicable)
+       - Suggest which phase to revisit (Planning/Execution/Analysis)
+       - Recommend specific tools or approaches to use
+       - Prioritize the most critical actions
     
-    No code blocks, no extra formatting, just the EXECUTE line.
+    Be constructive and specific in your feedback.
             """
-            system_sections.append(phase_instructions + review_guidance)
+            system_sections.append(review_instructions)
         
         # Combine all system sections
         system_prompt = "\n\n".join(system_sections)
@@ -810,20 +892,13 @@ You can help analyze binary files by executing commands through GhidraMCP."""
             if not normalized_command:
                 exists, error_message, similar_commands, all_available_commands = self._check_command_exists(command_name)
                 if not exists:
-                    # Construct the enhanced error message with the list of all tools
-                    tools_list_str = "\nAvailable Ghidra Tools:\n"
-                    if all_available_commands:
-                        for i, tool in enumerate(sorted(all_available_commands)):
-                            tools_list_str += f"  - {tool}\n"
+                    # Provide concise error with suggestions only
+                    if similar_commands:
+                        suggestion_str = f" Did you mean: {', '.join(similar_commands[:3])}?"
                     else:
-                        tools_list_str += "  (Could not fetch tool list or no tools available via client introspection).\n"
+                        suggestion_str = ""
                     
-                    # Also mention bridge-level commands
-                    tools_list_str += "\nBridge-level commands:\n"
-                    tools_list_str += "  - get_cached_result(result_id): Retrieve full cached result\n"
-                    tools_list_str += "  - scan_function_pointer_tables(): Scan for vtables/dispatch tables\n"
-                    
-                    enhanced_unknown_command_error = f"{error_message}\n\nTo help you choose a valid tool, here is a list of available Ghidra tools:\n{tools_list_str}"
+                    enhanced_unknown_command_error = f"{error_message}{suggestion_str}"
                     raise ValueError(enhanced_unknown_command_error)
                 
             # Check for required parameters
@@ -835,6 +910,40 @@ You can help analyze binary files by executing commands through GhidraMCP."""
                     command_name, params, error_message
                 )
                 raise ValueError(enhanced_error)
+            
+            # --- IMPROVEMENT: Semantic String Categorization ---
+            # If the command is 'list_strings' and a 'category' or generic filter is used, 
+            # translate it to a regular expression for the backend string search.
+            if normalized_command == "list_strings":
+                str_filter = params.get("filter", "")
+                
+                # Check for "category" pseudo-argument in filter or explicit param
+                # Note: The agent might pass category="filesystem" or filter="category:filesystem"
+                category = params.get("category")
+                if not category and str_filter and str_filter.startswith("category:"):
+                    category = str_filter.split(":", 1)[1]
+                
+                if category:
+                    if category == "filesystem":
+                        # Regex for paths (drive letters, UNC, extensions)
+                        # Ghidra simple search might not fully support complex regex, but basic patterns work.
+                        # We'll use a broad pattern or just specific extension terms if regex isn't reliable.
+                        # Assuming the backend supports contains check or basic regex.
+                        # Let's set a reliable text filter for now.
+                        params["filter"] = ".exe"  # Default to executables if generic
+                        # If we can support regex in the backend, we would pass that.
+                        # For now, we inject a clearer filter.
+                        self.logger.info(f"🔄 Converted category='filesystem' to filter='.exe' (approximate)")
+                    
+                    elif category == "registry":
+                        params["filter"] = "HKLM" # Basic start
+                        self.logger.info(f"🔄 Converted category='registry' to filter='HKLM'")
+                    
+                    elif category == "urls":
+                        params["filter"] = "http"
+                        self.logger.info(f"🔄 Converted category='urls' to filter='http'")
+                        
+            # ---------------------------------------------------
                 
             # Enhanced CAG memory-based duplicate detection
             if self.enable_cag and self.cag_manager:
@@ -871,6 +980,27 @@ You can help analyze binary files by executing commands through GhidraMCP."""
             
             result = command_func(**params)
             
+            # --- IMPROVEMENT: Auto-fallback for Import XREFs ---
+            # if get_function_xrefs returns nothing, it might be an import thunk (e.g. LoadLibraryW)
+            # We should hint the user to use get_xrefs_to on the address if possible, or try to resolve it.
+            if normalized_command == "get_function_xrefs" and (not result or "0" in str(result)):
+                 # If empty result for a function name, it might be an import.
+                 # We can't easily auto-chain without address, but we can provide a specific hint.
+                 if not result:
+                     result = [] # Ensure it's a list if None
+                 
+                 # Add a "fake" result entry with a hint
+                 hint_entry = {
+                     "name": "HINT: Import Thunk?",
+                     "address": "TRY_BELOW",
+                     "references": ["If this is an external API (like LoadLibrary), split into two steps:",
+                                   "1. Find address: list_imports(filter='name')",
+                                   "2. Get XREFs: get_xrefs_to(address='...')"]
+                 }
+                 if isinstance(result, list):
+                     result.append(hint_entry)
+            # ---------------------------------------------------
+
             # Cache the result for future use
             self._cache_result(normalized_command, cache_key, params, result)
             
@@ -1062,6 +1192,22 @@ You can help analyze binary files by executing commands through GhidraMCP."""
             self.executed_tools = set()  # Reset tool tracking for new query
             self.step_result_map = {}  # Reset step result map for new query
             
+            # Reset coverage tracker for fresh investigation
+            if self.coverage_tracker:
+                self.coverage_tracker.reset()
+            # Reset lead tracker
+            if self.lead_tracker:
+                self.lead_tracker.reset()
+            
+            # Depth escalation: each cycle gets progressively deeper instructions
+            DEPTH_INSTRUCTIONS = {
+                1: "RECONNAISSANCE: List imports, strings, exports. Identify binary purpose, compiler, and key security-related APIs. Cover as many investigation areas as possible at a surface level.",
+                2: "TARGETED SEARCH: Follow up on HIGH-priority leads from cycle 1. Search for service/privilege/path/registry strings. Focus on uncovered investigation areas.",
+                3: "DEEP TRACE: Decompile callers of security-critical APIs. Trace data flow (lpApplicationName, lpCommandLine, file paths) to find concrete vulnerabilities.",
+                4: "VERIFICATION: Confirm or deny hypotheses. Check if paths are quoted, permissions are validated, DLLs load from absolute paths, etc.",
+                5: "GAP FILL: Address ALL remaining uncovered checklist items. Re-verify HIGH findings. Summarize confirmed vulnerabilities with evidence.",
+            }
+            
             # Ensure context is initialized
             if not isinstance(self.context, list):
                 if isinstance(self.context, dict) and 'history' in self.context:
@@ -1116,8 +1262,13 @@ You can help analyze binary files by executing commands through GhidraMCP."""
                 else:
                     plan_response = self._generate_plan(query)
                 
+                # Inject depth instruction for this cycle
+                depth_instruction = DEPTH_INSTRUCTIONS.get(cycle, DEPTH_INSTRUCTIONS[5])
+                plan_response = f"## Cycle {cycle} Depth: {depth_instruction}\n\n{plan_response}"
+                
                 self.logger.info(f"✅ Planning completed: {len(plan_response)} chars")
                 self._emit_cot("Status", f"Planning completed ({len(plan_response)} chars)")
+                self._emit_cot("Depth", f"Cycle {cycle}: {depth_instruction.split(':')[0]}")
                 
                 # PHASE 2: Execution Loop (INNER LOOP)
                 self.logger.info(f"🔧 Cycle {cycle} - Phase 2: Execution Loop (max {max_exec_steps} steps)")
@@ -1126,7 +1277,43 @@ You can help analyze binary files by executing commands through GhidraMCP."""
                 exec_results = self._execution_loop(plan_response, max_steps=max_exec_steps)
                 self.logger.info(f"✅ Execution loop completed: {exec_results.total_steps} steps executed")
                 self._emit_cot("Status", f"Execution completed: {exec_results.total_steps} tools executed")
+            
+                # Check if execution gate triggered during this cycle
+                if exec_results.gates_triggered:
+                    gate_count = len(exec_results.gates_triggered)
+                    gate_summary = "; ".join(g.reason[:60] for g in exec_results.gates_triggered[-3:])
+                    self._emit_cot("Gate", f"⚠️ {gate_count} gate(s) triggered this cycle: {gate_summary}")
+                    self.logger.info(f"🚧 {gate_count} gate(s) fired during execution: {gate_summary}")
                 
+                # Check if AI asked a question — pause for user input
+                if exec_results.pending_question:
+                    q = exec_results.pending_question
+                    self._emit_cot("Status", f"⏸️ Waiting for user answer: {q.question[:80]}")
+                    self.logger.info(f"⏸️ Question pending — Phase 1: Log and continue")
+                    # Phase 1: Log and continue (Phase 2 will add UI blocking)
+                    # Clear the question so the loop can proceed
+                    exec_results.pending_question = None
+                
+                # Session Compaction — Check if context is approaching limits
+                if self.session_compactor and self.session_compactor.should_compact(exec_results):
+                    self._emit_cot("Compaction", "📦 Context approaching limit, compacting...")
+                    self.logger.info("📦 Triggering session compaction")
+                    
+                    # Strategy 1: Prune old tool outputs
+                    prune_result = self.session_compactor.prune(exec_results)
+                    self._emit_cot("Compaction", 
+                        f"📦 Pruned {prune_result.results_pruned} results: "
+                        f"{prune_result.original_chars} → {prune_result.compacted_chars} chars")
+                    
+                    # Strategy 2: If still over budget, LLM-summarize
+                    if self.session_compactor.should_compact(exec_results):
+                        compact_result = self.session_compactor.compact(exec_results, query)
+                        if compact_result.summary:
+                            exec_results.compaction_summary = compact_result.summary
+                            self._emit_cot("Compaction", 
+                                f"📦 LLM compaction: {compact_result.compacted_chars} chars summary")
+                            self.logger.info(f"📦 LLM compaction complete: {compact_result.compacted_chars} chars")
+            
                 # PHASE 3: Analysis
                 self.logger.info(f"🧠 Cycle {cycle} - Phase 3: Analysis")
                 self._emit_cot("Phase", f"Phase 3: Analysis")
@@ -1441,7 +1628,7 @@ You can help analyze binary files by executing commands through GhidraMCP."""
                 self.cag_manager.update_session_from_bridge_context(self.context)
                 
                 # Get memory-enhanced prompt context to prevent redundant operations
-                memory_context = self.cag_manager.enhance_prompt_with_memory_context(goal_statement)
+                memory_context = self.cag_manager.enhance_prompt_with_memory_context(self.current_goal or "analysis")
                 if memory_context:
                     user_prompt = f"{memory_context}\n\n{user_prompt}"
             
@@ -1547,7 +1734,7 @@ You can help analyze binary files by executing commands through GhidraMCP."""
                     self.add_to_context("system", guidance_prompt)
             
             # If no commands but the response indicates goal completion, mark as achieved
-            if not commands and ("GOAL ACHIEVED" in response.upper() or "GOAL COMPLETE" in response.upper()):
+            if not commands and ("INVESTIGATION COMPLETE" in response.upper() or "GOAL ACHIEVED" in response.upper()):
                 logging.info("AI indicates the goal has been achieved")
                 self.goal_achieved = True
                 all_results.append(f"Step {step_count} - Goal achievement indicated: {response}")
@@ -1574,13 +1761,8 @@ You can help analyze binary files by executing commands through GhidraMCP."""
                     else:
                         execution_result = str(result)
                     
-                    # Dynamic truncation based on context budget
-                    # Default: 15,000 chars (~3,750 tokens) - increased from previous 6,000
-                    max_result_chars = 15000
-                    if self.context_manager and hasattr(self.context_manager, 'budget'):
-                        remaining = self.context_manager.budget.get_remaining_execution_chars()
-                        # Allow up to 25% of remaining budget or default, whichever is larger
-                        max_result_chars = max(15000, remaining // 4)
+                    # Dynamic truncation based on context budget from config
+                    max_result_chars = self._get_max_result_chars()
                     
                     context_result = execution_result
                     if len(execution_result) > max_result_chars:
@@ -1742,8 +1924,6 @@ NAMING QUALITY CHECK:
 ✅ USE specific names based on: error messages, protocol operations, actual behavior
    Examples: "handle_http2_stream_close", "validate_tls_handshake", "parse_certificate_data"
 
-If you can derive a MORE SPECIFIC name from the analysis (especially from error messages or AI summary), you MUST call rename_function again with the better name.
-
 Only provide FINAL RESPONSE when:
 1. The function name is SPECIFIC and DESCRIPTIVE (not generic)
 2. You've investigated all available information (strings, errors, AI analysis)
@@ -1868,6 +2048,15 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
             plan=plan
         )
         
+        # Reset gatekeeper state for this loop
+        self.execution_gate.reset()
+        
+        # Check for any user feedback from a previous gate pause
+        gate_feedback = self.execution_gate.consume_feedback()
+        if gate_feedback:
+            self.logger.info(f"📝 Injecting user feedback from previous gate: {gate_feedback[:100]}")
+            plan = plan + f"\n\n## User Guidance\n{gate_feedback}"
+        
         self.logger.info(f"🔄 Starting execution loop (max {max_steps} steps)")
         
         # Initialize analysis dumper for this loop
@@ -1883,11 +2072,13 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
             system_prompt, user_prompt = self._build_execution_loop_prompt(exec_results, step)
             
             # Ask AI: "What's the next tool to execute?"
+            print(f"[Bridge] Execution Loop Step {step}: Requesting AI decision...")
             response = self.ollama.generate_with_phase(
                 user_prompt,
                 phase="execution",
                 system_prompt=system_prompt
             )
+            print(f"[Bridge] Received AI response (len={len(response)})")
             
             self.logger.info(f"Received execution loop response: {response[:100]}...")
             
@@ -1897,6 +2088,23 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
                 exec_results.investigation_complete = True
                 exec_results.completed_at = datetime.now()
                 break
+            
+            # Check for user question (ASK_USER directive)
+            if "ASK_USER:" in response:
+                question = self.question_handler.parse_from_response(response)
+                if question:
+                    self.logger.info(f"❓ AI asks: {question.question}")
+                    self._emit_cot("Question", f"❓ AI asks: {question.question}")
+                    if question.options:
+                        self._emit_cot("Question", f"   Options: {' | '.join(question.options)}")
+                    
+                    # Emit to UI if callback is set
+                    if self._ui_question_callback:
+                        self._ui_question_callback(question)
+                    
+                    exec_results.pending_question = question
+                    self.logger.info("⏸️ Execution paused — waiting for user input")
+                    break  # Pause execution loop
             
             # Extract reasoning
             reasoning = None
@@ -1922,6 +2130,30 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
             
             # Execute tools (Batching Support)
             for cmd_name, cmd_params in commands:
+                # CRITICAL: Reset filtering state at start of each iteration
+                # This prevents stale data from previous iterations leaking into cache
+                full_result_before_filter = None
+                
+                # --- PRE-EXECUTION GATE CHECK ---
+                gate_signal = self.execution_gate.check_before_execution(
+                    cmd_name, cmd_params, exec_results.tool_executions
+                )
+                if gate_signal == ExecutionSignal.PAUSE:
+                    gate = self.execution_gate.get_gate_reason()
+                    if gate:
+                        exec_results.gates_triggered.append(gate)
+                        self._emit_gate(gate)
+                    self.logger.warning(f"🚧 Pre-execution gate paused loop at step {step}")
+                    # Phase 1: Log and continue (Phase 2 will truly block)
+                elif gate_signal == ExecutionSignal.ABORT:
+                    gate = self.execution_gate.get_gate_reason()
+                    if gate:
+                        exec_results.gates_triggered.append(gate)
+                        self._emit_gate(gate)
+                    exec_results.investigation_complete = True
+                    exec_results.completed_at = datetime.now()
+                    return exec_results
+                
                 try:
                     # Generate signature for duplicate detection
                     param_sig = str(sorted(cmd_params.items())) if cmd_params else ""
@@ -1967,6 +2199,44 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
                     # Execute the tool
                     result = self.execute_command(cmd_name, cmd_params)
                     
+                    # EXECUTION-PHASE RANKING: Filter large results to preserve analysis context
+                    LARGE_RESULT_TOOLS = ['list_functions', 'list_imports', 'list_strings', 'list_exports']
+                    RANKING_THRESHOLD = 100  # Filter if result has >100 items
+                    
+                    if cmd_name in LARGE_RESULT_TOOLS:
+                        # Check if result is large enough to warrant filtering
+                        item_count = 0
+                        if isinstance(result, list):
+                            item_count = len(result)
+                        elif isinstance(result, dict):
+                            item_count = len(result.get('items', [])) or len(result.get('functions', [])) or len(result.get('imports', []))
+                        
+                        if item_count > RANKING_THRESHOLD:
+                            self.logger.info(f"📊 Large result detected ({item_count} items), applying execution-phase ranking")
+                            
+                            # IMPORTANT: Store full result BEFORE filtering
+                            # This ensures get_cached_result() can access the complete data
+                            full_result_before_filter = result
+                            
+                            # Filter result to top 20 most relevant items  
+                            filtered_result = self._execution_agent_rank(
+                                tool_name=cmd_name,
+                                result=result,
+                                goal=exec_results.goal,  
+                                max_items=20
+                            )
+                            
+                            # Replace result with filtered version for analysis
+                            result = filtered_result
+                            
+                            # Add a note about the filtering so the user/agent knows
+                            if isinstance(result, list):
+                                result.append(f"... (Showing top 20 of {item_count} items. Full list cached.)")
+                            elif isinstance(result, dict) and 'items' in result:
+                                result['note'] = f"Showing top 20 of {item_count} items. Full list cached."
+                                
+                            self.logger.info(f"💾 Using filtered version for analysis ({len(result) if isinstance(result, list) else 'dict'} items)")
+                    
                     # Display the result to the user
                     self._display_tool_result(cmd_name, result)
                     
@@ -1977,7 +2247,14 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
                         result_str = str(result)
                     
                     # Store the full result for caching before truncation
-                    full_result_str = result_str
+                    # If ranking was applied, cache the ORIGINAL unfiltered result
+                    if full_result_before_filter is not None:
+                        if isinstance(full_result_before_filter, (dict, list)):
+                            full_result_str = json.dumps(full_result_before_filter, indent=2)
+                        else:
+                            full_result_str = str(full_result_before_filter)
+                    else:
+                        full_result_str = result_str
                     
                     # Generate step ID early so we can reference it in truncation message
                     # Use loop-prefixed ID: step_L{loop}_{step} for unambiguous cross-loop references
@@ -1988,19 +2265,22 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
                     was_truncated = False
                     truncated_to = 0
                     
-                    # Dynamic truncation based on context budget
-                    # Default: 15,000 chars (~3,750 tokens) - much larger than previous 6,000
-                    max_result_chars = 15000
-                    if self.context_manager and hasattr(self.context_manager, 'budget'):
-                        remaining = self.context_manager.budget.get_remaining_execution_chars()
-                        # Allow up to 25% of remaining budget or default, whichever is larger
-                        max_result_chars = max(15000, remaining // 4)
+                    # Dynamic truncation based on context budget from config
+                    # This scales with CONTEXT_BUDGET from .env
+                    max_result_chars = self._get_max_result_chars()
+                    logging.debug(f"[Context Budget] Allocated for result: {max_result_chars} chars")
                     
                     if len(result_str) > max_result_chars:
                         was_truncated = True
                         truncated_to = max_result_chars
+                        original_len = len(result_str)
+                        dropped_chars = original_len - max_result_chars
+                        
+                        logging.warning(f"[TRUNCATION] Result too large: {original_len} chars > limit {max_result_chars}. Dropped {dropped_chars} chars.")
+                        logging.warning(f"[TRUNCATION] Full content cached with ID: {loop_step_id}")
+                        
                         result_str = result_str[:max_result_chars] + (
-                            f"\n... [Truncated {len(result_str) - max_result_chars} chars. "
+                            f"\n... [Truncated {dropped_chars} chars. "
                             f"Use get_cached_result(result_id=\"{loop_step_id}\") for full content]"
                         )
                     
@@ -2050,7 +2330,30 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
                     # Update analysis state
                     self._update_analysis_state({"name": cmd_name, "params": cmd_params}, result_str)
                     
+                    # Auto-mark coverage from tool results
+                    if self.coverage_tracker:
+                        newly_covered = self.coverage_tracker.auto_mark_from_result(
+                            tool_name=cmd_name,
+                            tool_params=cmd_params,
+                            result=result_str
+                        )
+                        if newly_covered:
+                            self._emit_cot("Coverage",
+                                f"📋 Covered: {', '.join(newly_covered)}")
+                    
                     self.logger.info(f"Step {step} complete: {cmd_name}")
+                    
+                    # --- POST-EXECUTION GATE CHECK ---
+                    gate_signal = self.execution_gate.check_after_execution(
+                        cmd_name, result_str, exec_results.tool_executions
+                    )
+                    if gate_signal == ExecutionSignal.PAUSE:
+                        gate = self.execution_gate.get_gate_reason()
+                        if gate:
+                            exec_results.gates_triggered.append(gate)
+                            self._emit_gate(gate)
+                        self.logger.warning(f"🚧 Post-execution gate: critical artifact found in {cmd_name} result")
+                        # Phase 1: Log and continue (Phase 2 will truly block)
                     
                 except Exception as e:
                     error_msg = f"ERROR: {str(e)}"
@@ -2077,6 +2380,35 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
         
         self.logger.info(f"✅ Execution loop complete: {exec_results.total_steps} steps executed")
         return exec_results
+
+
+    def _execution_agent_rank(self, tool_name: str, result: Any, goal: str, max_items: int = 20) -> Any:
+        """Ask execution agent to rank/filter large results for relevance."""
+        result_str = json.dumps(result, indent=2) if isinstance(result, (dict, list)) else str(result)
+        item_count = len(result) if isinstance(result, list) else len(result.get('items', [])) if isinstance(result, dict) else 0
+        
+        preview = '\n'.join(result_str.split('\n')[:50])
+        if len(result_str.split('\n')) > 50:
+            preview += f"\n... ({len(result_str.split(chr(10))) - 50} more lines)"
+        
+        ranking_prompt = f"""Executed {tool_name}, got {item_count} results. GOAL: {goal}
+
+Results Preview:
+{preview}
+
+Select top {max_items} MOST RELEVANT. Prioritize: security APIs, suspicious patterns, entry points, goal-specific.
+Output ONLY JSON (same structure), top {max_items} items."""
+
+        try:
+            self.logger.info(f"🎯 Ranking {item_count} from {tool_name}")
+            resp = self.ollama.generate(prompt=ranking_prompt, system_prompt="Filter. Output JSON only.", phase="execution")
+            cleaned = '\n'.join([l for l in resp.strip().split('\n') if not l.startswith('```')]).strip()
+            filtered = json.loads(cleaned)
+            self.logger.info(f"✅ Kept {len(filtered) if isinstance(filtered, list) else len(filtered.get('items', []))}/{item_count}")
+            return filtered
+        except Exception as e:
+            self.logger.warning(f"⚠️ Ranking failed: {e}")
+            return result
 
     def _build_execution_loop_prompt(self, exec_results: ExecutionPhaseResults, 
                                      current_step: int) -> Tuple[str, str]:
@@ -2125,13 +2457,49 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
                 user_sections.append(f"\n{step_id}: {tool_exec.tool_name}({tool_exec.parameters})")
                 user_sections.append(f"Result: {result_preview}")
         
-        # Instructions for next step
-        user_sections.append("""
+        # Helper to get coverage info
+        coverage_section = ""
+        if self.coverage_tracker:
+            coverage_section = self.coverage_tracker.format_for_prompt()
+
+        # Helper to get lead info
+        leads_section = ""
+        if self.lead_tracker:
+            # Parse leads from previous cycle results if any
+            if exec_results.analysis_dump:
+                self.lead_tracker.parse_analysis_dump(exec_results.analysis_dump)
+            leads_section = self.lead_tracker.format_for_prompt()
+        
+        # Instructions for next step with structured methodology
+        user_sections.append(f"""
+{coverage_section}
+
+## Investigation Methodology
+
+Follow this depth-first pattern for EACH uncovered area:
+
+1. **DISCOVER** → Search for APIs/strings: `list_imports`, `list_strings(filter="keyword")`
+2. **LOCATE**  → Find cross-references: `get_xrefs_to(address="0xADDR")`
+3. **TRACE**   → Decompile callers: `decompile_function_by_address(address="0xADDR")`
+4. **VERIFICATION**  → Check the decompiled code for exploitable patterns
+
+RULE: If you see `StartService` or `CreateService`, you MUST trace to find the service name string.
+Example for service vulnerability:
+  DISCOVER: list_strings(filter="service") → found "StartServiceW"
+  LOCATE:   get_xrefs_to(address="0x...") → called from FUN_004a143c
+  TRACE:    decompile_function_by_address("004a143c") → CreateProcessW(NULL, unquoted_path)
+  VERIFY:   Path contains spaces + no quotes → Unquoted Service Path vulnerability
+
+Do NOT stop at step 1 (discovery). Always trace findings through to step 4 (verification).
+Prioritize the ❌ uncovered areas shown above.
+
+{leads_section}
+
 ## Your Task
 
-Based on the plan and results so far, determine the NEXT step(s).
+Based on the plan, results, and coverage gaps above, determine the NEXT step(s).
 
-1. **Reasoning**: Explain WHY you are choosing the specific tool(s). What do you hope to learn?
+1. **Reasoning**: Explain WHY you are choosing the specific tool(s). Reference which investigation area you are covering.
 2. **Execution**: Execute one or more tools to gather information.
 
 If the investigation is complete and you have enough information, respond with:
@@ -2142,6 +2510,12 @@ Otherwise, provide your reasoning and then execute the tool(s) using the standar
 REASONING: [Your reasoning here]
 EXECUTE: tool_name(param1="value1", param2="value2")
 EXECUTE: another_tool(param1="value1")
+
+If you need user input to decide your next step, you can ask:
+ASK_USER: [Your question here]
+OPTIONS: Option A | Option B | Option C
+
+The user will answer, and their response will appear in your next prompt.
 
 Output the REASONING line followed by one or more EXECUTE lines.
 If you are done, output ONLY "INVESTIGATION COMPLETE".
@@ -2742,6 +3116,35 @@ Please review the analysis dump for complete details.
         # Build evaluation prompt
         system_prompt, _ = self._build_structured_prompt(phase="evaluation")
         
+        # Smart truncation: preserve beginning (context) AND end (conclusions)
+        # The conclusion is critical for goal evaluation and often appears at the end
+        EVAL_MAX_CHARS = 4000
+        PRESERVE_START = 2000
+        PRESERVE_END = 1500
+        
+        if len(analysis) > EVAL_MAX_CHARS:
+            # Check for completion indicators to help evaluation
+            has_final_response = "FINAL RESPONSE:" in analysis
+            has_conclusion = any(marker in analysis.lower() for marker in 
+                                ["conclusion", "summary", "in summary", "overall assessment", "investigation complete"])
+            
+            truncated_analysis = (
+                f"{analysis[:PRESERVE_START]}\n\n"
+                f"[... {len(analysis) - PRESERVE_START - PRESERVE_END:,} chars truncated for evaluation ...]\n\n"
+                f"{analysis[-PRESERVE_END:]}"
+            )
+            
+            # Add completion signal hints
+            completion_hints = []
+            if has_final_response:
+                completion_hints.append("Contains 'FINAL RESPONSE' marker")
+            if has_conclusion:
+                completion_hints.append("Contains conclusion/summary section")
+            if completion_hints:
+                truncated_analysis += f"\n\n[Completion signals detected: {', '.join(completion_hints)}]"
+        else:
+            truncated_analysis = analysis
+        
         user_prompt = f"""
 ## Original User Goal
 {goal}
@@ -2752,7 +3155,7 @@ Please review the analysis dump for complete details.
 - Tools used: {', '.join([te.tool_name for te in exec_results.tool_executions])}
 
 ## Analysis Provided
-{analysis[:1500]}...
+{truncated_analysis}
 
 ## Your Task
 
@@ -2779,6 +3182,7 @@ Examples:
 
 Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisfied.
 """
+
         
         response = self.ollama.generate_with_phase(
             user_prompt,
@@ -2786,8 +3190,18 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
             system_prompt=system_prompt
         )
         
+        # Retry if empty response (extends retry-on-empty to evaluation phase)
+        if not response or not response.strip():
+            self.logger.warning("Empty evaluation response - retrying with clarification...")
+            retry_prompt = user_prompt + "\n\n[NOTE: Your previous response was empty. Please respond with either 'GOAL ACHIEVED' or 'GOAL NOT ACHIEVED: [reason]']"
+            response = self.ollama.generate_with_phase(
+                retry_prompt,
+                phase="evaluation",
+                system_prompt=system_prompt
+            )
+        
         # Parse response
-        response_clean = response.strip()
+        response_clean = response.strip() if response else ""
         goal_achieved = "GOAL ACHIEVED" in response_clean.upper() and "NOT ACHIEVED" not in response_clean.upper()
         
         if goal_achieved:
@@ -2796,6 +3210,8 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
             # Extract reason after "GOAL NOT ACHIEVED:"
             if "GOAL NOT ACHIEVED:" in response_clean:
                 reason = response_clean.split("GOAL NOT ACHIEVED:", 1)[1].strip()
+            elif not response_clean:
+                reason = "Evaluation returned empty response after retry"
             else:
                 reason = response_clean
         
@@ -3820,6 +4236,27 @@ Keywords: function analysis, reverse engineering, {old_name}, {new_name}, behavi
         # Return both prompts as a tuple
         return (system_prompt, user_prompt)
 
+    def _perform_review_phase(self) -> List[str]:
+        """
+        Execute the review phase to analyze the results of the investigation.
+        
+        Returns:
+            List of result strings from the review
+        """
+        logging.info("Starting review phase")
+        
+        # Build the review prompt
+        prompt = self._build_review_prompt()
+        
+        # Query the LLM
+        response = self.chat_engine.query(prompt)
+        logging.info(f"Received review response: {response[:100]}...")
+        
+        # Parse any artifacts from the response
+        self._parse_and_save_artifacts(response)
+        
+        return [f"\n=== REVIEW ANALYSIS ===\n{response}"]
+
     def _run_hardcoded_rename_workflow(self, display_name: str):
         # Instead of: ai_response = self.bridge.process_query(analysis_query)
         # Do direct calls:
@@ -3835,6 +4272,50 @@ Keywords: function analysis, reverse engineering, {old_name}, {new_name}, behavi
         ai_response = self.bridge.ollama.generate(analysis_prompt)
         
         # 5. Extract name and rename
+
+    def _get_latest_agent_analysis_text(self) -> str:
+        """Retrieve the text analysis from the latest agent dump."""
+        try:
+            import glob
+            import os
+            
+            # Use the configured logs directory
+            logs_dir = self.analysis_dumper.logs_dir
+            if not os.path.exists(logs_dir):
+                return ""
+
+            dump_files = glob.glob(os.path.join(logs_dir, "analysis_dump_*.md"))
+            
+            if not dump_files:
+                return ""
+                
+            # Get the latest file
+            latest_file = max(dump_files, key=os.path.getmtime)
+            self.logger.info(f"Using analysis dump for report context: {latest_file}")
+            
+            with open(latest_file, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            # Strategy 1: Look for "AI AGENT RESPONSE" section
+            parts = content.split("AI AGENT RESPONSE")
+            if len(parts) > 1:
+                # Get the part after the header
+                analysis_part = parts[-1]
+                # Remove the separator line if present
+                analysis_part = analysis_part.split("============================================================")[-1]
+                return analysis_part.strip()
+            
+            # Strategy 2: Look for "Investigation Goal" and "Statistics" to exclude them 
+            # and return the rest if it looks like a report
+            # But "Binary Analysis Report" is a common header in the response
+            if "# Binary Analysis Report" in content:
+                return content.split("# Binary Analysis Report", 1)[1]
+
+            return ""
+            
+        except Exception as e:
+            self.logger.warning(f"Failed to read latest analysis dump: {e}")
+            return ""
 
     def generate_software_report(self, report_format: str = "markdown") -> str:
         """
@@ -3999,6 +4480,20 @@ Keywords: function analysis, reverse engineering, {old_name}, {new_name}, behavi
         except Exception as e:
             self.logger.warning(f"Error collecting some binary data: {e}")
         
+
+        # Collect previous agent analysis for correlation
+        data['agent_analysis_history'] = self._get_latest_agent_analysis_text()
+        
+        # Collect binary name and info
+        try:
+            program_info = self.ghidra.get_current_program_info()
+            data['metadata']['binary_name'] = program_info.get('name', 'Unknown Binary')
+            data['metadata']['project_name'] = program_info.get('project', 'Unknown Project')
+            self.logger.info(f"Collected binary info: {data['metadata']['binary_name']}")
+        except Exception as e:
+            self.logger.warning(f"Failed to collect binary info: {e}")
+            data['metadata']['binary_name'] = "Unknown Binary"
+            
         return data
     
     def _perform_comprehensive_ai_analysis(self, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -4050,6 +4545,35 @@ Keywords: function analysis, reverse engineering, {old_name}, {new_name}, behavi
         
         return analysis
     
+    def _format_agent_analysis_context(self, data: Dict[str, Any], analysis_type: str = "analysis") -> str:
+        """
+        Format the agent analysis history section for prompts.
+        
+        Handles empty analysis gracefully by providing fallback content
+        and explicit permission to speculate based on available data.
+        
+        Args:
+            data: Binary data dict containing 'agent_analysis_history'
+            analysis_type: Type of analysis for context-specific guidance
+            
+        Returns:
+            Formatted analysis context string
+        """
+        analysis_history = data.get('agent_analysis_history', '')
+        
+        # Check if analysis history is empty or just whitespace
+        if not analysis_history or not analysis_history.strip():
+            return f"""No prior agent analysis available for this binary.
+
+**IMPORTANT GUIDANCE:**
+- You may SPECULATE based on the binary data provided above (imports, exports, function names, strings).
+- Base your {analysis_type} on the concrete evidence available (function names, API imports, string references).
+- Clearly indicate when you are inferring behavior vs. reporting confirmed findings.
+- Do NOT refuse to analyze - provide your best assessment based on available data.
+- If certain about something, state it confidently. If uncertain, use phrases like "likely", "appears to", "suggests"."""
+        else:
+            return analysis_history
+    
     def _build_classification_prompt(self, data: Dict[str, Any]) -> str:
         """Build prompt for software classification analysis."""
         return f"""Analyze this binary and classify the software type and purpose.
@@ -4076,7 +4600,12 @@ Provide a structured classification following this EXACT format:
 **ARCHITECTURE_STYLE:** [Monolithic/Modular/Service-oriented/Plugin-based/Other]
 **COMPLEXITY_LEVEL:** [Low/Medium/High/Very_High]
 **CLASSIFICATION_CONFIDENCE:** [0-100%]
-**EVIDENCE:** [Key evidence supporting this classification - MUST include specific function addresses, function names, and string examples. Format: "Function at address 0x... named '...' does X", "String 'Y' found at Z"]"""
+**EVIDENCE:** [Key evidence supporting this classification - MUST include specific function addresses, function names, and string examples. Format: "Function at address 0x... named '...' does X", "String 'Y' found at Z"]
+
+**PREVIOUS AGENT ANALYSIS:**
+{self._format_agent_analysis_context(data, 'classification')}
+
+**IMPORTANT:** If prior analysis exists, use it as the PRIMARY SOURCE of truth. Otherwise, base your classification on the Binary Information above."""
 
     def _build_security_assessment_prompt(self, data: Dict[str, Any]) -> str:
         """Build prompt for security risk assessment."""
@@ -4111,7 +4640,12 @@ Analyze for security risks and provide assessment in this EXACT format:
 - Persistence_Mechanisms: [NONE/LOW/MEDIUM/HIGH/CRITICAL] - [description with specific addresses and functions]
 **SUSPICIOUS_INDICATORS:** [List EACH concerning behavior with format: "Description at address 0x... in function '...' - Evidence: specific API/string/pattern"]
 **MITIGATION_RECOMMENDATIONS:** [Security recommendations]
-**IOCS:** [Potential Indicators of Compromise with specific addresses and strings found]"""
+**IOCS:** [Potential Indicators of Compromise with specific addresses and strings found]
+
+**PREVIOUS AGENT ANALYSIS:**
+{self._format_agent_analysis_context(data, 'security assessment')}
+
+**IMPORTANT:** If prior analysis exists, use it as the PRIMARY SOURCE of truth. Otherwise, assess security risks based on the imports, function names, and behaviors observable in the Binary Data above."""
 
     def _build_function_categorization_prompt(self, data: Dict[str, Any]) -> str:
         """Build prompt for function categorization analysis."""
@@ -4149,7 +4683,12 @@ Analyze and categorize functions into standard categories. Provide results in th
 **Main_Core:** [count] - [function names WITH addresses (0x...) and brief descriptions]
 **Unknown_Other:** [count] - [function names WITH addresses (0x...) and brief descriptions]
 
-**CATEGORY_INSIGHTS:** [Analysis of what the function distribution reveals about software purpose, cite specific address examples]"""
+**CATEGORY_INSIGHTS:** [Analysis of what the function distribution reveals about software purpose, cite specific address examples]
+
+**PREVIOUS AGENT ANALYSIS:**
+{self._format_agent_analysis_context(data, 'function categorization')}
+
+**IMPORTANT:** If prior analysis exists, use it to guide categorization. Otherwise, categorize based on function names, import patterns, and observable code structure."""
 
     def _build_behavioral_analysis_prompt(self, data: Dict[str, Any]) -> str:
         """Build prompt for behavioral pattern analysis."""
@@ -4175,7 +4714,12 @@ Identify patterns, workflows, and behavioral characteristics. Format response as
 **DEPENDENCY_ANALYSIS:** [Key dependencies and their purposes - cite specific import/export addresses]
 **OPERATIONAL_MODES:** [Different modes of operation - cite specific function addresses]
 **TRIGGER_MECHANISMS:** [What causes different behaviors - cite specific addresses and conditions]
-**BEHAVIORAL_FINGERPRINT:** [Unique behavioral characteristics that identify this software - cite specific addresses and evidence]"""
+**BEHAVIORAL_FINGERPRINT:** [Unique behavioral characteristics that identify this software - cite specific addresses and evidence]
+
+**PREVIOUS AGENT ANALYSIS:**
+{self._format_agent_analysis_context(data, 'behavioral analysis')}
+
+**IMPORTANT:** If prior analysis exists, use it as the PRIMARY SOURCE. Otherwise, infer behavioral patterns from imports, exports, and function structures."""
 
     def _build_architecture_prompt(self, data: Dict[str, Any]) -> str:
         """Build prompt for software architecture analysis."""
@@ -4201,7 +4745,12 @@ Analyze the software architecture and provide results in this EXACT format:
 **INTERFACE_DESIGN:** [How different components interface with each other]
 **SCALABILITY_DESIGN:** [How the architecture supports scalability]
 **ARCHITECTURE_QUALITY:** [Assessment of architectural quality and maintainability]
-**COMPLEXITY_METRICS:** [Analysis of architectural complexity]"""
+**COMPLEXITY_METRICS:** [Analysis of architectural complexity]
+
+**PREVIOUS AGENT ANALYSIS:**
+{self._format_agent_analysis_context(data, 'architecture analysis')}
+
+**IMPORTANT:** If prior analysis exists, align your architecture analysis with it. Otherwise, derive architectural insights from code organization and structure."""
 
     def _build_risk_assessment_prompt(self, data: Dict[str, Any], analysis: Dict[str, Any]) -> str:
         """Build prompt for overall risk assessment."""
@@ -4226,7 +4775,12 @@ Provide final risk assessment in this EXACT format:
 **MONITORING_RECOMMENDATIONS:** [What to monitor if deployed, cite specific functions/addresses to watch]
 **CONTAINMENT_STRATEGY:** [How to safely contain or isolate if needed]
 **BUSINESS_IMPACT:** [Potential business/operational impact]
-**TECHNICAL_RISK:** [Technical risks and implications with specific examples from addresses]"""
+**TECHNICAL_RISK:** [Technical risks and implications with specific addresses]
+
+**PREVIOUS AGENT ANALYSIS:**
+{self._format_agent_analysis_context(data, 'risk assessment')}
+
+**IMPORTANT:** If prior analysis exists, use it as the PRIMARY SOURCE for risk calculation. Otherwise, assess risks based on the analysis summary and observable indicators."""
 
     def _format_summaries_for_prompt(self, summaries: Dict[str, str]) -> str:
         """Format function summaries for AI prompts with comprehensive RAG retrieval."""
@@ -5082,6 +5636,8 @@ Provide final risk assessment in this EXACT format:
             return self._generate_json_report(data, analysis)
         elif format_type.lower() == "text":
             return self._generate_text_report(data, analysis)
+        elif format_type.lower() == "html":
+            return self._generate_html_report(data, analysis)
         else:  # Default to markdown
             return self._generate_markdown_report(data, analysis)
 
@@ -5222,6 +5778,359 @@ This section provides specific addresses and evidence for key findings identifie
 *For questions or additional analysis, consult the detailed function summaries and analysis logs.*
 """
         return report
+
+    def _generate_html_report(self, data: Dict[str, Any], analysis: Dict[str, Any]) -> str:
+        """
+        Generate HTML-formatted vulnerability report using AI.
+        
+        This method:
+        1. Builds a context summary from analysis data
+        2. Calls the LLM with html_report_generation_prompt to get structured JSON
+        3. Parses the JSON response into sections
+        4. Assembles final HTML using the report_template module
+        """
+        from src.report_template import (
+            generate_html_report, ReportSection, ReportMetadata,
+            build_stats_grid, build_attack_vectors, build_timeline, build_table,
+            build_vulnerability_discovery, get_discovery_javascript
+        )
+        
+        # Build context for the AI
+        context = self._build_html_report_context(data, analysis)
+        
+        # Get the HTML report generation prompt
+        prompt = self.config.ollama.html_report_generation_prompt
+        
+        # Build the full prompt with context
+        full_prompt = f"""{prompt}
+
+## ANALYSIS DATA TO REPORT:
+
+### Binary Information:
+- **Binary Name:** {data.get('metadata', {}).get('binary_name', 'Unknown Binary')}
+- **Total Functions:** {data.get('metadata', {}).get('total_functions', 0)}
+- **Analyzed Functions:** {data.get('metadata', {}).get('analyzed_count', 0)}
+- **Renamed Functions:** {data.get('metadata', {}).get('renamed_count', 0)}
+- **Imports:** {len(data.get('imports', []))}
+- **Exports:** {len(data.get('exports', []))}
+
+### Security Assessment:
+- **Risk Level:** {analysis.get('security_assessment', {}).get('risk_level', 'Not assessed')}
+- **Risk Score:** {analysis.get('security_assessment', {}).get('risk_score', 'N/A')}/100
+- **Indicators:** {analysis.get('security_assessment', {}).get('indicators', 'None')}
+
+### Software Classification:
+- **Type:** {analysis.get('software_classification', {}).get('type', 'Unknown')}
+- **Purpose:** {analysis.get('software_classification', {}).get('purpose', 'Unknown')}
+- **Confidence:** {analysis.get('software_classification', {}).get('confidence', 'N/A')}
+
+### Risk Assessment:
+- **Rating:** {analysis.get('risk_assessment', {}).get('rating', 'Not assessed')}
+- **Threat Level:** {analysis.get('risk_assessment', {}).get('threat_level', 'Unknown')}
+- **Recommendations:** {analysis.get('risk_assessment', {}).get('recommendations', 'None')}
+
+### Key Imports (sample):
+{self._format_imports_sample(data.get('imports', [])[:20])}
+
+### Behavioral Analysis:
+- **Workflows:** {analysis.get('behavioral_analysis', {}).get('workflows', 'Not analyzed')}
+- **Fingerprint:** {analysis.get('behavioral_analysis', {}).get('fingerprint', 'Not identified')}
+
+### Evidence with Addresses:
+{self._format_address_evidence(analysis)}
+
+Now generate the JSON report based on this data.
+"""
+        
+        try:
+            # Call LLM to generate the structured report
+            response = self._call_llm_for_html_report(full_prompt)
+            
+            # Parse the JSON response
+            sections, ai_metadata = self._parse_html_report_response(response)
+            
+            # If no sections were generated, use the fallback report
+            if not sections:
+                self.logger.info("No sections generated from AI, using fallback report")
+                return self._generate_fallback_html_report(data, analysis)
+            
+            # Create metadata
+            binary_name = data.get('metadata', {}).get('binary_name', 'Unknown Binary')
+            metadata = ReportMetadata(
+                binary_name=binary_name,
+                severity=ai_metadata.get('severity', 'MEDIUM'),
+                subtitle=ai_metadata.get('subtitle', 'AI-Powered Binary Analysis Report'),
+                tool_name="OGhidra MCP"
+            )
+            
+            # Generate the final HTML
+            return generate_html_report(sections, metadata)
+            
+        except Exception as e:
+            self.logger.error(f"Error generating HTML report: {e}")
+            # Fallback to a basic HTML report
+            return self._generate_fallback_html_report(data, analysis)
+
+    def _build_html_report_context(self, data: Dict[str, Any], analysis: Dict[str, Any]) -> str:
+        """Build context string for HTML report generation."""
+        context_parts = []
+        
+        # Add function summaries if available
+        summaries = data.get('function_summaries', {})
+        if summaries:
+            context_parts.append("## Key Function Summaries:")
+            for name, summary in list(summaries.items())[:10]:
+                context_parts.append(f"- **{name}:** {summary[:200]}...")
+        
+        return '\n'.join(context_parts)
+
+    def _format_imports_sample(self, imports: List[str]) -> str:
+        """Format a sample of imports for the prompt."""
+        if not imports:
+            return "No imports available"
+        return '\n'.join(f"- {imp}" for imp in imports[:15])
+
+    def _format_address_evidence(self, analysis: Dict[str, Any]) -> str:
+        """Format address evidence from analysis for the prompt."""
+        evidence = []
+        
+        # Collect addresses from various sections
+        for section_name in ['security_assessment', 'software_classification', 'risk_assessment']:
+            section = analysis.get(section_name, {})
+            addresses = section.get('addresses', [])
+            if addresses:
+                for addr_info in addresses[:5]:
+                    if isinstance(addr_info, dict):
+                        evidence.append(f"- {addr_info.get('address', 'N/A')}: {addr_info.get('context', 'No context')}")
+        
+        return '\n'.join(evidence) if evidence else "No specific address evidence available"
+
+    def _call_llm_for_html_report(self, prompt: str) -> str:
+        """Call the LLM to generate the HTML report structure."""
+        try:
+            # Use the configured LLM client (self.ollama holds either OllamaClient or ExternalClient)
+            if hasattr(self, 'ollama') and self.ollama:
+                # Both clients support the generate method
+                response = self.ollama.generate(prompt=prompt)
+                return response
+            else:
+                self.logger.warning("No LLM client available for HTML report generation")
+                return "{}"
+        except Exception as e:
+            self.logger.error(f"Error calling LLM for HTML report: {e}")
+            return "{}"
+
+    def _parse_html_report_response(self, response: str) -> tuple:
+        """
+        Parse the AI's JSON response into ReportSection objects.
+        
+        Returns:
+            Tuple of (List[ReportSection], metadata_dict)
+        """
+        from src.report_template import (
+            ReportSection, build_stats_grid, build_attack_vectors, 
+            build_timeline, build_table
+        )
+        import json
+        import re
+        
+        sections = []
+        metadata = {"severity": "MEDIUM", "subtitle": "Binary Analysis Report"}
+        
+        try:
+            # Try to extract JSON from the response
+            # Handle cases where the AI might wrap it in markdown code blocks
+            json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', response, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(1)
+            else:
+                # Try to find raw JSON
+                json_start = response.find('{')
+                json_end = response.rfind('}') + 1
+                if json_start >= 0 and json_end > json_start:
+                    json_str = response[json_start:json_end]
+                else:
+                    raise ValueError("No JSON found in response")
+            
+            report_data = json.loads(json_str)
+            
+            # Extract metadata
+            if 'metadata' in report_data:
+                metadata = report_data['metadata']
+            
+            # Process sections
+            for section_data in report_data.get('sections', []):
+                section_id = section_data.get('id', 'unknown')
+                title = section_data.get('title', 'Section')
+                icon = section_data.get('icon', '📄')
+                content_type = section_data.get('content_type', 'html')
+                content = section_data.get('content', '')
+                
+                # Process content based on type
+                if content_type == 'stats' and isinstance(content, (str, list)):
+                    if isinstance(content, str):
+                        try:
+                            content = json.loads(content)
+                        except:
+                            pass
+                    if isinstance(content, list):
+                        content = build_stats_grid(content)
+                    
+                elif content_type == 'attack_vectors' and isinstance(content, (str, list)):
+                    if isinstance(content, str):
+                        try:
+                            content = json.loads(content)
+                        except:
+                            pass
+                    if isinstance(content, list):
+                        content = build_attack_vectors(content)
+                    
+                elif content_type == 'timeline' and isinstance(content, (str, list)):
+                    if isinstance(content, str):
+                        try:
+                            content = json.loads(content)
+                        except:
+                            pass
+                    if isinstance(content, list):
+                        content = build_timeline(content)
+                    
+                elif content_type == 'table' and isinstance(content, (str, dict)):
+                    if isinstance(content, str):
+                        try:
+                            content = json.loads(content)
+                        except:
+                            pass
+                    if isinstance(content, dict):
+                        headers = content.get('headers', [])
+                        rows = content.get('rows', [])
+                        address_cols = [0] if headers and 'Address' in headers[0] else []
+                        content = build_table(headers, rows, address_cols)
+                
+                elif content_type == 'discovery' and isinstance(content, (str, list)):
+                    from src.report_template import build_vulnerability_discovery
+                    if isinstance(content, str):
+                        try:
+                            content = json.loads(content)
+                        except:
+                            pass
+                    if isinstance(content, list):
+                        content = build_vulnerability_discovery(content)
+                
+                elif content_type == 'key_findings' and isinstance(content, (str, list)):
+                    from src.report_template import build_key_findings
+                    if isinstance(content, str):
+                        try:
+                            content = json.loads(content)
+                        except:
+                            pass
+                    if isinstance(content, list):
+                        content = build_key_findings(content)
+                
+                elif content_type == 'security_imports' and isinstance(content, (str, list)):
+                    from src.report_template import build_security_imports
+                    if isinstance(content, str):
+                        try:
+                            content = json.loads(content)
+                        except:
+                            pass
+                    if isinstance(content, list):
+                        content = build_security_imports(content)
+                
+                sections.append(ReportSection(
+                    id=section_id,
+                    title=title,
+                    icon=icon,
+                    content_type=content_type,
+                    content=str(content)
+                ))
+            
+            # If parsing succeeded but no sections were created, add fallback
+            if not sections:
+                raise ValueError("No sections found in parsed response")
+            
+        except Exception as e:
+            self.logger.warning(f"Error parsing HTML report response: {e}")
+            # Create a fallback section with the raw response
+            if response and response.strip() and response != "{}":
+                sections.append(ReportSection(
+                    id="raw_analysis",
+                    title="Analysis Results",
+                    icon="📋",
+                    content_type="html",
+                    content=f'<div class="summary-content"><pre>{response[:5000]}</pre></div>'
+                ))
+            else:
+                # No valid response - return empty sections to trigger full fallback
+                self.logger.warning("Empty or invalid LLM response, using fallback report")
+        
+        return sections, metadata
+
+    def _generate_fallback_html_report(self, data: Dict[str, Any], analysis: Dict[str, Any]) -> str:
+        """Generate a basic HTML report without AI, as fallback."""
+        from src.report_template import generate_html_report, ReportSection, ReportMetadata
+        
+        binary_name = data.get('metadata', {}).get('binary_name', 'Unknown Binary')
+        
+        metadata = ReportMetadata(
+            binary_name=binary_name,
+            severity=analysis.get('security_assessment', {}).get('risk_level', 'MEDIUM').upper(),
+            subtitle="Binary Analysis Report (Fallback)"
+        )
+        
+        # Create basic sections from the analysis data
+        sections = []
+        
+        # Executive Summary
+        exec_content = f'''
+        <div class="summary-content">
+            <p><strong>Software Type:</strong> {analysis.get('software_classification', {}).get('type', 'Unknown')}</p>
+            <p><strong>Risk Level:</strong> {analysis.get('security_assessment', {}).get('risk_level', 'Unknown')}</p>
+            <p><strong>Purpose:</strong> {analysis.get('software_classification', {}).get('purpose', 'Not determined')}</p>
+        </div>
+        '''
+        sections.append(ReportSection(
+            id="executive_summary",
+            title="Executive Summary",
+            icon="📋",
+            content_type="html",
+            content=exec_content
+        ))
+        
+        # Statistics
+        stats_content = f'''
+        <div class="grid">
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-icon">📦</div>
+                    <h3>Functions</h3>
+                </div>
+                <div class="stat-value">{data.get('metadata', {}).get('total_functions', 0)}</div>
+            </div>
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-icon">🔗</div>
+                    <h3>Imports</h3>
+                </div>
+                <div class="stat-value">{len(data.get('imports', []))}</div>
+            </div>
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-icon">📤</div>
+                    <h3>Exports</h3>
+                </div>
+                <div class="stat-value">{len(data.get('exports', []))}</div>
+            </div>
+        </div>
+        '''
+        sections.append(ReportSection(
+            id="statistics",
+            title="Statistics",
+            icon="📊",
+            content_type="html",
+            content=stats_content
+        ))
+        
+        return generate_html_report(sections, metadata)
 
     def _generate_json_report(self, data: Dict[str, Any], analysis: Dict[str, Any]) -> str:
         """Generate JSON-formatted software report."""

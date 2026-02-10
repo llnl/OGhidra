@@ -189,4 +189,30 @@ This workplan outlines strategies for progressively analyzing a binary to build 
 ### Common Errors and Solutions:
 - Data may be passed through multiple layers of indirection
 - Consider both explicit data flow and side effects
-- Track both the "happy path" and error handling paths 
+- Track both the "happy path" and error handling paths
+
+## Workplan: Vulnerability and Safety Verification
+
+### Goal: Verify the safety of identified sensitive operations
+
+1. **Identify Critical API Calls**:
+   - `CreateProcess`, `CreateDirectory`, `WriteFile`, `WinExec`, `ShellExecute`
+   - `LoadLibrary`, `RegOpenKey`
+
+2. **Verify Arguments (MANDATORY)**:
+   For each critical API found:
+   ```
+   EXECUTE: decompile_function(name="CallerFunction")
+   ```
+   *   **Check 1**: Are security attributes (lpSecurityAttributes) NULL?
+   *   **Check 2**: Are file paths hardcoded or dynamically constructed?
+   *   **Check 3**: Is user input sanitized before use?
+
+3. **Verify Service Integrity**:
+   If `StartServiceCtrlDispatcher` is present:
+   - Verify the `ServiceMain` function.
+   - Check if it loads other binaries or DLLs from writable locations.
+
+4. **Verify Deployment Risks**:
+   - Check manifest for execution level (e.g., `requireAdministrator`).
+   - Check for unquoted service paths if strings suggest a service configuration. 

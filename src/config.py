@@ -63,7 +63,7 @@ class OllamaConfig(BaseModel):
     )
     
     # LLM Logging Configuration
-    llm_logging_enabled: bool = Field(default=False, env="LLM_LOGGING_ENABLED")
+    llm_logging_enabled: bool = Field(default=True, env="LLM_LOGGING_ENABLED")
     llm_log_file: str = Field(default="logs/llm_interactions.log", env="LLM_LOG_FILE")
     llm_log_prompts: bool = Field(default=True, env="LLM_LOG_PROMPTS")
     llm_log_responses: bool = Field(default=True, env="LLM_LOG_RESPONSES")
@@ -172,11 +172,85 @@ class OllamaConfig(BaseModel):
         env="MIN_CORRELATION_MENTIONS"
     )
     
-    enable_cycle_conclusions: bool = Field(
+    # Interactive Execution Gate (OpenCode-inspired)
+    execution_gate_enabled: bool = Field(
         default=True,
-        description="Pass structured conclusions between agentic cycles",
-        env="ENABLE_CYCLE_CONCLUSIONS"
+        description="Enable interactive execution gate for pause/review during loops",
+        env="EXECUTION_GATE_ENABLED"
     )
+    
+    gate_on_artifact: bool = Field(
+        default=True,
+        description="Pause when critical artifact found in tool results",
+        env="GATE_ON_ARTIFACT"
+    )
+    
+    gate_on_repetition: bool = Field(
+        default=True,
+        description="Pause on N identical tool calls (doom-loop detection)",
+        env="GATE_ON_REPETITION"
+    )
+    
+    gate_repetition_threshold: int = Field(
+        default=3,
+        ge=2,
+        le=10,
+        description="How many identical calls before triggering repetition gate",
+        env="GATE_REPETITION_THRESHOLD"
+    )
+    
+    gate_on_high_risk_tool: bool = Field(
+        default=False,
+        description="Pause before destructive tools (rename_function, etc.)",
+        env="GATE_ON_HIGH_RISK_TOOL"
+    )
+    
+    gate_auto_resume_timeout: int = Field(
+        default=0,
+        ge=0,
+        description="Seconds before auto-resuming after gate (0 = wait forever)",
+        env="GATE_AUTO_RESUME_TIMEOUT"
+    )
+    
+    # Session Compaction (OpenCode-inspired)
+    compaction_enabled: bool = Field(
+        default=True,
+        description="Enable smart context pruning to prevent overflow",
+        env="COMPACTION_ENABLED"
+    )
+    
+    compaction_threshold: float = Field(
+        default=0.75,
+        ge=0.3,
+        le=0.95,
+        description="Context usage fraction that triggers compaction (0.3-0.95)",
+        env="COMPACTION_THRESHOLD"
+    )
+    
+    compaction_auto: bool = Field(
+        default=True,
+        description="Auto-compact between agentic cycles when threshold exceeded",
+        env="COMPACTION_AUTO"
+    )
+    
+    # Enable or disable Context-Augmented Generation
+    enable_cag: bool = True
+    
+    # Review Phase Configuration
+    review_thoroughness: str = Field(
+        default="standard",
+        description="Review depth: 'basic', 'standard', or 'thorough'",
+        env="REVIEW_THOROUGHNESS"
+    )
+    
+    @validator('review_thoroughness')
+    def validate_review_thoroughness(cls, v):
+        """Validate review thoroughness level."""
+        valid_levels = {'basic', 'standard', 'thorough'}
+        v_lower = v.lower()
+        if v_lower not in valid_levels:
+            raise ValueError(f'review_thoroughness must be one of {valid_levels}')
+        return v_lower
     @validator('model')
     def validate_model_name(cls, v):
         """Ensure model name follows expected patterns."""
@@ -366,7 +440,7 @@ class OllamaConfig(BaseModel):
             "type": "function",
             "function": {
                 "name": "list_imports",
-                "description": "List imported symbols in the program",
+                "description": "List imported symbols in the program. Returns name, address, reference count, and caller names.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -540,9 +614,47 @@ class OllamaConfig(BaseModel):
     You are an expert Reverse Engineering Planning Agent.
     Your goal is to create a logical, step-by-step plan to investigate a binary using Ghidra.
     
+    ## CRITICAL: Deployment Vulnerability Awareness
+    
+    Your vulnerability search must cover BOTH layers:
+    
+    **Layer 1: Code Vulnerabilities** (you already do this)
+    - Memory: buffer overflow, use-after-free, integer overflow
+    - Injection: SQL, command, format string
+    - Logic: authentication bypass, race conditions
+    
+    **Layer 2: Deployment Vulnerabilities** (NEW - you must add this)
+    - Service Issues: unquoted paths, weak permissions, privilege escalation
+    - Executable Loading: DLL hijacking, PATH manipulation
+    - Registry: weak ACLs, auto-run persistence
+    
+    MANDATORY DEPLOYMENT CHECKS:
+    
+    1. Is this a Windows service?
+       - Search imports for: StartServiceCtrlDispatcher
+       - If YES → Add service security analysis to plan
+    
+    2. Does it load executables/DLLs?
+       - Search imports for: LoadLibrary, CreateProcess, ShellExecute
+       - If YES → Plan to analyze what/where it loads
+    
+    3. Are there hardcoded paths?
+       - Search strings for: "C:\\Program Files", ".exe", ".dll"
+       - If YES → Check for proper validation and quoting
+    
+    ## Planning Rules
+    1. **Structure**: Break down the goal into logical, sequential steps.
+    2. **Tools**: Explicitly state which tool(s) will be used for each step.
+    3. **Conditionals**: If a step depends on findings from a previous step, note that. 
+       (e.g. "If imports show network activity, then list network-related strings")
+    4. **Completeness**: Ensure the plan covers all aspects needed to achieve the goal.
+    5. **Verification**: Include a final step to verify findings if possible.
+    
     CRITICAL INSTRUCTION:
-    - If you discover specific constants, keys, or IPs, output them as ARTIFACTS (see below).
+    - If you discover specific constants, keys, or IPs, output them as ARTIFACTS.
     - Always batch discovery tools (list_imports, list_exports) in the first step.
+    
+    User Goal: {user_task_description}
     """
     
     execution_system_prompt: str = """
@@ -566,6 +678,10 @@ class OllamaConfig(BaseModel):
     ⚡ BATCHING & EFFICIENCY:
     - EXECUTE MULTIPLE TOOLS IN ONE RESPONSE.
     - Batch: list_imports, list_exports, list_strings.
+
+    ⚡ VERIFY FINDINGS:
+    - CAUTION: Do not assume an API usage is vulnerable just because it exists.
+    - PROVE IT: Verify arguments and contexts where possible.
     
     PROGRESSIVE EXECUTION PATTERN:
     1. **Capability Mapping**: (list_imports, list_segments) - Understand potential behavior.
@@ -583,6 +699,11 @@ class OllamaConfig(BaseModel):
     COMPLETION:
     - If the goal is met or no suitable tool exists, output "GOAL ACHIEVED"
     - Otherwise, execute the next appropriate tool(s).
+    
+    ⚠️ NEVER RETURN AN EMPTY RESPONSE:
+    - If you cannot determine the next step, explain WHY you are stuck.
+    - If the investigation hit a dead end, explain what was tried and why it failed.
+    - If the goal is complete, say "INVESTIGATION COMPLETE" with a summary.
 
     {{FUNCTION_CALL_BEST_PRACTICES}}
 """
@@ -626,6 +747,126 @@ class OllamaConfig(BaseModel):
     
     Prefix your final answer with "FINAL RESPONSE:" to mark the conclusion of your analysis.
     """
+    
+    # HTML Report Generation Prompt
+    html_report_generation_prompt: str = """
+You are generating an HTML vulnerability report based on binary analysis findings.
+
+## OUTPUT FORMAT
+You MUST output ONLY valid JSON (no markdown, no explanation) with this structure:
+```json
+{
+  "metadata": {
+    "severity": "CRITICAL|HIGH|MEDIUM|LOW",
+    "subtitle": "Short description of the analysis type"
+  },
+  "sections": [
+    {
+      "id": "section_id",
+      "title": "Section Title",
+      "icon": "📋",
+      "content_type": "html",
+      "content": "<div>HTML content here</div>"
+    }
+  ]
+}
+```
+
+## REQUIRED SECTIONS (include all that apply based on findings):
+
+1. **executive_summary** - Overview with impact assessment
+   - icon: 📋
+   - Summarize key findings, risk level, and recommendations
+
+2. **statistics** - Key metrics as JSON for stat cards
+   - icon: 📊
+   - content_type: "stats"
+   - content: JSON array like [{"icon":"📦","value":"150","label":"API Imports"},{"icon":"ƒ","value":"490","label":"Functions"}]
+
+3. **key_findings** - Security findings with severity (REPLACES attack_vectors)
+   - icon: 🔥
+   - content_type: "key_findings"
+   - content: JSON array like [{"title":"DLL Hijacking Risk","severity":"high","description":"LoadLibraryW called without path validation","apis":["LoadLibraryW","GetProcAddress"]}]
+
+4. **attack_vectors** - Brief attack vector cards (legacy, use key_findings instead)
+   - icon: ⚡
+   - content_type: "attack_vectors"
+   - content: JSON array like [{"title":"Token Manipulation","severity":"critical","description":"...","apis":["OpenProcessToken"]}]
+
+5. **vulnerability_discovery** - DETAILED investigation paths with evidence
+   - icon: 🔬
+   - content_type: "discovery"
+   - content: JSON array of discovery objects:
+   ```json
+   [{
+     "title": "DLL Hijacking via LoadLibraryW",
+     "subtitle": "EXTERNAL:0000000d",
+     "severity": "high",
+     "investigation_path": [
+       {"tool": "list_imports", "time": "07:36:13", "params": "{\\"offset\\": 0}", "result": "Discovered <code>LoadLibraryW</code> at <code>EXTERNAL:0000000d</code>"},
+       {"tool": "get_xrefs_to", "time": "07:51:42", "params": "{\\"address\\": \\"LoadLibraryW\\"}", "result": "Found <strong>3 call sites</strong>"}
+     ],
+     "evidence": [
+       {"type": "Import API", "value": "LoadLibraryW", "address": "EXTERNAL:0000000d"},
+       {"type": "String Reference", "value": "mscoree.dll", "address": "0x0041a7f0"}
+     ],
+     "code": {
+       "filename": "FUN_00407b20",
+       "address": "0x00407b20",
+       "content": "<span class=\\"fn\\">LoadLibraryW</span>(<span class=\\"str\\">L\\"mscoree.dll\\"</span>)"
+     },
+     "impact": {
+       "title": "Privilege Escalation Risk",
+       "description": "If the binary runs elevated, an attacker could place a malicious <code>mscoree.dll</code> to execute code."
+     }
+   }]
+   ```
+
+6. **security_imports** - Security-relevant API imports table
+   - icon: 🔗
+   - content_type: "security_imports"
+   - content: JSON array like [{"address":"0x00401000","api":"VirtualAlloc","category":"Memory","risk":"high"}]
+
+7. **investigation_steps** - Timeline of AI analysis
+   - icon: 🔍
+   - content_type: "timeline"
+   - content: JSON array like [{"step":"STEP 1","title":"Import Analysis","content":"...","reasoning":"..."}]
+
+8. **string_artifacts** - Interesting strings with addresses
+   - icon: 📝
+   - content_type: "table"
+   - content: JSON like {"headers":["Address","String","Significance"],"rows":[["0x00401234","api.example.com","C2 Server"]]}
+
+9. **recommendations** - Mitigation steps
+   - icon: ✅
+   - HTML list with actionable recommendations
+
+## DYNAMIC SECTIONS (add based on findings):
+- **encryption_analysis** - If crypto APIs found (CryptEncrypt, etc.)
+- **network_behavior** - If network APIs found (socket, WinHTTP, etc.)
+- **persistence_mechanisms** - If registry/service APIs found
+- **anti_analysis** - If debugging/VM detection found
+
+## CSS CLASSES AVAILABLE:
+- Tags: tag-critical, tag-high, tag-medium, tag-low, tag-info
+- Stats: stats-grid, stat-card, stat-icon, stat-value, stat-label
+- Findings: findings-grid, finding-card, finding-header, finding-title, finding-badge, finding-desc, finding-apis, finding-api
+- Code: code-block, address, api-tag, kw, fn, str, cmt, typ, num, hl
+- Layout: grid, container, section, section-header, section-line
+- Discovery: discovery-section, discovery-card, inv-path, inv-step, evidence-grid, evidence-item, impact-box
+- Risk: risk-meter, risk-circle, risk-inner, risk-score, risk-label
+
+## IMPORTANT RULES:
+1. Include memory addresses where relevant (e.g., "String at 0x00401234")
+2. Use HTML tags in results (code, strong) for highlighting
+3. Be evidence-based - cite specific findings from the analysis
+4. Use proper severity levels based on actual risk (critical, high, medium, low)
+5. Output ONLY the JSON, no other text
+6. For vulnerability_discovery, show the ACTUAL investigation steps that led to finding the vulnerability
+7. ALWAYS include statistics section with function count, imports, exports, and security issues count
+8. Include key_findings section if ANY security-relevant APIs or patterns were found
+"""
+
     
     # System prompts for different phases
     phase_system_prompts: Dict[str, str] = Field(default_factory=lambda: {
@@ -722,15 +963,16 @@ class ExternalConfig(BaseModel):
     tools: List[Tool] = Field(default_factory=lambda: OllamaConfig().tools)
 
     # Context Budget (reused logic)
-    context_budget: int = Field(default=80000, ge=4000, le=2000000, env="CONTEXT_BUDGET")
+    context_budget: int = Field(default=20000, ge=4000, le=2000000, env="CONTEXT_BUDGET")
     context_budget_execution: float = Field(default=0.5, ge=0.1, le=0.8, env="CONTEXT_BUDGET_EXECUTION")
     enable_result_summarization: bool = Field(default=True, env="ENABLE_RESULT_SUMMARIZATION")
     result_cache_enabled: bool = Field(default=True, env="RESULT_CACHE_ENABLED")
     tiered_context_enabled: bool = Field(default=True, env="TIERED_CONTEXT_ENABLED")
     
     # Sliding Window & Tiered Context Limits
-    max_detailed_steps: int = Field(default=10, ge=1, le=50, env="MAX_DETAILED_STEPS")
-    current_loop_max_chars: int = Field(default=4000, ge=100, le=50000, env="CURRENT_LOOP_MAX_CHARS")
+    max_detailed_steps: int = Field(default=5, ge=1, le=50, env="MAX_DETAILED_STEPS")
+    current_loop_max_chars: int = Field(default=2000, ge=100, le=50000, env="CURRENT_LOOP_MAX_CHARS")
+
     prev_loop_max_chars: int = Field(default=800, ge=50, le=10000, env="PREV_LOOP_MAX_CHARS")
     older_loop_max_chars: int = Field(default=200, ge=20, le=2000, env="OLDER_LOOP_MAX_CHARS")
     
@@ -971,6 +1213,28 @@ def get_config() -> BridgeConfig:
             if 'ollama' not in config_data:
                 config_data['ollama'] = {}
             config_data['ollama']['agentic_loop_enabled'] = os.getenv('AGENTIC_LOOP_ENABLED').lower() == 'true'
+            # Also apply to external config
+            if 'external' not in config_data:
+                config_data['external'] = {}
+            config_data['external']['agentic_loop_enabled'] = os.getenv('AGENTIC_LOOP_ENABLED').lower() == 'true'
+        
+        # Apply MAX_AGENTIC_CYCLES to external config as well
+        if os.getenv('MAX_AGENTIC_CYCLES'):
+            if 'external' not in config_data:
+                config_data['external'] = {}
+            try:
+                config_data['external']['max_agentic_cycles'] = int(os.getenv('MAX_AGENTIC_CYCLES'))
+            except ValueError:
+                pass
+        
+        # Apply MAX_EXECUTION_STEPS to external config
+        if os.getenv('MAX_EXECUTION_STEPS'):
+            if 'external' not in config_data:
+                config_data['external'] = {}
+            try:
+                config_data['external']['max_execution_steps'] = int(os.getenv('MAX_EXECUTION_STEPS'))
+            except ValueError:
+                pass
         
         # Load Ollama timeout setting
         if os.getenv('OLLAMA_TIMEOUT'):

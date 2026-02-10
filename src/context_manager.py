@@ -155,13 +155,11 @@ class ResultCache:
             excerpt_lines.append(f"... ({len(lines)} total items)")
             return '\n'.join(excerpt_lines)
         
-        # For decompiled code, show signature and first lines
+        # For decompiled code, preserve more content (high-priority analysis data)
         if 'decompile' in tool_name:
-            # Try to find function signature
-            for i, line in enumerate(lines[:5]):
-                if '(' in line and ')' in line:
-                    return '\n'.join(lines[:min(15, len(lines))])
-            return '\n'.join(lines[:15])
+            # Keep up to 50 lines for decompiled code - this is critical analysis data
+            max_lines = min(50, len(lines))
+            return '\n'.join(lines[:max_lines])
         
         # Default: first 500 chars
         return result[:500]

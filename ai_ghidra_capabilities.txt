@@ -4,7 +4,7 @@ Information Gathering:
 - list_methods(offset, limit): List function names.
 - list_classes(offset, limit): List class/namespace names.
 - list_segments(offset, limit): List memory segments.
-- list_imports(offset, limit): List imported symbols.
+- list_imports(offset, limit): List imported symbols with caller information (ref count and caller names).
 - list_exports(offset, limit): List exported symbols.
 - list_namespaces(offset, limit): List non-global namespaces.
 - list_data_items(offset, limit): List defined data labels and values.

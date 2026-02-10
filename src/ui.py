@@ -2120,8 +2120,9 @@ class RenamedFunctionsPanel:
 class AIResponsePanel:
     """Panel for displaying AI agent responses."""
     
-    def __init__(self, parent):
+    def __init__(self, parent, generate_callback=None):
         self.frame = ttk.LabelFrame(parent, text="AI Agent Responses", padding=10)
+        self.generate_callback = generate_callback
         self._setup_widgets()
         self._setup_text_tags()
         self.response_history = []
@@ -2162,7 +2163,8 @@ class AIResponsePanel:
         
         # Control buttons
         ttk.Button(self.frame, text="Clear", command=self._clear_responses).grid(row=1, column=0, padx=(0, 5))
-        ttk.Button(self.frame, text="Save to File", command=self._save_responses).grid(row=1, column=1, padx=5)
+        # Converted "Save to File" to "Generate Report" per user request
+        ttk.Button(self.frame, text="Generate Report", command=self._on_generate_report).grid(row=1, column=1, padx=5)
         ttk.Button(self.frame, text="Export JSON", command=self._export_json).grid(row=1, column=2, padx=(5, 0))
         
         # Configure grid weights
@@ -2313,6 +2315,13 @@ class AIResponsePanel:
                 messagebox.showinfo("Success", f"Responses exported to {filename}")
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to export file: {e}")
+
+    def _on_generate_report(self):
+        """Handle Generate Report button click."""
+        if self.generate_callback:
+            self.generate_callback()
+        else:
+            messagebox.showinfo("Info", "Report generation callback not linked.")
     
     def get_widget(self):
         """Return the frame widget."""
@@ -3996,79 +4005,32 @@ Choose your enumeration strategy:"""
             return
         
         # Professional confirmation dialog
-        confirmation_message = """🔍 Generate Software Report - Confirmation Required
+        confirmation_message = """🔍 Generate Vulnerability Report - Confirmation Required
 
-You are about to generate a comprehensive AI-powered software analysis report.
+You are about to generate an AI-powered HTML vulnerability analysis report.
 
 This report will include:
-• Software classification and architecture analysis
-• Security risk assessment with detailed scoring
-• Function categorization and behavioral pattern analysis
-• Comprehensive findings summary with actionable insights
+• Executive Summary with risk assessment
+• Attack vectors and exploitation flow diagrams
+• AI investigation steps timeline
+• Critical imports and string artifacts
+• Security recommendations
 
 The analysis process will:
 • Collect all available binary data (functions, imports, exports, segments, etc.)
 • Analyze renamed functions and their behavioral summaries
 • Perform AI-powered classification and risk assessment
-• Generate a detailed markdown report with executive summary
+• Generate a styled HTML report
 
 This operation may take several minutes depending on the amount of analysis data available.
 
-Do you want to proceed with generating the software report?"""
+Do you want to proceed with generating the vulnerability report?"""
         
-        if not messagebox.askyesno("Generate Software Report", confirmation_message):
+        if not messagebox.askyesno("Generate Vulnerability Report", confirmation_message):
             return
         
-        # Show format selection dialog
-        format_dialog = tk.Toplevel(self.frame)
-        format_dialog.title("Report Format Selection")
-        format_dialog.geometry("400x200")
-        format_dialog.transient(self.frame)
-        format_dialog.grab_set()
-        
-        # Center the dialog
-        format_dialog.update_idletasks()
-        x = (format_dialog.winfo_screenwidth() // 2) - (format_dialog.winfo_width() // 2)
-        y = (format_dialog.winfo_screenheight() // 2) - (format_dialog.winfo_height() // 2)
-        format_dialog.geometry(f"+{x}+{y}")
-        
-        # Dialog content
-        ttk.Label(format_dialog, text="Select Report Format:", font=('Arial', 12, 'bold')).pack(pady=10)
-        
-        format_var = tk.StringVar(value="markdown")
-        
-        ttk.Radiobutton(format_dialog, text="Markdown (.md) - Formatted report with sections", 
-                       variable=format_var, value="markdown").pack(anchor='w', padx=20, pady=5)
-        ttk.Radiobutton(format_dialog, text="Plain Text (.txt) - Simple text format", 
-                       variable=format_var, value="text").pack(anchor='w', padx=20, pady=5)
-        ttk.Radiobutton(format_dialog, text="JSON (.json) - Structured data format", 
-                       variable=format_var, value="json").pack(anchor='w', padx=20, pady=5)
-        
-        # Buttons frame
-        button_frame = ttk.Frame(format_dialog)
-        button_frame.pack(pady=20)
-        
-        selected_format = None
-        
-        def confirm_format():
-            nonlocal selected_format
-            selected_format = format_var.get()
-            format_dialog.destroy()
-        
-        def cancel_format():
-            format_dialog.destroy()
-        
-        ttk.Button(button_frame, text="Generate Report", command=confirm_format).pack(side='left', padx=10)
-        ttk.Button(button_frame, text="Cancel", command=cancel_format).pack(side='left', padx=10)
-        
-        # Wait for dialog to close
-        format_dialog.wait_window()
-        
-        if selected_format is None:
-            return  # User cancelled
-        
-        # Start the software report generation workflow
-        self._run_software_report_workflow("Generate Software Report", selected_format)
+        # Start the software report generation workflow with HTML format
+        self._run_software_report_workflow("Generate Vulnerability Report", "html")
     
     def _run_software_report_workflow(self, display_name: str, report_format: str):
         """Run the comprehensive software report generation workflow."""
@@ -4097,30 +4059,33 @@ Do you want to proceed with generating the software report?"""
                     report_content = self.bridge.generate_software_report(report_format)
                     
                     # Display success message
-                    self.response_panel.add_response("Report Generated", f"✅ Software report generated successfully!")
+                    self.response_panel.add_response("Report Generated", f"✅ Vulnerability report generated successfully!")
                     
-                    # Show first 1000 characters in response panel
-                    preview = report_content[:1000] + ("..." if len(report_content) > 1000 else "")
-                    self.response_panel.add_response("Report Preview", preview)
+                    # Only show preview for non-HTML formats (HTML is not human-readable in text)
+                    if report_format != "html":
+                        preview = report_content[:1000] + ("..." if len(report_content) > 1000 else "")
+                        self.response_panel.add_response("Report Preview", preview)
+                    else:
+                        self.response_panel.add_response("Report Info", f"📄 HTML report generated ({len(report_content)} bytes). Open the saved file in a browser to view.")
                     
                     # Offer to save the report
                     save_response = messagebox.askyesno(
                         "Save Report",
-                        f"Software report generated successfully!\n\nWould you like to save the report to a file?\n\nReport length: {len(report_content)} characters"
+                        f"Vulnerability report generated successfully!\n\nWould you like to save the report to a file?\n\nReport size: {len(report_content)} bytes"
                     )
                     
                     if save_response:
                         # Determine file extension
                         extension = ".md" if report_format == "markdown" else f".{report_format}"
-                        default_filename = f"software_report_{self._get_timestamp_for_filename()}{extension}"
+                        default_filename = f"vulnerability_report_{self._get_timestamp_for_filename()}{extension}"
                         
                         # Show save dialog
                         filename = filedialog.asksaveasfilename(
-                            title="Save Software Report",
+                            title="Save Vulnerability Report",
                             defaultextension=extension,
                             initialfile=default_filename,
                             filetypes=[
-                                (f"{report_format.title()} files", f"*{extension}"),
+                                (f"{report_format.upper()} files", f"*{extension}"),
                                 ("All files", "*.*")
                             ]
                         )
@@ -4133,8 +4098,9 @@ Do you want to proceed with generating the software report?"""
                             except Exception as e:
                                 self.response_panel.add_response("Save Error", f"❌ Error saving file: {e}")
                     
-                    # Also display the full report in the response panel
-                    self.response_panel.add_response("Full Report", report_content)
+                    # Only show full report in response panel for non-HTML formats
+                    if report_format != "html":
+                        self.response_panel.add_response("Full Report", report_content)
                     
                 except Exception as e:
                     error_msg = f"Error generating software report: {e}"
@@ -4388,13 +4354,30 @@ class OGhidraUI:
     
     def _show_startup_info(self):
         """Display configuration info on startup."""
-        ollama_config = self.config.ollama
-        timeout = getattr(ollama_config, 'timeout', 120)
-        request_delay = getattr(ollama_config, 'request_delay', 0.0)
-        model = getattr(ollama_config, 'model', 'unknown')
+        provider = getattr(self.config, 'llm_provider', 'ollama')
+        
+        # Determine active configuration source
+        if provider == 'ollama':
+            config_src = self.config.ollama
+            provider_display = "Ollama"
+        elif provider == 'google':
+             # Legacy google support (will be mapped to external effectively but kept distinct in config if needed)
+            config_src = self.config.google
+            provider_display = "Google (Legacy)"
+        else: # external or specific external provider name
+            config_src = self.config.external
+            # For external, show the sub-provider type if available
+            sub_provider = getattr(config_src, 'provider', 'unknown')
+            provider_display = f"External ({sub_provider})"
+
+        # Safe attribute access with defaults
+        timeout = getattr(config_src, 'timeout', 'N/A')
+        request_delay = getattr(config_src, 'request_delay', 0.0)
+        model = getattr(config_src, 'model', 'unknown')
         
         startup_msg = (
-            f"Ollama Config: timeout={timeout}s, request_delay={request_delay}s, model={model}\n"
+            f"LLM Provider: {provider_display}\n"
+            f"Config: model={model}, timeout={timeout}s, delay={request_delay}s\n"
             f"Ready for queries."
         )
         self.response_panel.add_response("System", startup_msg)
@@ -4426,7 +4409,8 @@ class OGhidraUI:
         self.query_panel.get_widget().pack(fill='x', pady=(0, 10))
         
         # AI Response panel (main content area)
-        self.response_panel = AIResponsePanel(parent)
+        # Pass the generate report callback from main UI
+        self.response_panel = AIResponsePanel(parent, generate_callback=self._menu_generate_report)
         self.response_panel.get_widget().pack(fill='both', expand=True)
     
     def _setup_sidebar_panel(self, parent):

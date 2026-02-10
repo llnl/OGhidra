@@ -12,7 +12,7 @@ import requests
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Union, Tuple
 from tenacity import Retrying, stop_after_attempt, wait_exponential, retry_if_exception
 
 # Reuse text chunking utilities from ollama_client
@@ -124,7 +124,7 @@ class ExternalClient:
         
         if self.llm_log_format == 'json':
             log_entry.update(data)
-            self.llm_logger.info(json.dumps(log_entry, indent=2))
+            self.llm_logger.info(json.dumps(log_entry))
         else:
             # Simple text logging
             lines = [f"Type: {interaction_type}"]
@@ -132,12 +132,38 @@ class ExternalClient:
                 lines.append(f"{key}: {value}")
             self.llm_logger.info('\n'.join(lines))
 
+    def query(self, prompt: Union[str, Tuple[str, str]], phase: Optional[str] = None) -> str:
+        """
+        High-level query interface compatible with Bridge.
+        Handles both string prompts and (system, user) tuples.
+        
+        Args:
+            prompt: String prompt or (system_prompt, user_prompt) tuple
+            phase: Optional phase name for model selection
+            
+        Returns:
+            Generated response string
+        """
+        system_prompt = None
+        user_prompt = prompt
+        
+        # Handle tuple prompt (system, user)
+        if isinstance(prompt, tuple) and len(prompt) == 2:
+            system_prompt, user_prompt = prompt
+            
+        return self.generate(
+            prompt=user_prompt,
+            system_prompt=system_prompt,
+            phase=phase
+        )
+
     def generate(self, 
                 prompt: str, 
                 model: Optional[str] = None,
                 system_prompt: Optional[str] = None,
                 temperature: Optional[float] = None,
-                max_tokens: Optional[int] = None) -> str:
+                max_tokens: Optional[int] = None,
+                phase: Optional[str] = None) -> str:
         """
         Generate a response from the External API.
         Currently supports: Google (Gemini)
@@ -154,12 +180,12 @@ class ExternalClient:
         
         # --- Provider: Google ---
         if self.provider == 'google':
-             return self._generate_google(prompt, used_model, used_system, temperature, max_tokens, start_time)
+             return self._generate_google(prompt, used_model, used_system, temperature, max_tokens, start_time, phase)
         else:
              self.logger.error(f"Provider '{self.provider}' not implemented yet.")
              return ""
 
-    def _generate_google(self, prompt, model, system_prompt, temperature, max_tokens, start_time):
+    def _generate_google(self, prompt, model, system_prompt, temperature, max_tokens, start_time, phase=None):
         """Google Gemini Implementation"""
         
         # URL Construction
@@ -196,6 +222,14 @@ class ExternalClient:
             "topK": self.top_k
         }
         payload["generationConfig"] = gen_config
+        
+        # 4. Safety Settings (Disable strict filtering for security research)
+        payload["safetySettings"] = [
+            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
+        ]
 
         try:
             # Setup retryer
@@ -208,9 +242,15 @@ class ExternalClient:
             
             # Execute request with retries
             def do_post():
-                resp = requests.post(url, headers=headers, json=payload, timeout=self.timeout)
-                resp.raise_for_status()
-                return resp
+                print(f"[ExternalClient] Sending request to Google (timeout={self.timeout}s)...")
+                try:
+                    resp = requests.post(url, headers=headers, json=payload, timeout=self.timeout)
+                    print(f"[ExternalClient] Received response: {resp.status_code}")
+                    resp.raise_for_status()
+                    return resp
+                except Exception as e:
+                    print(f"[ExternalClient] Request failed: {e}")
+                    raise
                 
             response = retryer(do_post)
             data = response.json()
@@ -218,18 +258,45 @@ class ExternalClient:
             # Response Parsing
             candidates = data.get("candidates", [])
             response_text = ""
+            finish_reason = "UNKNOWN"
             if candidates:
                 content = candidates[0].get("content", {})
                 parts = content.get("parts", [])
                 if parts:
                     response_text = parts[0].get("text", "")
+                finish_reason = candidates[0].get("finishReason", "UNKNOWN")
+            
+            # Retry-on-empty: If model returned empty with STOP, retry once with a hint
+            if not response_text.strip() and finish_reason == "STOP":
+                self.logger.warning("Empty response received with STOP. Retrying with hint...")
+                
+                # Append a hint to the prompt
+                retry_prompt = prompt + "\n\n[SYSTEM NOTE: Your previous response was empty. If you cannot determine the next step, explain why. If the investigation is complete, respond with 'INVESTIGATION COMPLETE'.]"
+                
+                # Make a single retry
+                retry_payload = dict(payload)
+                retry_payload["contents"] = [{"parts": [{"text": retry_prompt}]}]
+                
+                retry_resp = requests.post(url, headers=headers, json=retry_payload, timeout=self.timeout)
+                if retry_resp.ok:
+                    retry_data = retry_resp.json()
+                    retry_candidates = retry_data.get("candidates", [])
+                    if retry_candidates:
+                        retry_content = retry_candidates[0].get("content", {})
+                        retry_parts = retry_content.get("parts", [])
+                        if retry_parts:
+                            response_text = retry_parts[0].get("text", "")
+                            finish_reason = retry_candidates[0].get("finishReason", "UNKNOWN")
+                            data = retry_data  # Update for logging
+                            self.logger.info(f"Retry successful, got {len(response_text)} chars")
             
             # Log interaction
             if self.llm_logging_enabled:
                 log_data = {
                     'model': clean_model,
                     'method': 'generate',
-                    'status': 'success'
+                    'status': 'success',
+                    'phase': phase
                 }
                 if self.llm_log_prompts:
                     log_data['prompt'] = prompt
@@ -239,6 +306,9 @@ class ExternalClient:
                 
                 # Token usage metadata
                 usage = data.get("usageMetadata", {})
+                
+                log_data['finish_reason'] = finish_reason
+
                 if self.llm_log_tokens:
                     log_data['tokens'] = {
                         'prompt_token_count': usage.get("promptTokenCount", 0),
@@ -292,7 +362,7 @@ class ExternalClient:
                   self.logger.warning(f"Ignoring invalid model '{model}' for Google provider. Using default.")
                   model = None
                   
-        return self.generate(prompt=prompt, model=model, system_prompt=system_prompt)
+        return self.generate(prompt=prompt, model=model, system_prompt=system_prompt, phase=phase)
     
     def embed(self, text: str, model: str = None) -> List[float]:
         """

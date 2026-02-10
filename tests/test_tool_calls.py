@@ -142,7 +142,9 @@ class ToolCapabilityTester:
             'new_type': 'new_type',
             'query': 'function_name',
             'offset': 0,
-            'limit': 10
+            'limit': 10,
+            'tables': 'tables',
+            'port': 'port'
         }
         
         # Add a renamed function version
@@ -227,14 +229,41 @@ class ToolCapabilityTester:
         # Test basic functions first to gather data for other tests
         basic_tools = [
             'check_health', 'list_methods', 'get_current_function', 
-            'list_functions', 'list_strings' # Added list_strings
+            'list_functions', 'list_strings', 'instances_list'  # Added instances_list
         ]
         
         # Start with basic tools
         for tool in basic_tools:
             if tool in tools_to_test:
                 self.test_results[tool] = self.test_tool(tool)
+
+        # Special handling for instances_use - find a valid port first
+        if 'instances_use' in tools_to_test:
+            # Parse instances_list result or discover new ones
+            try:
+                # Try to find a port that isn't the current one (usually 8080)
+                # This assumes instances_list returns a string like "Port 8192: ..."
+                discovery_result = self.client.instances_list()
+                import re
+                # Find all 4-digit ports
+                ports = re.findall(r'Port (\d{4}):', discovery_result)
+                target_port = None
+                for p in ports:
+                    if p != '8080':
+                        target_port = int(p)
+                        break
                 
+                if target_port:
+                    self.test_data['port'] = target_port
+                else:
+                    self.test_data['port'] = 8080 # Fallback to current port if no other exists
+            except:
+                self.test_data['port'] = 8080
+
+        # Special handling for format_table_scan_results - provide dummy data
+        if 'format_table_scan_results' in tools_to_test:
+             self.test_data['tables'] = [{'table_address': 0x00401000, 'entry_count': 5, 'count': 5, 'entries': []}]
+
         # Gather function data if not already available
         if not self.available_functions or not self.available_addresses:
             self.gather_function_data()

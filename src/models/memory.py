@@ -260,6 +260,10 @@ class ExecutionPhaseResults(BaseModel):
     completed_at: Optional[datetime] = None
     investigation_complete: bool = False
     total_steps: int = 0
+    gates_triggered: List["ExecutionGate"] = Field(default_factory=list)
+    pending_question: Optional[Any] = None  # UserQuestion from user_question.py
+    analysis_dump: Optional[str] = None
+    compaction_summary: Optional[str] = None  # LLM-generated context summary
     
     def add_execution(self, tool_exec: ToolExecution):
         """Add a tool execution result."""
@@ -411,6 +415,41 @@ class CycleConclusions(BaseModel):
             sections.append("### Recommended Next Steps\n" + "\n".join(f"- {s}" for s in self.recommended_next_steps[:5]))
         
         return "\n\n".join(s for s in sections if s)
+
+
+class ExecutionSignal(str, Enum):
+    """Signals that control execution loop flow.
+    
+    Inspired by OpenCode's blocked/stop/continue return values
+    from SessionProcessor.
+    """
+    CONTINUE = "continue"   # Keep executing
+    PAUSE = "pause"         # Stop and surface to user for review
+    ABORT = "abort"         # Kill the loop entirely
+
+
+class ExecutionGate(BaseModel):
+    """A gate event — records why the execution loop paused.
+    
+    Inspired by OpenCode's PermissionNext.ask() pattern where the
+    system blocks until the user responds with once/always/reject.
+    
+    Triggers:
+        artifact   — Critical finding detected in tool results
+        repetition — Doom-loop: N identical tool calls in a row
+        high_risk  — Destructive tool about to execute
+        clarification — AI requested user guidance
+    """
+    reason: str
+    signal: ExecutionSignal = ExecutionSignal.PAUSE
+    trigger: str = "unknown"  # "artifact", "repetition", "high_risk", "clarification"
+    context: Dict[str, Any] = Field(default_factory=dict)
+    user_feedback: Optional[str] = None
+    timestamp: datetime = Field(default_factory=datetime.now)
+
+
+# Resolve forward reference for ExecutionPhaseResults.gates_triggered
+ExecutionPhaseResults.model_rebuild()
 
 
 class SessionMemory(BaseModel):

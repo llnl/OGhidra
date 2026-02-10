@@ -52,3 +52,9 @@ replay_pid*
 # Third party JAR files from Ghidra
 lib/*.jar
 
+# Gradle
+.gradle/
+build/
+dist/
+gradle.properties
+build_output*.txt

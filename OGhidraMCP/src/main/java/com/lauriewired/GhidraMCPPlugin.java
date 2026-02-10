@@ -437,18 +437,15 @@ public class GhidraMCPPlugin extends Plugin {
         if (basePort != DEFAULT_PORT) {
             if (isPortAvailable(basePort))
                 return basePort;
-            Msg.warn(this, "Configured port " + basePort + " is in use. Falling back to dynamic allocation.");
+            Msg.warn(this, "Configured port " + basePort + " is in use. Falling back to default/dynamic allocation.");
         }
 
-        // Try standard ports sequentially (8080, 8081, 8082...)
-        for (int i = 0; i < 10; i++) {
-            int candidate = DEFAULT_PORT + i;
-            if (isPortAvailable(candidate)) {
-                return candidate;
-            }
+        // Try standard default port 8080 explicitly
+        if (isPortAvailable(DEFAULT_PORT)) {
+            return DEFAULT_PORT;
         }
 
-        // Then try dynamic range 8192+
+        // Then try dynamic range 8192+ (Skipping 8081-8089 as per requirement)
         for (int i = 0; i < MAX_PORT_ATTEMPTS; i++) {
             int candidate = DYNAMIC_PORT_START + i;
             if (isPortAvailable(candidate)) {
@@ -456,7 +453,7 @@ public class GhidraMCPPlugin extends Plugin {
             }
         }
 
-        throw new RuntimeException("Could not find open port in range 8080-8089 or " + DYNAMIC_PORT_START + "+");
+        throw new RuntimeException("Could not find open port: 8080 or " + DYNAMIC_PORT_START + "+");
     }
 
     private boolean isPortAvailable(int port) {
@@ -521,8 +518,45 @@ public class GhidraMCPPlugin extends Plugin {
             return "No program loaded";
 
         List<String> lines = new ArrayList<>();
+        // Get external symbols (imports)
         for (Symbol symbol : program.getSymbolTable().getExternalSymbols()) {
-            lines.add(symbol.getName() + " -> " + symbol.getAddress());
+            StringBuilder line = new StringBuilder();
+            line.append(symbol.getName()).append(" -> ").append(symbol.getAddress());
+
+            // Get references to this import (xrefs)
+            ReferenceIterator refIter = program.getReferenceManager().getReferencesTo(symbol.getAddress());
+            List<String> callers = new ArrayList<>();
+            int refCount = 0;
+
+            while (refIter.hasNext()) {
+                Reference ref = refIter.next();
+                refCount++;
+
+                // If count is small, collect caller names
+                if (refCount <= 5) {
+                    Address fromAddr = ref.getFromAddress();
+                    Function caller = program.getFunctionManager().getFunctionContaining(fromAddr);
+                    if (caller != null) {
+                        callers.add(caller.getName());
+                    } else {
+                        callers.add(fromAddr.toString());
+                    }
+                }
+            }
+
+            // Append reference info
+            if (refCount > 0) {
+                line.append(" [Refs: ").append(refCount).append("]");
+                if (!callers.isEmpty()) {
+                    line.append(" [Callers: ").append(String.join(", ", callers));
+                    if (refCount > 5) {
+                        line.append(", ...");
+                    }
+                    line.append("]");
+                }
+            }
+
+            lines.add(line.toString());
         }
         return paginateList(lines, offset, limit);
     }
@@ -1397,6 +1431,9 @@ public class GhidraMCPPlugin extends Plugin {
 
         try {
             Address addr = program.getAddressFactory().getAddress(addressStr);
+            if (addr == null) {
+                return "Error: Invalid address format or address not found: " + addressStr;
+            }
             ReferenceManager refManager = program.getReferenceManager();
 
             ReferenceIterator refIter = refManager.getReferencesTo(addr);
@@ -1431,6 +1468,9 @@ public class GhidraMCPPlugin extends Plugin {
 
         try {
             Address addr = program.getAddressFactory().getAddress(addressStr);
+            if (addr == null) {
+                return "Error: Invalid address format or address not found: " + addressStr;
+            }
             ReferenceManager refManager = program.getReferenceManager();
 
             Reference[] references = refManager.getReferencesFrom(addr);
@@ -1461,7 +1501,9 @@ public class GhidraMCPPlugin extends Plugin {
     }
 
     /**
-     * Get all references to a specific function by name
+     * Get all references to a specific function by name.
+     * Now also supports external/imported symbols (e.g., LoadLibraryW,
+     * CreateFileW).
      */
     private String getFunctionXrefs(String functionName, int offset, int limit) {
         Program program = getCurrentProgram();
@@ -1473,26 +1515,61 @@ public class GhidraMCPPlugin extends Plugin {
         try {
             List<String> refs = new ArrayList<>();
             FunctionManager funcManager = program.getFunctionManager();
+            ReferenceManager refManager = program.getReferenceManager();
+            SymbolTable symbolTable = program.getSymbolTable();
+
+            Address targetAddress = null;
+            String targetType = "function";
+
+            // First, try to find as a regular function in FunctionManager
             for (Function function : funcManager.getFunctions(true)) {
                 if (function.getName().equals(functionName)) {
-                    Address entryPoint = function.getEntryPoint();
-                    ReferenceIterator refIter = program.getReferenceManager().getReferencesTo(entryPoint);
+                    targetAddress = function.getEntryPoint();
+                    break;
+                }
+            }
 
-                    while (refIter.hasNext()) {
-                        Reference ref = refIter.next();
-                        Address fromAddr = ref.getFromAddress();
-                        RefType refType = ref.getReferenceType();
-
-                        Function fromFunc = funcManager.getFunctionContaining(fromAddr);
-                        String funcInfo = (fromFunc != null) ? " in " + fromFunc.getName() : "";
-
-                        refs.add(String.format("From %s%s [%s]", fromAddr, funcInfo, refType.getName()));
+            // If not found in functions, check external symbols (imports)
+            if (targetAddress == null) {
+                for (Symbol symbol : symbolTable.getExternalSymbols()) {
+                    if (symbol.getName().equals(functionName)) {
+                        targetAddress = symbol.getAddress();
+                        targetType = "external";
+                        break;
                     }
                 }
             }
 
+            // Still not found? Try all symbols matching the name
+            if (targetAddress == null) {
+                SymbolIterator symIt = symbolTable.getSymbols(functionName);
+                if (symIt.hasNext()) {
+                    Symbol symbol = symIt.next();
+                    targetAddress = symbol.getAddress();
+                    targetType = symbol.getSymbolType().toString().toLowerCase();
+                }
+            }
+
+            if (targetAddress == null) {
+                return "Function or symbol not found: " + functionName;
+            }
+
+            // Get all references to this address
+            ReferenceIterator refIter = refManager.getReferencesTo(targetAddress);
+
+            while (refIter.hasNext()) {
+                Reference ref = refIter.next();
+                Address fromAddr = ref.getFromAddress();
+                RefType refType = ref.getReferenceType();
+
+                Function fromFunc = funcManager.getFunctionContaining(fromAddr);
+                String funcInfo = (fromFunc != null) ? " in " + fromFunc.getName() : "";
+
+                refs.add(String.format("From %s%s [%s]", fromAddr, funcInfo, refType.getName()));
+            }
+
             if (refs.isEmpty()) {
-                return "No references found to function: " + functionName;
+                return "No references found to " + targetType + ": " + functionName + " (at " + targetAddress + ")";
             }
 
             return paginateList(refs, offset, limit);
@@ -1770,6 +1847,8 @@ public class GhidraMCPPlugin extends Plugin {
 
     /**
      * Parse query parameters from the URL, e.g. ?offset=10&limit=100
+     * Handles edge cases: empty values (key=), values with = in them, missing
+     * values
      */
     private Map<String, String> parseQueryParams(HttpExchange exchange) {
         Map<String, String> result = new HashMap<>();
@@ -1777,16 +1856,20 @@ public class GhidraMCPPlugin extends Plugin {
         if (query != null) {
             String[] pairs = query.split("&");
             for (String p : pairs) {
-                String[] kv = p.split("=");
-                if (kv.length == 2) {
-                    // URL decode parameter values
-                    try {
-                        String key = URLDecoder.decode(kv[0], StandardCharsets.UTF_8);
-                        String value = URLDecoder.decode(kv[1], StandardCharsets.UTF_8);
-                        result.put(key, value);
-                    } catch (Exception e) {
-                        Msg.error(this, "Error decoding URL parameter", e);
+                // Use split with limit=2 to handle values containing '='
+                String[] kv = p.split("=", 2);
+                try {
+                    String key = URLDecoder.decode(kv[0], StandardCharsets.UTF_8);
+                    String value = "";
+                    if (kv.length == 2) {
+                        value = URLDecoder.decode(kv[1], StandardCharsets.UTF_8);
                     }
+                    // Only add if we have a key
+                    if (!key.isEmpty()) {
+                        result.put(key, value);
+                    }
+                } catch (Exception e) {
+                    Msg.error(this, "Error decoding URL parameter: " + p, e);
                 }
             }
         }

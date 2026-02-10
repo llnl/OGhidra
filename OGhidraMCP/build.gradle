@@ -3,7 +3,7 @@
 apply plugin: 'java'
 
 // Point to Ghidra installation
-def ghidraInstallDir = file(System.env.GHIDRA_INSTALL_DIR ?: "<PATH_TO_GHIDRA_INSTALLATION>")
+def ghidraInstallDir = file(project.findProperty('GHIDRA_INSTALL_DIR') ?: System.env.GHIDRA_INSTALL_DIR ?: "<PATH_TO_GHIDRA_INSTALLATION>")
 
 // Check if Ghidra installation is valid
 if (!ghidraInstallDir.exists()) {
@@ -15,7 +15,7 @@ apply from: new File(ghidraInstallDir, "support/buildExtension.gradle").absolute
 
 // Extension information
 version = "1.0"
-ext.ghidraVersion = "11.3.2"
+ext.ghidraVersion = "12.0.2"
 
 // Java version matching Ghidra 11.3.2
 java {

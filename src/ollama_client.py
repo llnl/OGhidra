@@ -11,8 +11,9 @@ import requests
 import time
 import os
 from datetime import datetime
+from typing import Dict, Any, List, Optional, Union, Tuple
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Tuple
+
 from tenacity import Retrying, stop_after_attempt, wait_exponential, retry_if_exception
 
 
@@ -239,7 +240,7 @@ class OllamaClient:
         # Add data based on logging preferences
         if self.llm_log_format == 'json':
             log_entry.update(data)
-            self.llm_logger.info(json.dumps(log_entry, indent=2))
+            self.llm_logger.info(json.dumps(log_entry))
         else:
             # Text format
             lines = [
@@ -257,12 +258,38 @@ class OllamaClient:
             lines.append(f"{'='*80}")
             self.llm_logger.info('\n'.join(lines))
         
+    def query(self, prompt: Union[str, Tuple[str, str]], phase: Optional[str] = None) -> str:
+        """
+        High-level query interface compatible with Bridge.
+        Handles both string prompts and (system, user) tuples.
+        
+        Args:
+            prompt: String prompt or (system_prompt, user_prompt) tuple
+            phase: Optional phase name for model selection
+            
+        Returns:
+            Generated response string
+        """
+        system_prompt = None
+        user_prompt = prompt
+        
+        # Handle tuple prompt (system, user)
+        if isinstance(prompt, tuple) and len(prompt) == 2:
+            system_prompt, user_prompt = prompt
+            
+        return self.generate(
+            prompt=user_prompt,
+            system_prompt=system_prompt,
+            phase=phase
+        )
+
     def generate(self, 
                 prompt: str, 
                 model: Optional[str] = None,
                 system_prompt: Optional[str] = None,
                 temperature: Optional[float] = None,
-                max_tokens: Optional[int] = None) -> str:
+                max_tokens: Optional[int] = None,
+                phase: Optional[str] = None) -> str:
         """
         Generate a response from the Ollama model.
         
@@ -322,6 +349,7 @@ class OllamaClient:
                 log_data = {
                     'model': used_model,
                     'method': 'generate',
+                    'phase': phase,
                 }
                 
                 if self.llm_log_prompts:
@@ -398,7 +426,8 @@ class OllamaClient:
         return self.generate(
             prompt=prompt,
             model=model,
-            system_prompt=system_prompt
+            system_prompt=system_prompt,
+            phase=phase
         )
             
     def list_models(self) -> List[str]:

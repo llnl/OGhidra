@@ -1,0 +1,2 @@
+# Path to your Ghidra installation directory
+GHIDRA_INSTALL_DIR=/path/to/ghidra_11.x_PUBLIC

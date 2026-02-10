@@ -59,14 +59,6 @@ graph TD
 
 ---
 
-### Monitor your Investigation and Rename All Functions
-<img width="1920" height="1028" alt="renaming-ui" src="https://github.com/user-attachments/assets/8843b5f5-1f2f-42eb-bf4a-4ef6c5625c9c" />
-
-
-### Summarize all your Functions
-<img width="1920" height="1026" alt="function-summaries" src="https://github.com/user-attachments/assets/3eec778a-ccb3-4a35-86aa-11908eafc6c6" />
-
-
 ## Pre-Installation Requirements
 
 Before installing OGhidra, you need to set up three core components: **Ghidra**, **OGhidraMCP**, and **Ollama**
@@ -91,7 +83,7 @@ Ghidra is the NSA's reverse engineering platform that OGhidra enhances with AI c
 
 1. **Download Ghidra 11.3 or later** from the official repository:
    - [Ghidra Releases](https://github.com/NationalSecurityAgency/ghidra/releases)
-   - Recommended: [Ghidra 11.3.2](https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_11.3.2_build/ghidra_11.3.2_PUBLIC_20250415.zip)
+   - Recommended: [Ghidra 11.3.2](https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_11.3.2_build/ghidra_11.3.2_PUBLIC_20250415.zip) or **Ghidra 12.0.2**
 
 2. **Extract the downloaded archive** to your desired installation directory
 
@@ -116,7 +108,7 @@ OGhidraMCP is an extended version of GhidraMCP with additional capabilities for 
 | Property | Value |
 |----------|-------|
 | **Version** | 1.1.0 |
-| **Ghidra Compatibility** | 11.3.2 (also compatible with 11.3.x, 11.4.x) |
+| **Ghidra Compatibility** | 12.0.2, 11.3.2 (also compatible with 11.3.x, 11.4.x) |
 | **Original Author** | LaurieWired |
 | **Modified By** | ezrealenoch |
 
@@ -127,7 +119,9 @@ OGhidraMCP is an extended version of GhidraMCP with additional capabilities for 
 - **Enhanced API Endpoints**: Discovery endpoints (`/plugin-version`, `/program`) for instance management and compatibility with multi-instance architectures
 
 **Installation:**
-1. Locate the plugin in `OGhidraMCP/dist/ghidra_11.3.2_PUBLIC_20251223_OGhidraMCP.zip`
+1. Locate the plugin in `OGhidraMCP/dist/`:
+   - For Ghidra 12.0.2: `OGhidraMCP_1-9`
+   - For Ghidra 11.3.2: `ghidra_11.3.2_PUBLIC_20260209_OGhidraMCP.zip`
 2. Open Ghidra
 3. Go to `File` → `Install Extensions`
 4. Click the `+` button
@@ -153,6 +147,7 @@ If you prefer the original plugin without modifications:
 3. **Restart Ghidra** to load the extension
 
 **Enable the Plugin (Both Options):**
+(TLDR: Install the plugin according to Laurie's video open up Ghidra Code Browser on some binary and then check on http://localhost:8080/methods)
 
 1. **Enable the GhidraMCP plugin**:
    - Go to `File` → `Configure` → `Developer`
@@ -166,9 +161,10 @@ If you prefer the original plugin without modifications:
    - Click `OK`
 
 3. **Verify the server is running**:
-   - With a project open, the GhidraMCP server should start automatically
+   - With a code browser project open, the GhidraMCP server should start automatically
    - Check Ghidra's console for "GhidraMCP HTTP server started on port XXXX" message
    - The port number will be shown in the console (may differ from configured port if using multi-instance mode)
+ 
 
 ### Step 3: Install Ollama
 
@@ -762,6 +758,25 @@ To solve the "context overload" problem in binary analysis, OGhidra now employs 
 1.  **Relevance Ranking**: Tool results are scored and ranked by relevance to your current goal, ensuring the AI sees the most critical information first (e.g., specific imports or strings) even when output is massive.
 2.  **Correlation Hints**: The system automatically detects addresses and values that appear across multiple different tool outputs (e.g., an address in an import list that is also referenced in a string). These "cross-tool correlations" are surfaced as high-priority hints.
 3.  **Cycle Conclusions**: At the end of each analysis cycle, the AI generates structured conclusions (Key Findings, Investigation Gaps) which are explicitly passed to the next planning phase, ensuring continuity and focus.
+
+### Orchestration 2.0: Safety & Focus
+
+OGhidra v1.8 introduces a new orchestration layer designed to keep the AI focused and safe during deep investigations:
+
+1.  **Lead Tracker (Focus)**:
+    -   Instead of wandering aimlessly, the AI now maintains a prioritized queue of investigation "leads".
+    -   High-priority leads (e.g., "Analyze decrypted payload") must be resolved before low-priority exploration.
+    -   Prevents "rabbit holes" and ensures systematic coverage of the binary.
+
+2.  **Cycle Convergence**:
+    -   At the end of each analysis cycle, the agent performs a "Convergence Step".
+    -   It synthesizes all findings into structured "Key Conclusions" and "Missing Gaps".
+    -   This state is passed to the next cycle, ensuring the AI "converges" on a final answer rather than looping indefinitely.
+
+3.  **Execution Gating (Safety)**:
+    -   **Import Reference Gating**: Automatically pauses execution if critical imports (e.g., `VirtualAlloc`, `CreateRemoteThread`) are detected in tool outputs.
+    -   **Artifact Gating**: Stops to ask for user guidance when sensitive strings (IP addresses, credentials) are found.
+    -   **Doom-Loop Prevention**: Detects and breaks repetitive tool loops.
 
 ### Google Gemini API Support
 

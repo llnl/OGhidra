@@ -1172,6 +1172,33 @@ class GhidraMCPClient:
         ]
         return "\n".join(result)
 
+    def get_current_program_info(self) -> Dict[str, str]:
+        """
+        Get structured information about the currently active program.
+        
+        Returns:
+            Dict containing 'name', 'project', 'port', etc.
+        """
+        # Ensure we have a valid current instance
+        if not self.current_instance_port or self.current_instance_port not in self.active_instances:
+            if self.active_instances:
+                # Auto-select first available if needed
+                self.current_instance_port = next(iter(self.active_instances))
+            else:
+                return {"name": "Unknown Binary", "project": "Unknown", "error": "No active instance"}
+                
+        # Update info to be fresh
+        self._update_instance_info(self.current_instance_port)
+        
+        info = self.active_instances.get(self.current_instance_port, {})
+        return {
+            "name": info.get("file", "Unknown Binary"),
+            "project": info.get("project", "Unknown Project"),
+            "port": str(self.current_instance_port),
+            "url": info.get("url", ""),
+            "plugin_version": info.get("plugin_version", "Unknown")
+        }
+
     def _discover_instances_internal(self, ports: List[int], host: str = "localhost") -> int:
         """Internal helper to scan ports and update active_instances."""
         count = 0
