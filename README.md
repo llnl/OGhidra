@@ -198,7 +198,7 @@ Ollama is the local LLM runtime that powers OGhidra's AI capabilities.
    # Alternative primary model (faster, good balance)
    ollama pull gemma3:27b
 
-   # Primary Cloud Model (Large, Cloud Hosted, Mistral please hire me)
+   # Primary Cloud Model (Large, Cloud Hosted, Mistral)
    ollama pull devstral-2:123b-cloud
    
    # Embedding model for vector search (RAG, LARGE Semantic Search)
