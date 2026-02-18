@@ -149,18 +149,7 @@ If you prefer the original plugin without modifications:
 **Enable the Plugin (Both Options):**
 (TLDR: Install the plugin according to Laurie's video open up Ghidra Code Browser on some binary and then check on http://localhost:8080/methods)
 
-1. **Enable the GhidraMCP plugin**:
-   - Go to `File` → `Configure` → `Developer`
-   - Check the box for `GhidraMCPPlugin` (or `OGhidraMCPPlugin`)
-   - Click `OK`
-
-2. **Configure the server port** (optional):
-   - Go to `Edit` → `Tool Options` → `GhidraMCP HTTP Server`
-   - Default port is `8080` - change if needed
-   - **Multi-Instance Mode**: If port 8080 is already in use, the plugin automatically tries ports 8192-8202, allowing multiple Ghidra instances to run simultaneously
-   - Click `OK`
-
-3. **Verify the server is running**:
+4. **Verify the server is running**:
    - With a code browser project open, the GhidraMCP server should start automatically
    - Check Ghidra's console for "GhidraMCP HTTP server started on port XXXX" message
    - The port number will be shown in the console (may differ from configured port if using multi-instance mode)
