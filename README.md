@@ -374,17 +374,17 @@ COMPACTION_THRESHOLD=0.75
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                        OGhidra UI                            │
-│                  (GUI / Interactive CLI)                     │
+│                        OGhidra UI                           │
+│                  (GUI / Interactive CLI)                    │
 └────────────────────────┬────────────────────────────────────┘
                          │
                          ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                   Bridge (src/bridge.py)                     │
+│                   Bridge (src/bridge.py)                    │
 │  ┌────────────────────────────────────────────────────────┐ │
-│  │ • Agentic Loop: Plan → Execute → Review → Replan      │ │
-│  │ • Tool Router: Ghidra client, LLM client, CAG manager │ │
-│  │ • Context Manager: Budget allocation, compression     │ │
+│  │ • Agentic Loop: Plan → Execute → Review → Replan       │ │
+│  │ • Tool Router: Ghidra client, LLM client, CAG manager  │ │
+│  │ • Context Manager: Budget allocation, compression      │ │
 │  └────────────────────────────────────────────────────────┘ │
 └───────────┬────────────────────────┬────────────────────────┘
             │                        │
@@ -399,12 +399,12 @@ COMPACTION_THRESHOLD=0.75
             └────────────┬───────────┘
                          ▼
 ┌─────────────────────────────────────────────────────────────┐
-│               CAG Manager (Knowledge System)                 │
+│               CAG Manager (Knowledge System)                │
 │  ┌────────────────────────────────────────────────────────┐ │
-│  │ • Vector Store: Semantic search over functions        │ │
-│  │ • Pattern Detector: 12+ malware techniques            │ │
-│  │ • Metadata Extractor: Structured function analysis    │ │
-│  │ • Session Store: Persistent analysis state            │ │
+│  │ • Vector Store: Semantic search over functions         │ │
+│  │ • Pattern Detector: 12+ malware techniques             │ │
+│  │ • Metadata Extractor: Structured function analysis     │ │
+│  │ • Session Store: Persistent analysis state             │ │
 │  └────────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────┘
 ```
