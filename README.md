@@ -1,4 +1,4 @@
-# OGhidra3 - AI-Powered Reverse Engineering with Ghidra
+# OGhidra 3 - AI-Powered Reverse Engineering with Ghidra
 
 ![Python Version](https://img.shields.io/badge/python-3.12%2B-blue?logo=python)
 ![License](https://img.shields.io/badge/license-BSD--3--Clause-green)
