@@ -468,7 +468,6 @@ See [LICENSE](LICENSE) and [NOTICE.md](NOTICE.md) for details.
 
 ## Support
 
-- **Documentation**: [AI_docs/](AI_docs/) for detailed technical documentation
 - **Issues**: [GitHub Issues](https://github.com/LLNL/OGhidra/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/LLNL/OGhidra/discussions)
 - **Just Email Me Directly**: enochsurge@gmail.com
