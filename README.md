@@ -437,7 +437,7 @@ If you use OGhidra in your research, please cite:
 ```bibtex
 @software{oghidra2025,
   title = {OGhidra: AI-Powered Reverse Engineering with Ghidra},
-  author = {OGhidra Contributors},
+  author = {Enoch Wang},
   year = {2025},
   url = {https://github.com/LLNL/OGhidra}
 }
@@ -471,3 +471,4 @@ See [LICENSE](LICENSE) and [NOTICE.md](NOTICE.md) for details.
 - **Documentation**: [AI_docs/](AI_docs/) for detailed technical documentation
 - **Issues**: [GitHub Issues](https://github.com/LLNL/OGhidra/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/LLNL/OGhidra/discussions)
+- **Just Email Me Directly**: enochsurge@gmail.com
