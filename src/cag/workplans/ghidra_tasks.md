@@ -13,13 +13,13 @@ This document contains step-by-step workplans for common Ghidra tasks. These wor
 
 2. **Decompile the function**:
    ```
-   EXECUTE: decompile_function(name="FUN_14024DA90")
+   EXECUTE: decompile_function(name="function_name")
    ```
-   Note: Replace "FUN_14024DA90" with the actual function name.
+   Note: Replace "function_name" with the actual function name.
 
 3. **Analyze the decompiled code**:
    - Look for direct function calls in the decompiled C-like code
-   - These will appear as function calls like `FUN_14024B250()` or similar
+   - These will appear as function calls like `other_function()` or similar
    - Record all unique function names that are called
 
 4. **Create a list of called functions**:
@@ -42,9 +42,9 @@ This document contains step-by-step workplans for common Ghidra tasks. These wor
 
 2. **Decompile the function to understand its purpose**:
    ```
-   EXECUTE: decompile_function(name="FUN_14024DA90")
+   EXECUTE: decompile_function(name="function_name")
    ```
-   Note: Replace "FUN_14024DA90" with the actual function name.
+   Note: Replace "function_name" with the actual function name.
 
 3. **Analyze the code to determine an appropriate name**:
    - Look for key operations, data being processed, and return values
@@ -53,7 +53,7 @@ This document contains step-by-step workplans for common Ghidra tasks. These wor
 
 4. **Rename the function**:
    ```
-   EXECUTE: rename_function(old_name="FUN_14024DA90", new_name="descriptive_name")
+   EXECUTE: rename_function(old_name="function_name", new_name="descriptive_name")
    ```
 
 ### Common Errors and Solutions:
@@ -73,9 +73,9 @@ This document contains step-by-step workplans for common Ghidra tasks. These wor
 
 2. **For each potential match, decompile and analyze**:
    ```
-   EXECUTE: decompile_function(name="FUN_14024DA90")
+   EXECUTE: decompile_function(name="function_name")
    ```
-   Note: Replace "FUN_14024DA90" with each function name from step 1.
+   Note: Replace "function_name" with each function name from step 1.
 
 3. **Evaluate the decompiled code** for the specific functionality you're seeking
 

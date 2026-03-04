@@ -75,7 +75,7 @@ class LeadTracker:
         try:
             # Simple regex to find the JSON-like structure or markdown list
             # Matching robust patterns from the dump
-            # Example: - [HIGH] 0x004a0e20: Call to AdjustTokenPrivileges...
+            # Example: - [HIGH] 0x401000: Call to AdjustTokenPrivileges...
             
             # Pattern for markdown style leads in "Cycle Conclusions"
             md_pattern = r"-\s*\[(HIGH|MEDIUM|LOW)\]\s*(0x[0-9a-fA-F]+)?[:\s]*(.*?)(?:\n|$)"

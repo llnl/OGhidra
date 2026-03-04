@@ -115,6 +115,176 @@ class SimpleVectorStore:
             })
             
         return results
+    
+    def search_hybrid(self, query: str, top_k: int = 5, use_keywords: bool = True, keyword_weight: float = 0.4) -> List[Dict[str, Any]]:
+        """
+        Hybrid search combining keyword matching and semantic similarity.
+        
+        Args:
+            query: Search query
+            top_k: Number of results to return
+            use_keywords: Whether to include keyword search
+            keyword_weight: Weight for keyword results (0.0-1.0), semantic gets (1-weight)
+            
+        Returns:
+            List of documents with scores, sorted by combined relevance
+        """
+        if not self.documents:
+            logger.warning("No documents available for search")
+            return []
+        
+        results = []
+        
+        # 1. Keyword search (grep-style)
+        if use_keywords:
+            keyword_results = self._keyword_search(query, top_k=top_k*2)
+            for result in keyword_results:
+                result['search_type'] = 'keyword'
+            results.extend(keyword_results)
+        
+        # 2. Semantic search (embeddings)
+        if self.embeddings:
+            semantic_results = self.search(query, top_k=top_k*2)
+            for result in semantic_results:
+                result['search_type'] = 'semantic'
+            results.extend(semantic_results)
+        
+        # 3. Merge and re-rank
+        if results:
+            return self._merge_and_rerank(results, top_k, keyword_weight)
+        
+        return []
+    
+    def _keyword_search(self, query: str, top_k: int = 10) -> List[Dict[str, Any]]:
+        """
+        Keyword-based search through document text (grep-style).
+        
+        Args:
+            query: Search query
+            top_k: Number of results to return
+            
+        Returns:
+            List of documents with keyword match scores
+        """
+        query_lower = query.lower()
+        query_terms = query_lower.split()
+        matches = []
+        
+        for i, doc in enumerate(self.documents):
+            # Get document text
+            text = doc.get("text", doc.get("content", "")).lower()
+            
+            if not text:
+                continue
+            
+            # Calculate match score based on term frequency
+            score = 0.0
+            text_words = text.split()
+            text_len = len(text_words)
+            
+            # Score by term frequency (TF)
+            for term in query_terms:
+                term_count = text.count(term)
+                if term_count > 0:
+                    # TF score: occurrences / doc length
+                    tf_score = term_count / max(text_len, 1)
+                    score += tf_score
+            
+            # Only include if there's a match
+            if score > 0:
+                matches.append({
+                    "document": doc,
+                    "score": score,
+                    "search_type": "keyword"
+                })
+        
+        # Sort by score and return top-K
+        return sorted(matches, key=lambda x: x["score"], reverse=True)[:top_k]
+    
+    def _merge_and_rerank(self, results: List[Dict[str, Any]], top_k: int, keyword_weight: float = 0.4) -> List[Dict[str, Any]]:
+        """
+        Merge keyword and semantic results, removing duplicates and re-ranking.
+        
+        Args:
+            results: Combined results from keyword and semantic search
+            top_k: Number of results to return
+            keyword_weight: Weight for keyword scores (semantic gets 1-weight)
+            
+        Returns:
+            Merged and re-ranked results
+        """
+        # Deduplicate by document address/name
+        seen = {}
+        semantic_weight = 1.0 - keyword_weight
+        
+        for result in results:
+            doc = result["document"]
+            # Use address as unique identifier
+            doc_id = doc.get("metadata", {}).get("address") or doc.get("name", "") or str(hash(str(doc)))
+            
+            if doc_id in seen:
+                # Document already seen - combine scores
+                existing = seen[doc_id]
+                search_type = result.get("search_type", "unknown")
+                
+                # Weight the score based on search type
+                if search_type == "keyword":
+                    weighted_score = result["score"] * keyword_weight
+                else:
+                    weighted_score = result["score"] * semantic_weight
+                
+                existing["combined_score"] += weighted_score
+                existing["search_types"].add(search_type)
+            else:
+                # New document
+                search_type = result.get("search_type", "unknown")
+                
+                # Weight the score
+                if search_type == "keyword":
+                    weighted_score = result["score"] * keyword_weight
+                else:
+                    weighted_score = result["score"] * semantic_weight
+                
+                seen[doc_id] = {
+                    "document": doc,
+                    "score": result["score"],  # Original score
+                    "combined_score": weighted_score,
+                    "search_types": {search_type}
+                }
+        
+        # Convert to list and sort by combined score
+        merged = list(seen.values())
+        merged.sort(key=lambda x: x["combined_score"], reverse=True)
+        
+        return merged[:top_k]
+    
+    def search_by_function_name(self, name_pattern: str, exact: bool = False) -> List[Dict[str, Any]]:
+        """
+        Search for functions by name pattern.
+        
+        Args:
+            name_pattern: Function name or pattern to search for
+            exact: If True, require exact match; if False, substring match
+            
+        Returns:
+            List of matching documents
+        """
+        matches = []
+        pattern_lower = name_pattern.lower()
+        
+        for doc in self.documents:
+            doc_name = doc.get("name", "").lower()
+            
+            if exact:
+                if doc_name == pattern_lower:
+                    matches.append({"document": doc, "score": 1.0})
+            else:
+                if pattern_lower in doc_name:
+                    # Score by how much of the name matches
+                    score = len(pattern_lower) / max(len(doc_name), 1)
+                    matches.append({"document": doc, "score": score})
+        
+        return sorted(matches, key=lambda x: x["score"], reverse=True)
 
     def get_relevant_knowledge(self, query: str, token_limit: int = 2000) -> str:
         """

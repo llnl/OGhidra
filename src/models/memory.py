@@ -92,6 +92,7 @@ class AnalysisState(BaseModel):
     functions_analyzed: Set[str] = Field(default_factory=set)
     comments_added: Dict[str, str] = Field(default_factory=dict)  # address -> comment
     cached_results: Dict[str, Any] = Field(default_factory=dict)
+    pattern_detections: Dict[str, List[str]] = Field(default_factory=dict)  # address -> pattern names (HIGH severity)
     
     class Config:
         # Allow sets in Pydantic model
@@ -459,6 +460,7 @@ class SessionMemory(BaseModel):
     analysis_state: AnalysisState = Field(default_factory=AnalysisState)
     start_time: datetime = Field(default_factory=datetime.now)
     knowledge_base: List[KnowledgeArtifact] = Field(default_factory=list)  # New Knowledge Base
+    user_preferences: Dict[str, Any] = Field(default_factory=dict)
     
     def add_message(self, role: MessageRole, content: str, metadata: Dict[str, Any] = None):
         """Add a message to the conversation history."""
@@ -486,6 +488,20 @@ class SessionMemory(BaseModel):
             category=category,
             tags=tags or []
         ))
+
+    def set_user_preference(self, key: str, value: Any) -> None:
+        """Set a user preference (sticky note) for this session."""
+        self.user_preferences[key] = value
+
+    def get_user_preferences_summary(self) -> str:
+        """Format user preferences for prompt injection."""
+        if not self.user_preferences:
+            return ""
+        lines = ["## USER PREFERENCES (STICKY)"]
+        for k in sorted(self.user_preferences.keys()):
+            v = self.user_preferences[k]
+            lines.append(f"- {k}: {v}")
+        return "\n".join(lines)
 
     def get_knowledge_summary(self) -> str:
         """Get formatted summary of all knowledge artifacts."""
@@ -532,4 +548,3 @@ class SessionMemory(BaseModel):
             datetime: lambda v: v.isoformat(),
             set: lambda v: list(v)
         }
-

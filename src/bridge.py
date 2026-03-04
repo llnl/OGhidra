@@ -20,6 +20,7 @@ import os, json, logging, textwrap, inspect, sys, functools, itertools, math, ra
 from src.config import BridgeConfig
 from src.ollama_client import OllamaClient
 from src.external_client import ExternalClient
+from src.custom_api_client import CustomAPIClient
 from src.ghidra_client import GhidraMCPClient
 from src.command_parser import CommandParser
 from src.cag.manager import CAGManager
@@ -82,7 +83,6 @@ class Bridge:
             Bridge._model_load_lock = threading.Lock()
         
         # Select LLM Provider and Config
-        # Select LLM Provider and Config
         self.provider = getattr(config, 'llm_provider', 'ollama')
         
         # Handle 'google' alias for backward compatibility
@@ -93,6 +93,10 @@ class Bridge:
             self.llm_config = config.external
             self.ollama = ExternalClient(config=self.llm_config)
             self.logger.info(f"Using External Provider ({self.llm_config.provider}) as LLM")
+        elif self.provider == 'custom_api':
+            self.llm_config = config.custom_api
+            self.ollama = CustomAPIClient(config=self.llm_config)
+            self.logger.info("Using Custom API as LLM provider")
         else:
             self.llm_config = config.ollama
             self.ollama = OllamaClient(config=self.llm_config)
@@ -142,6 +146,14 @@ class Bridge:
             prev_loop_max_chars=getattr(self.llm_config, 'prev_loop_max_chars', 800),
             older_loop_max_chars=getattr(self.llm_config, 'older_loop_max_chars', 200)
         )
+
+        # Deterministic compaction for prompt stability (reduces 429/504)
+        try:
+            from src.result_compactor import ResultCompactor, CompactionConfig
+            max_chars = int(getattr(self.llm_config, 'compaction_max_chars', 2000))
+            self.result_compactor = ResultCompactor(CompactionConfig(max_chars=max_chars))
+        except Exception:
+            self.result_compactor = None
         
         # Analysis dumper for capturing raw context before truncation
         self.analysis_dumper = AnalysisDumper()
@@ -181,6 +193,15 @@ class Bridge:
         # Store function analysis summaries
         self.function_summaries = {}
         
+        # KNOWLEDGE GRAPH: Track function relationships for architectural understanding
+        self.function_graph = None
+        try:
+            from src.function_graph import FunctionGraph
+            self.function_graph = FunctionGraph()
+            self.logger.info("✅ Knowledge Graph initialized for architectural analysis")
+        except Exception as e:
+            self.logger.warning(f"⚠️  Knowledge Graph initialization failed: {e}. Graph features disabled.")
+        
         # Initialize caches and statistics
         self._init_caches()
         
@@ -193,11 +214,41 @@ class Bridge:
         self.current_plan_tools = []
         self.executed_tools = set()  # Track (cmd_name:params_signature) to avoid duplicates
         self.step_result_map = {}  # Map cmd_signature -> (loop_step_id, result_excerpt)
-        self.tool_repetition_limit = 2  # Maximum repetitions allowed for tool calls
+        self.tool_repetition_limit = 999  # TEMPORARILY DISABLED - was causing cache misses (original: 2)
         self.current_loop_number = 1  # Track current agentic loop/cycle number
         
         # Workflow stage tracking for UI integration
         self.current_workflow_stage = None  # Can be: 'planning', 'execution', 'analysis', 'review', None
+
+        # Task mode controls how much guidance we inject.
+        # Modes: off (no special mode), purpose_id, malware, vuln, custom
+        self.task_mode_enabled = False
+        self.task_mode = "off"
+        
+        # Grep layer (hybrid search) state
+        self.grep_layer_enabled = False
+
+        # Load sticky user preferences (custom mode notepad) from disk
+        try:
+            from src.user_prefs_store import load_user_prefs
+            persisted = load_user_prefs()
+            if isinstance(persisted, dict) and persisted:
+                for k, v in persisted.items():
+                    self.session.set_user_preference(k, v)
+
+                # Also restore task mode state if present
+                try:
+                    self.task_mode_enabled = bool(persisted.get('task_mode_enabled', False))
+                    self.task_mode = str(persisted.get('task_mode', 'off') or 'off')
+                    self.grep_layer_enabled = bool(persisted.get('grep_layer_enabled', False))
+                except Exception:
+                    pass
+
+                # Note: focus_function tracking was removed as it caused confusion during
+                # cross-reference analysis. Users should explicitly query "current function"
+                # when needed, which will call get_current_function() from Ghidra.
+        except Exception:
+            pass
         
         # Partial outputs storage
         self.partial_outputs = []
@@ -239,6 +290,10 @@ class Bridge:
             self.llm_config = self.config.external
             self.ollama = ExternalClient(config=self.llm_config)
             self.logger.info(f"Switched to External Provider: {self.llm_config.provider}")
+        elif self.provider == 'custom_api':
+            self.llm_config = self.config.custom_api
+            self.ollama = CustomAPIClient(config=self.llm_config)
+            self.logger.info("Switched to Custom API Provider")
         else:
             self.llm_config = self.config.ollama
             self.ollama = OllamaClient(config=self.llm_config)
@@ -256,6 +311,208 @@ class Bridge:
             
         Bridge.set_ollama_client(self.ollama)
         print(f"[Bridge] Client reloaded. Provider: {self.provider}")
+
+    def set_task_mode(self, enabled: bool, mode: str = "off") -> None:
+        """Set task mode and persist it."""
+        self.task_mode_enabled = bool(enabled)
+        self.task_mode = mode or "off"
+        try:
+            self.session.set_user_preference("task_mode_enabled", self.task_mode_enabled)
+            self.session.set_user_preference("task_mode", self.task_mode)
+            
+            # Log the change
+            if self.task_mode_enabled:
+                self.logger.info(f"Task mode enabled: {self.task_mode}")
+            else:
+                self.logger.info("Task mode disabled")
+        except Exception as e:
+            self.logger.warning(f"Could not persist task mode: {e}")
+
+    def get_task_mode_state(self) -> dict:
+        """Get the current task mode state."""
+        return {
+            "enabled": bool(getattr(self, 'task_mode_enabled', False)),
+            "mode": getattr(self, 'task_mode', 'off'),
+        }
+    
+    def set_grep_layer_enabled(self, enabled: bool) -> None:
+        """Enable or disable the hybrid search (grep layer) functionality."""
+        self.grep_layer_enabled = bool(enabled)
+        
+        # Reload capabilities text to include/exclude search_function_summaries
+        if self.include_capabilities:
+            self.capabilities_text = self._load_capabilities_text()
+        
+        try:
+            self.session.set_user_preference("grep_layer_enabled", self.grep_layer_enabled)
+            
+            # Log the change
+            if self.grep_layer_enabled:
+                self.logger.info("Hybrid search (grep layer) enabled - search_function_summaries available")
+            else:
+                self.logger.info("Hybrid search (grep layer) disabled - search_function_summaries hidden")
+        except Exception as e:
+            self.logger.warning(f"Could not persist grep layer state: {e}")
+    
+    def get_grep_layer_state(self) -> bool:
+        """Get the current grep layer state."""
+        return bool(getattr(self, 'grep_layer_enabled', False))
+
+    def _update_scope_from_query(self, query: str) -> None:
+        """Best-effort scope anchoring to reduce goal drift across turns."""
+        try:
+            q = (query or "").lower()
+            scope = "binary"
+            if any(k in q for k in ["current function", "this function", "the function", "decompile", "disassemble function", "review function"]):
+                scope = "function"
+            if any(k in q for k in ["whole binary", "entire binary", "full binary", "whole program", "entire program", "all functions"]):
+                scope = "binary"
+
+            self.session.set_user_preference("active_goal", (query or "").strip())
+            self.session.set_user_preference("scope_lock", scope)
+        except Exception:
+            return
+
+    def _build_scope_card(self) -> str:
+        """Compact, authoritative session scope card injected into prompts.
+        
+        Note: focus_function tracking was removed. Users should explicitly ask about
+        "the current function" when needed, which calls get_current_function() from Ghidra.
+        """
+        try:
+            prefs = getattr(self.session, 'user_preferences', {}) or {}
+            active_goal = str(prefs.get('active_goal', '')).strip()
+            scope_lock = str(prefs.get('scope_lock', '')).strip() or "binary"
+
+            lines = ["## SESSION SCOPE (AUTHORITATIVE)"]
+            if active_goal:
+                lines.append(f"- active_goal: {active_goal}")
+            lines.append(f"- scope_lock: {scope_lock}")
+            lines.append("- rule: Do not broaden scope unless user explicitly requests")
+            return "\n".join(lines)
+        except Exception:
+            return ""
+
+    def _maybe_update_custom_workplan(self, user_query: str, final_response: str) -> None:
+        """Update the custom-mode notepad/workplan after a query completes.
+
+        This is intentionally small to avoid rate limiting and prompt bloat.
+        """
+        try:
+            if not bool(getattr(self, 'task_mode_enabled', False)):
+                return
+            if getattr(self, 'task_mode', 'off') != 'custom':
+                return
+
+            existing = ""
+            try:
+                existing = str(self.session.user_preferences.get('custom_workplan', '')).strip()
+            except Exception:
+                existing = ""
+
+            prompt = (
+                "You maintain a short user-specific investigation notepad.\n"
+                "Update the NOTEPAD based on the latest user query and the assistant's final response.\n\n"
+                "Rules:\n"
+                "- Keep it concise (max 12 bullets).\n"
+                "- Prefer concrete preferences (tools to use, ordering, evidence standards, formatting).\n"
+                "- Remove duplicates and outdated items.\n"
+                "- Do NOT add generic advice.\n"
+                "- Output ONLY the updated notepad as bullet points (no headings).\n\n"
+                f"CURRENT NOTEPAD:\n{existing}\n\n"
+                f"LATEST USER QUERY:\n{user_query}\n\n"
+                f"LATEST ASSISTANT RESPONSE:\n{final_response[:2000]}\n"
+            )
+
+            updated = self.ollama.generate(
+                prompt=prompt,
+                system_prompt="You update a short notepad. Output ONLY bullet points.",
+                phase="analysis",
+                max_tokens=250,
+            )
+
+            updated = (updated or "").strip()
+            if updated:
+                self.session.set_user_preference('custom_workplan', updated)
+                try:
+                    from src.user_prefs_store import save_user_prefs
+                    save_user_prefs(self.session.user_preferences)
+                except Exception:
+                    pass
+        except Exception:
+            return
+    
+    def _should_analyze_findings(self, tools_executed: int) -> bool:
+        """
+        Check if we should pause for analysis checkpoint.
+        
+        Forces analysis after every 3 tool executions to prevent the AI from
+        drowning in data without reflection. This implements a key lesson from
+        the ninja trojan investigation failure.
+        
+        Args:
+            tools_executed: Number of tools executed in current loop
+            
+        Returns:
+            True if analysis checkpoint is needed
+        """
+        # After every 3 tool executions, force analysis
+        return tools_executed > 0 and tools_executed % 3 == 0
+    
+    def _create_analysis_checkpoint(self, execution_results: List) -> str:
+        """
+        Create analysis checkpoint prompt that forces reflection.
+        
+        This is inspired by OpenCode's iterative feedback loops where the
+        agent must explain its findings before continuing. It prevents the
+        "execution without thought" pattern that caused investigation failures.
+        
+        Args:
+            execution_results: List of recent tool executions
+            
+        Returns:
+            Formatted checkpoint prompt
+        """
+        # Get last 3 tool names
+        recent_tools = []
+        for ex in execution_results[-3:]:
+            if hasattr(ex, 'cmd_name'):
+                recent_tools.append(ex.cmd_name)
+            elif isinstance(ex, dict):
+                recent_tools.append(ex.get('cmd_name', 'unknown'))
+        
+        checkpoint_prompt = f"""
+🔍 ANALYSIS CHECKPOINT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+You have executed: {', '.join(recent_tools)}
+
+MANDATORY REFLECTION: Before executing more tools, analyze your findings:
+
+1. **Data Summary**: What data was returned from the tools above?
+   - List the key findings (addresses, function names, strings, etc.)
+   
+2. **Pattern Detection**: Are there suspicious patterns?
+   - Security APIs (privilege escalation, crypto, etc.)
+   - Network indicators (URLs, IPs, suspicious domains)
+   - Malicious behaviors (obfuscation, hidden files, etc.)
+
+3. **Verification Required**: Do you need to decompile any functions?
+   - For each suspicious finding, identify the function to decompile
+   - State the address and why it's suspicious
+   
+4. **Next Action**: Based on these findings, what's your next step?
+   - Decompile a function? (provide address)
+   - Search for related strings? (provide filter)
+   - Trace cross-references? (provide address)
+   - Declare investigation complete? (provide evidence)
+
+⚠️  CRITICAL: You must complete this analysis before executing more tools.
+Do NOT skip to tool execution. Provide concrete details from the data above.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+"""
+        return checkpoint_prompt
     
     def _get_max_result_chars(self) -> int:
         """
@@ -388,29 +645,11 @@ class Bridge:
         if self._ui_gate_callback:
             self._ui_gate_callback(gate)
 
-    def _parse_and_save_artifacts(self, response: str):
-        """
-        Parse text-based artifacts from LLM response.
-        Format: ARTIFACT: [category] key = value
-        """
-        import re
-        # Regex to capture: ARTIFACT: [cat] key = value
-        # Tolerates missing brackets or whitespace variations
-        pattern = r"ARTIFACT:\s*(?:\[(\w+)\])?\s*([^=]+)\s*=\s*(.+)"
-        
-        matches = re.finditer(pattern, response, re.IGNORECASE)
-        count = 0
-        for match in matches:
-            category = match.group(1) or "general"
-            key = match.group(2).strip()
-            value = match.group(3).strip()
-            
-            self.session.add_knowledge(key, value, category)
-            self.logger.info(f"💾 Parsed Artifact: [{category}] {key} = {value}")
-            count += 1
-            
-        if count > 0:
-            self._emit_cot("Memory", f"Saved {count} knowledge artifacts")
+    # REMOVED: _parse_and_save_artifacts - text-based ARTIFACT format was never used
+    # Artifacts now auto-populated from execution gate triggers
+    # def _parse_and_save_artifacts(self, response: str):
+    #     """Parse text-based artifacts from LLM response."""
+    #     pass
     
     def _load_capabilities_text(self) -> Optional[str]:
         """Load the capabilities text from the file if the flag is set."""
@@ -418,23 +657,105 @@ class Bridge:
             return None
             
         capabilities_file = "ai_ghidra_capabilities.txt"
+        capabilities_content = None
+        
         try:
             # Assuming the script is run from the project root
             file_path = os.path.join(os.path.dirname(__file__), '..', capabilities_file) 
             if os.path.exists(file_path):
                 with open(file_path, 'r', encoding='utf-8') as f:
-                    return f.read()
+                    capabilities_content = f.read()
             else:
                 # Try reading from the current working directory as a fallback
                 if os.path.exists(capabilities_file):
                     with open(capabilities_file, 'r', encoding='utf-8') as f:
-                        return f.read()
+                        capabilities_content = f.read()
                 else:
                     self.logger.warning(f"Capabilities file '{capabilities_file}' not found.")
                     return None
         except Exception as e:
             self.logger.error(f"Error reading capabilities file '{capabilities_file}': {str(e)}")
             return None
+        
+        # Conditionally add search_function_summaries when Hybrid Search is enabled
+        if capabilities_content and getattr(self, 'grep_layer_enabled', False):
+            # Find the "Context Management:" section and add search_function_summaries
+            search_func_desc = ("- search_function_summaries(query, search_type, top_k): Search analyzed function summaries (when available). "
+                               "Use search_type=\"hybrid\" (keyword+semantic), \"keyword\" (grep-style), \"semantic\" (embeddings-only), or \"name\" (match function name). "
+                               "Requires function summaries to be present; hybrid search is intended to be enabled via the \"Enable Hybrid Search\" checkbox.")
+            
+            # Insert after the get_cached_result line in Context Management section
+            context_mgmt_marker = "- get_cached_result(result_id):"
+            if context_mgmt_marker in capabilities_content:
+                # Find the end of the get_cached_result line
+                marker_pos = capabilities_content.find(context_mgmt_marker)
+                next_section_pos = capabilities_content.find("\n\n", marker_pos)
+                if next_section_pos != -1:
+                    # Insert before the next section
+                    capabilities_content = (
+                        capabilities_content[:next_section_pos] +
+                        "\n" + search_func_desc +
+                        capabilities_content[next_section_pos:]
+                    )
+        
+        return capabilities_content
+    
+    def _remove_search_function_summaries_refs(self, prompt_text: str) -> str:
+        """
+        Remove references to search_function_summaries from prompt text when hybrid search is disabled.
+        This includes removing entire sections that discuss the tool.
+        """
+        if not prompt_text:
+            return prompt_text
+        
+        # Remove sections that start with markers about hybrid search or search_function_summaries
+        import re
+        
+        # Pattern 1: Remove entire sections bordered by emoji dividers that mention hybrid search
+        # This matches sections like: 🔥 HYBRID SEARCH STRATEGY ... ━━━━━
+        pattern1 = r'🔥\s*HYBRID SEARCH[^━]*?━{20,}.*?━{20,}'
+        prompt_text = re.sub(pattern1, '', prompt_text, flags=re.DOTALL | re.IGNORECASE)
+        
+        # Pattern 2: Remove standalone sections about function summary search
+        # This matches sections like: 🔍 FUNCTION SUMMARY SEARCH ... ━━━━━
+        pattern2 = r'🔍\s*FUNCTION SUMMARY SEARCH[^━]*?━{20,}.*?━{20,}'
+        prompt_text = re.sub(pattern2, '', prompt_text, flags=re.DOTALL | re.IGNORECASE)
+        
+        # Pattern 3: Remove individual lines that mention search_function_summaries
+        lines = prompt_text.split('\n')
+        filtered_lines = []
+        skip_until_blank = False
+        
+        for line in lines:
+            # If we're in a section to skip, check if we've reached a blank line or new section
+            if skip_until_blank:
+                if line.strip() == '' or line.strip().startswith('##') or line.strip().startswith('**'):
+                    skip_until_blank = False
+                else:
+                    continue
+            
+            # Check if line mentions search_function_summaries
+            if 'search_function_summaries' in line.lower():
+                # If it's an EXECUTE line or part of a usage example, skip it
+                if 'EXECUTE:' in line or 'search_function_summaries(' in line:
+                    continue
+                # If it's part of a description, skip until we hit a blank line
+                skip_until_blank = True
+                continue
+            
+            # Check if line mentions "Hybrid Search" or "hybrid search" in instructional context
+            if re.search(r'(when|use|enable|available).*hybrid\s+search', line, re.IGNORECASE):
+                skip_until_blank = True
+                continue
+                
+            filtered_lines.append(line)
+        
+        prompt_text = '\n'.join(filtered_lines)
+        
+        # Clean up excessive blank lines
+        prompt_text = re.sub(r'\n{3,}', '\n\n', prompt_text)
+        
+        return prompt_text
 
     def _build_structured_prompt(self, phase: str = None) -> tuple:
         """
@@ -489,15 +810,36 @@ You can help analyze binary files by executing commands through GhidraMCP."""
         
         # 3. Phase-specific instructions (static rules)
         if phase == "planning":
-            phase_instructions = self.llm_config.planning_system_prompt.replace(
+            # Task mode gating: only use deployment-vuln planning prompt when explicitly in vuln mode.
+            use_vuln_prompt = bool(getattr(self, 'task_mode_enabled', False)) and getattr(self, 'task_mode', 'off') == 'vuln'
+            planning_template = getattr(self.llm_config, 'planning_system_prompt_vuln', '') if use_vuln_prompt else self.llm_config.planning_system_prompt
+            if not planning_template:
+                planning_template = self.llm_config.planning_system_prompt
+            phase_instructions = planning_template.replace(
                 "{user_task_description}", "[User's goal will be provided in the user message]"
             )
+            # Remove search_function_summaries references if hybrid search is disabled
+            if not getattr(self, 'grep_layer_enabled', False):
+                phase_instructions = self._remove_search_function_summaries_refs(phase_instructions)
             system_sections.append(phase_instructions)
         elif phase == "execution":
-            phase_instructions = self.llm_config.execution_system_prompt.format(
+            # Choose execution system prompt based on task mode
+            task_mode_enabled = bool(getattr(self, 'task_mode_enabled', False))
+            
+            if task_mode_enabled:
+                # Use detailed investigation methodology prompt for task mode
+                execution_template = getattr(self.llm_config, 'execution_system_prompt_task_mode', self.llm_config.execution_system_prompt)
+            else:
+                # Use simple, direct prompt for normal queries
+                execution_template = self.llm_config.execution_system_prompt
+            
+            phase_instructions = execution_template.format(
                 user_task_description="[User's goal will be provided in the user message]",
                 FUNCTION_CALL_BEST_PRACTICES=self.llm_config.FUNCTION_CALL_BEST_PRACTICES
             )
+            # Remove search_function_summaries references if hybrid search is disabled
+            if not getattr(self, 'grep_layer_enabled', False):
+                phase_instructions = self._remove_search_function_summaries_refs(phase_instructions)
             system_sections.append(phase_instructions)
         elif phase == "evaluation":
             phase_instructions = self.llm_config.evaluation_system_prompt.replace(
@@ -562,7 +904,36 @@ You can help analyze binary files by executing commands through GhidraMCP."""
         
         # Build CAG context if enabled
         cag_context_obj = None
-        if self.enable_cag and self.cag_manager:
+        # By default we keep prompts lean when Task Mode is off.
+        # If the user explicitly enables Hybrid Search (grep layer), we allow CAG/RAG
+        # knowledge injection even when Task Mode is off.
+        task_mode_enabled = bool(getattr(self, 'task_mode_enabled', False))
+        grep_layer_enabled = bool(getattr(self, 'grep_layer_enabled', False))
+        
+        # ENHANCED: Direct function context injection when Hybrid Search is enabled
+        function_context_section = None
+        if grep_layer_enabled and phase == "execution":
+            try:
+                # Get latest user query
+                recent_user_msgs = self.session.get_recent_messages(limit=1, role_filter=[MessageRole.USER])
+                if recent_user_msgs:
+                    user_query = recent_user_msgs[0].content
+                    
+                    # Try to get relevant functions directly
+                    relevant_funcs = self._get_relevant_functions_for_query(user_query, top_k=5, search_type="hybrid", grep_enabled=True)
+                    if relevant_funcs:
+                        function_context_section = self._format_function_context(relevant_funcs)
+                        if function_context_section:
+                            self.logger.info(f"📚 Injecting {len(relevant_funcs)} relevant function(s) as context (Hybrid Search)")
+            except Exception as e:
+                self.logger.debug(f"Function context injection failed: {e}")
+        
+        if self.enable_cag and self.cag_manager and (task_mode_enabled or grep_layer_enabled):
+            try:
+                if grep_layer_enabled and not task_mode_enabled:
+                    self.logger.info("CAG/RAG context injection enabled (trigger: Hybrid Search)")
+            except Exception:
+                pass
             latest_user_query = None
             
             # Get latest user query from session
@@ -611,10 +982,33 @@ You can help analyze binary files by executing commands through GhidraMCP."""
         # Generate user prompt with conversation history ALWAYS at the end
         user_prompt = structured_prompt.build_user_prompt(max_history_items=self.config.context_limit)
 
+        # Inject relevant functions context (Hybrid Search)
+        if function_context_section:
+            user_prompt = function_context_section + "\n\n" + user_prompt
+
+        # Inject compact scope card ONLY when task mode is enabled
+        task_mode_enabled = bool(getattr(self, 'task_mode_enabled', False))
+        if task_mode_enabled:
+            scope_card = self._build_scope_card()
+            if scope_card:
+                user_prompt = scope_card + "\n\n" + user_prompt
+
         # --- INJECT KNOWLEDGE ARTIFACTS ---
         knowledge_summary = self.session.get_knowledge_summary()
         if knowledge_summary:
             user_prompt = knowledge_summary + "\n\n" + user_prompt
+        # ----------------------------------
+
+        # --- INJECT USER PREFERENCES (CUSTOM MODE NOTEPAD) ---
+        # Only inject preferences when task mode is enabled AND in custom mode.
+        prefs_summary = ""
+        try:
+            if bool(getattr(self, 'task_mode_enabled', False)) and getattr(self, 'task_mode', 'off') == 'custom':
+                prefs_summary = self.session.get_user_preferences_summary()
+        except Exception:
+            prefs_summary = ""
+        if prefs_summary:
+            user_prompt = prefs_summary + "\n\n" + user_prompt
         # ----------------------------------
         
         # --- INJECT COMPLETED STEPS SUMMARY ---
@@ -861,6 +1255,302 @@ You can help analyze binary files by executing commands through GhidraMCP."""
             return full_result
         else:
             return f"Error: Cached result '{result_id}' not found. Available IDs: {list(self.context_manager.result_cache.cache.keys())[:5]}"
+    
+    def _extract_behavior_summary(self, text: str) -> str:
+        """
+        Extract the first sentence after '**Behavior Summary:**' from function analysis.
+        Returns concise one-sentence description of function behavior.
+        
+        Args:
+            text: Full function analysis text containing behavior summary
+            
+        Returns:
+            First sentence of behavior summary, or fallback text if not found
+            
+        Example:
+            Input: "**Function Analysis:**\\n...\\n**Behavior Summary:**\\nThis function does X. It also does Y."
+            Output: "This function does X."
+        """
+        import re
+        lines = text.split('\n')
+        
+        # Find "**Behavior Summary:**" section
+        for i, line in enumerate(lines):
+            if '**Behavior Summary:**' in line:
+                # Get content from next non-empty line
+                for j in range(i + 1, len(lines)):
+                    content = lines[j].strip()
+                    # Skip empty lines and section headers
+                    if content and not content.startswith('**'):
+                        # Extract first sentence - improved regex to handle abbreviations
+                        # Look for sentence terminators (. ! ?) followed by space and capital letter, or end of string
+                        # This avoids breaking on "C.R.T." or "U.S.A." type abbreviations
+                        match = re.search(r'[.!?](?:\s+[A-Z]|\s*$)', content)
+                        if match:
+                            # Include the period but not the following space/letter
+                            end_pos = match.start() + 1
+                            return content[:end_pos].strip()
+                        # No sentence terminator found - return up to 200 chars
+                        return content[:200].strip()
+                break
+        
+        # Fallback 1: Try plain "Behavior:" (backward compatibility with older format)
+        for i, line in enumerate(lines):
+            if 'Behavior:' in line and '**Behavior Summary:**' not in line:
+                remaining = '\n'.join(lines[i:]).replace('Behavior:', '').strip()
+                match = re.search(r'[.!?](?:\s+[A-Z]|\s*$)', remaining)
+                if match:
+                    end_pos = match.start() + 1
+                    return remaining[:end_pos].strip()
+                return remaining[:200].strip()
+        
+        # Fallback 2: Return truncated full text
+        return text[:200].strip() if text else "No summary available"
+    
+    def _search_function_summaries(self, query: str, search_type: str = "hybrid", top_k: int = 5) -> str:
+        """
+        Search through analyzed function summaries using hybrid keyword + semantic search.
+        
+        Args:
+            query: Search query (function name, keyword, or concept)
+            search_type: "hybrid" (both), "keyword" (grep), "semantic" (RAG), or "name" (exact)
+            top_k: Number of results to return (1-20)
+            
+        Returns:
+            Formatted string with matching functions
+        """
+        # Check if grep layer is enabled
+        grep_enabled = getattr(self, 'grep_layer_enabled', False)
+        
+        # Validate search_type
+        valid_types = ["hybrid", "keyword", "semantic", "name"]
+        if search_type not in valid_types:
+            return f"Error: search_type must be one of {valid_types}, got '{search_type}'"
+        
+        # Clamp top_k
+        top_k = max(1, min(int(top_k), 20))
+        
+        results = self._get_relevant_functions_for_query(query, top_k, search_type, grep_enabled)
+        
+        if not results:
+            return f"No results found for query: '{query}'"
+        
+        # Format results
+        output = [f"Found {len(results)} function(s) matching '{query}':\n"]
+        
+        for i, result in enumerate(results, 1):
+            doc = result.get("document", {})
+            score = result.get("score", 0.0)
+            
+            name = doc.get("name", "Unknown")
+            metadata = doc.get("metadata", {})
+            address = metadata.get("address", "unknown")
+            old_name = metadata.get("old_name", "")
+            
+            # Get summary from text using extraction method
+            text = doc.get("text", "")
+            summary = self._extract_behavior_summary(text)
+            
+            output.append(f"{i}. {name} @ {address}")
+            if old_name and old_name != name:
+                output.append(f"   (renamed from: {old_name})")
+            output.append(f"   Score: {score:.3f}")
+            output.append(f"   Summary: {summary}")
+            output.append("")
+        
+        return "\n".join(output)
+    
+    def _get_relevant_functions_for_query(self, query: str, top_k: int = 5, search_type: str = "hybrid", grep_enabled: bool = False):
+        """
+        Get relevant functions for a query using various search strategies.
+        Returns list of result dicts with 'document' and 'score' keys.
+        """
+        # Build list of function documents from analyzed functions
+        function_docs = []
+        
+        # Try to get functions from UI panel
+        try:
+            if hasattr(self, '_ui_instance'):
+                ui = self._ui_instance
+                if hasattr(ui, 'renamed_functions_panel') and ui.renamed_functions_panel:
+                    if hasattr(ui.renamed_functions_panel, 'tree'):
+                        for item in ui.renamed_functions_panel.tree.get_children():
+                            try:
+                                values = ui.renamed_functions_panel.tree.item(item, 'values')
+                                if len(values) >= 4:
+                                    doc = {
+                                        "text": f"Function: {values[2]}\nOriginal: {values[1]}\nAddress: {values[0]}\nBehavior: {values[3]}",
+                                        "type": "function_analysis",
+                                        "name": values[2],
+                                        "metadata": {
+                                            "address": values[0],
+                                            "old_name": values[1],
+                                            "new_name": values[2]
+                                        }
+                                    }
+                                    function_docs.append(doc)
+                            except Exception:
+                                continue
+        except Exception as e:
+            self.logger.debug(f"Could not get functions from UI: {e}")
+        
+        # Fallback: get from function_summaries dict
+        if not function_docs:
+            # Prefer structured mapping if available (preserves names)
+            fam = getattr(self, 'function_address_mapping', None)
+            fsum = getattr(self, 'function_summaries', None)
+            if isinstance(fam, dict) and isinstance(fsum, dict):
+                for addr, info in fam.items():
+                    try:
+                        old_name = info.get('old_name', 'Unknown')
+                        new_name = info.get('new_name', 'Unknown')
+                        summary = (fsum.get(addr, '') or fsum.get(old_name, '') or fsum.get(new_name, ''))
+                        if not summary:
+                            continue
+                        doc = {
+                            "text": f"Function: {new_name}\nOriginal: {old_name}\nAddress: {addr}\nBehavior: {summary}",
+                            "type": "function_analysis",
+                            "name": new_name,
+                            "metadata": {"address": addr, "old_name": old_name, "new_name": new_name}
+                        }
+                        function_docs.append(doc)
+                    except Exception:
+                        continue
+            
+            # Last resort: raw summaries only
+            if not function_docs and isinstance(fsum, dict):
+                for addr, summary in fsum.items():
+                    if not summary:
+                        continue
+                    doc = {
+                        "text": f"Address: {addr}\nBehavior: {summary}",
+                        "type": "function_analysis",
+                        "name": f"FUN_{addr}",
+                        "metadata": {"address": addr}
+                    }
+                    function_docs.append(doc)
+        
+        if not function_docs:
+            return []
+        
+        # Perform search based on type
+        if search_type == "name":
+            # Direct name search
+            query_lower = query.lower()
+            matches = []
+            for doc in function_docs:
+                name = doc.get("name", "").lower()
+                if query_lower in name:
+                    score = len(query_lower) / max(len(name), 1)
+                    matches.append({"document": doc, "score": score})
+            matches.sort(key=lambda x: x["score"], reverse=True)
+            return matches[:top_k]
+            
+        elif search_type == "keyword" or (search_type == "hybrid" and grep_enabled):
+            # Keyword search (grep-style) or hybrid when grep layer is enabled
+            from src.cag.vector_store import SimpleVectorStore
+            temp_store = SimpleVectorStore(function_docs, [])
+            return temp_store._keyword_search(query, top_k=top_k)
+            
+        elif search_type == "semantic":
+            # Semantic search requires CAG manager with vectors
+            if not self.cag_manager or not self.cag_manager.vector_store:
+                # Fall back to keyword
+                from src.cag.vector_store import SimpleVectorStore
+                temp_store = SimpleVectorStore(function_docs, [])
+                return temp_store._keyword_search(query, top_k=top_k)
+            
+            return self.cag_manager.vector_store.search(query, top_k=top_k)
+            
+        elif search_type == "hybrid":
+            # Hybrid search (keyword + semantic)
+            if not self.cag_manager or not self.cag_manager.vector_store:
+                # Fall back to keyword-only
+                from src.cag.vector_store import SimpleVectorStore
+                temp_store = SimpleVectorStore(function_docs, [])
+                return temp_store._keyword_search(query, top_k=top_k)
+            
+            # True hybrid search
+            results = self.cag_manager.vector_store.search_hybrid(query, top_k=top_k, use_keywords=True)
+            
+            # ============ KNOWLEDGE GRAPH ENHANCEMENT ============
+            # Expand primary results with graph neighbors for better architectural context
+            if self.function_graph and len(self.function_graph) > 0 and results:
+                try:
+                    # Extract addresses from primary results
+                    primary_addresses = []
+                    for result in results:
+                        metadata = result.get("document", {}).get("metadata", {})
+                        addr = metadata.get("address", "")
+                        if addr:
+                            primary_addresses.append(addr)
+                    
+                    if primary_addresses:
+                        # Expand with graph neighbors
+                        expanded_addresses = self.function_graph.expand_context_for_rag(
+                            primary_addresses,
+                            expansion_depth=1,  # Immediate neighbors only
+                            max_expanded=top_k * 2  # Allow doubling the context
+                        )
+                        
+                        # Add expanded functions to results
+                        for addr in expanded_addresses:
+                            if addr not in primary_addresses and addr in self.function_address_mapping:
+                                func_data = self.function_address_mapping[addr]
+                                # Create document for graph neighbor
+                                doc = {
+                                    "text": f"Function: {func_data.get('new_name', addr)}\nAddress: {addr}",
+                                    "type": "function_analysis",
+                                    "name": func_data.get('new_name', addr),
+                                    "metadata": {
+                                        "address": addr,
+                                        "new_name": func_data.get('new_name', addr),
+                                        "graph_expanded": True  # Mark as graph-added
+                                    }
+                                }
+                                # Score based on centrality
+                                centrality = self.function_graph.calculate_centrality(addr)
+                                results.append({
+                                    "document": doc,
+                                    "score": 0.3 + (centrality * 0.3)  # 0.3-0.6 range for graph neighbors
+                                })
+                        
+                        self.logger.info(f"📊 Graph expanded {len(primary_addresses)} results to {len(results)} (added {len(results) - len(primary_addresses)} neighbors)")
+                        
+                        # Re-sort with graph additions
+                        results.sort(key=lambda x: x.get("score", 0), reverse=True)
+                    
+                except Exception as graph_error:
+                    self.logger.debug(f"Graph expansion failed: {graph_error}")
+            
+            return results[:top_k * 2]  # Return more when graph-enhanced
+        
+        return []
+    
+    def _format_function_context(self, results):
+        """Format relevant functions as context section for prompt injection."""
+        if not results:
+            return None
+        
+        lines = ["## 📚 Relevant Functions from Analysis"]
+        lines.append("The following functions may be relevant to your query:\n")
+        
+        for i, result in enumerate(results[:5], 1):  # Limit to top 5
+            doc = result.get("document", {})
+            name = doc.get("name", "Unknown")
+            metadata = doc.get("metadata", {})
+            address = metadata.get("address", "unknown")
+            
+            # Get summary using extraction method
+            text = doc.get("text", "")
+            summary = self._extract_behavior_summary(text)
+            
+            lines.append(f"### {i}. {name} @ {address}")
+            lines.append(f"{summary}")
+            lines.append("")
+        
+        lines.append("💡 Tip: These functions were automatically retrieved based on your query. You can decompile them for more details.")
+        return "\n".join(lines)
 
     def execute_command(self, command_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -875,13 +1565,32 @@ You can help analyze binary files by executing commands through GhidraMCP."""
         """
         try:
             # Handle bridge-level commands FIRST (before Ghidra client validation)
-            bridge_commands = {"get_cached_result", "scan_function_pointer_tables"}
+            bridge_commands = {"get_cached_result", "scan_function_pointer_tables", "search_function_summaries"}
             normalized_bridge_cmd = command_name.lower().replace("-", "_").replace(" ", "_")
             
             if normalized_bridge_cmd == "get_cached_result":
                 result_id = params.get("result_id", "")
                 result = self.get_cached_result(result_id)
                 return {"result": result, "source": "context_cache"}
+            
+            if normalized_bridge_cmd == "search_function_summaries":
+                # Check if hybrid search is enabled
+                if not getattr(self, 'grep_layer_enabled', False):
+                    return {
+                        "result": "Error: search_function_summaries is only available when 'Enable Hybrid Search' is turned on in the UI. Please enable it in the Task Mode section.",
+                        "source": "function_search"
+                    }
+                
+                # NEW: Search through analyzed function summaries
+                query = params.get("query", "")
+                search_type = params.get("search_type", "hybrid")  # hybrid, keyword, semantic, name
+                top_k = params.get("top_k", 5)
+                
+                if not query:
+                    return {"result": "Error: 'query' parameter is required", "source": "function_search"}
+                
+                result = self._search_function_summaries(query, search_type, top_k)
+                return {"result": result, "source": "function_search"}
             
             if normalized_bridge_cmd == "scan_function_pointer_tables":
                 # This is handled by ghidra_client, so let it pass through
@@ -1187,6 +1896,7 @@ You can help analyze binary files by executing commands through GhidraMCP."""
             
             # Store the query as our current goal
             self.current_goal = query
+            self._update_scope_from_query(query)
             self.goal_achieved = False
             self.goal_steps_taken = 0
             self.executed_tools = set()  # Reset tool tracking for new query
@@ -1200,6 +1910,8 @@ You can help analyze binary files by executing commands through GhidraMCP."""
                 self.lead_tracker.reset()
             
             # Depth escalation: each cycle gets progressively deeper instructions
+            # NOTE: These depth instructions are ONLY used when Task Mode is enabled
+            # When Task Mode is OFF, the AI should handle simple queries directly without forced investigation paths
             DEPTH_INSTRUCTIONS = {
                 1: "RECONNAISSANCE: List imports, strings, exports. Identify binary purpose, compiler, and key security-related APIs. Cover as many investigation areas as possible at a surface level.",
                 2: "TARGETED SEARCH: Follow up on HIGH-priority leads from cycle 1. Search for service/privilege/path/registry strings. Focus on uncovered investigation areas.",
@@ -1207,6 +1919,9 @@ You can help analyze binary files by executing commands through GhidraMCP."""
                 4: "VERIFICATION: Confirm or deny hypotheses. Check if paths are quoted, permissions are validated, DLLs load from absolute paths, etc.",
                 5: "GAP FILL: Address ALL remaining uncovered checklist items. Re-verify HIGH findings. Summarize confirmed vulnerabilities with evidence.",
             }
+            
+            # Check if task mode is enabled - only apply depth instructions if it is
+            task_mode_enabled = bool(getattr(self, 'task_mode_enabled', False))
             
             # Ensure context is initialized
             if not isinstance(self.context, list):
@@ -1262,13 +1977,19 @@ You can help analyze binary files by executing commands through GhidraMCP."""
                 else:
                     plan_response = self._generate_plan(query)
                 
-                # Inject depth instruction for this cycle
-                depth_instruction = DEPTH_INSTRUCTIONS.get(cycle, DEPTH_INSTRUCTIONS[5])
-                plan_response = f"## Cycle {cycle} Depth: {depth_instruction}\n\n{plan_response}"
+                # Inject depth instruction ONLY if Task Mode is enabled
+                # When Task Mode is OFF, allow the AI to handle queries naturally without forced investigation paths
+                if task_mode_enabled:
+                    depth_instruction = DEPTH_INSTRUCTIONS.get(cycle, DEPTH_INSTRUCTIONS[5])
+                    plan_response = f"## Cycle {cycle} Depth: {depth_instruction}\n\n{plan_response}"
+                    depth_label = depth_instruction.split(':')[0]
+                    self.logger.info(f"✅ Planning completed: {len(plan_response)} chars (Depth: {depth_label})")
+                    self._emit_cot("Depth", f"Cycle {cycle}: {depth_label}")
+                else:
+                    # Task Mode OFF - no depth instructions, simpler logging
+                    self.logger.info(f"✅ Planning completed: {len(plan_response)} chars (Task Mode: OFF)")
                 
-                self.logger.info(f"✅ Planning completed: {len(plan_response)} chars")
                 self._emit_cot("Status", f"Planning completed ({len(plan_response)} chars)")
-                self._emit_cot("Depth", f"Cycle {cycle}: {depth_instruction.split(':')[0]}")
                 
                 # PHASE 2: Execution Loop (INNER LOOP)
                 self.logger.info(f"🔧 Cycle {cycle} - Phase 2: Execution Loop (max {max_exec_steps} steps)")
@@ -1377,6 +2098,9 @@ You can help analyze binary files by executing commands through GhidraMCP."""
             # Workflow complete
             self.current_workflow_stage = None
             self.logger.info("🎯 Agentic query processing completed successfully")
+
+            # Custom mode: update notepad/workplan after query
+            self._maybe_update_custom_workplan(user_query=query, final_response=best_response)
             
             return best_response
             
@@ -1409,6 +2133,7 @@ You can help analyze binary files by executing commands through GhidraMCP."""
             
             # Store the query as our current goal
             self.current_goal = query
+            self._update_scope_from_query(query)
             self.goal_achieved = False
             self.goal_steps_taken = 0
             self.executed_tools = set()  # Reset tool tracking for new query
@@ -1465,6 +2190,9 @@ You can help analyze binary files by executing commands through GhidraMCP."""
             # Workflow complete
             self.current_workflow_stage = None
             self.logger.info("🎯 Query processing completed successfully")
+
+            # Custom mode: update notepad/workplan after query
+            self._maybe_update_custom_workplan(user_query=query, final_response=response)
             
             return response
         except Exception as e:
@@ -1595,7 +2323,7 @@ You can help analyze binary files by executing commands through GhidraMCP."""
 
         def _canonical_params(cmd, params):
             """Strip default offset/limit values for read-only tools so signatures match."""
-            defaults = {"offset": 0, "limit": 100}
+            defaults = {"offset": 0, "limit": 500}
             if cmd in READ_ONLY_PAGINATED:
                 cleaned = {k: v for k, v in params.items() if defaults.get(k) != v}
             else:
@@ -1636,12 +2364,52 @@ You can help analyze binary files by executing commands through GhidraMCP."""
             response = self.ollama.generate_with_phase(user_prompt, phase="execution", system_prompt=system_prompt)
             logging.info(f"Received response from Ollama: {response[:100]}...")
             
-            # --- PARSE ARTIFACTS (Text-Based) ---
-            self._parse_and_save_artifacts(response)
-            # ------------------------------------
+            # REMOVED: Text-based ARTIFACT parsing (never used)
+            # Artifacts now auto-populated from execution gate triggers
+            # self._parse_and_save_artifacts(response)
             
             # Extract commands to execute
             commands = self.command_parser.extract_commands(response)
+            
+            # Check for format violations and provide feedback to LLM
+            format_feedback = self.command_parser.generate_format_feedback(response, commands)
+            if format_feedback:
+                self.logger.warning("Format violations detected in LLM response")
+                # Add feedback as a system message so LLM can learn from it
+                self.add_to_context("system", format_feedback)
+                # If no commands were extracted despite violations, ask LLM to retry
+                if not commands:
+                    self.add_to_context(
+                        "system",
+                        "No valid commands could be extracted. Please retry with correct format."
+                    )
+                    return response  # Return response as-is, feedback will guide next attempt
+
+            # ENFORCE HYBRID SEARCH (GREP LAYER) ON FIRST STEP
+            # If Hybrid Search is enabled, always run a function-summary search first so the
+            # agent has relevant candidates before expensive decompilation.
+            try:
+                if step_count == 1 and bool(getattr(self, 'grep_layer_enabled', False)):
+                    already_searching = bool(commands) and commands[0][0] == "search_function_summaries"
+                    # Skip enforcement if the user query is clearly about a specific function/address.
+                    q_text = (self.current_goal or "")
+                    if not q_text:
+                        recent_user_msgs = self.session.get_recent_messages(limit=1, role_filter=[MessageRole.USER])
+                        if recent_user_msgs:
+                            q_text = str(recent_user_msgs[0].content or "")
+                    looks_specific = False
+                    if q_text:
+                        import re
+                        looks_specific = bool(re.search(r"\b0x[0-9a-fA-F]{6,}\b|\b[0-9a-fA-F]{8,}\b|\bFUN_[0-9A-Fa-f]{6,}\b", q_text))
+
+                    if not already_searching and not looks_specific:
+                        commands = [("search_function_summaries", {"query": q_text or "analysis", "search_type": "hybrid", "top_k": 5})]
+                        self.add_to_context(
+                            "system",
+                            "Hybrid Search is enabled: running search_function_summaries first to retrieve relevant analyzed functions before other tools."
+                        )
+            except Exception:
+                pass
             
             # Enhanced duplicate detection using CAG memory system
             if commands:
@@ -2082,12 +2850,40 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
             
             self.logger.info(f"Received execution loop response: {response[:100]}...")
             
+            # Extract reasoning first
+            reasoning = None
+            reasoning_match = re.search(r'REASONING:\s*(.*?)(?:\nEXECUTE:|$)', response, re.DOTALL)
+            if reasoning_match:
+                reasoning = reasoning_match.group(1).strip()
+                self.logger.info(f"🤔 Reasoning: {reasoning}")
+            
+            # Extract commands from the response
+            commands = self.command_parser.extract_commands(response)
+            
             # Check if investigation is complete
-            if "INVESTIGATION COMPLETE" in response.upper() or "GOAL ACHIEVED" in response.upper():
-                self.logger.info("✅ AI indicates investigation is complete")
-                exec_results.investigation_complete = True
-                exec_results.completed_at = datetime.now()
-                break
+            has_completion_signal = "INVESTIGATION COMPLETE" in response.upper() or "GOAL ACHIEVED" in response.upper()
+            
+            if has_completion_signal:
+                # CRITICAL: Check if LLM violated completion rules by mixing commands and completion
+                if commands:
+                    self.logger.error("⚠️  COMPLETION RULE VIOLATION: LLM output EXECUTE commands AND completion signal in same response!")
+                    self.logger.warning("📝 This violates the prompt rules. Ignoring completion signal and continuing execution...")
+                    
+                    # Add feedback to help LLM learn
+                    self.add_to_context(
+                        "system",
+                        "⚠️  FORMAT VIOLATION: You output both EXECUTE commands and 'INVESTIGATION COMPLETE' in the same response.\n"
+                        "This is explicitly forbidden. You must:\n"
+                        "1. Execute tools → Wait for results → Then decide\n"
+                        "2. NEVER output completion signals in the same response as tool calls\n"
+                        "Please continue with analysis of the tool results."
+                    )
+                    # Don't mark as complete - continue execution
+                else:
+                    self.logger.info("✅ AI indicates investigation is complete")
+                    exec_results.investigation_complete = True
+                    exec_results.completed_at = datetime.now()
+                    break
             
             # Check for user question (ASK_USER directive)
             if "ASK_USER:" in response:
@@ -2106,20 +2902,11 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
                     self.logger.info("⏸️ Execution paused — waiting for user input")
                     break  # Pause execution loop
             
-            # Extract reasoning
-            reasoning = None
-            reasoning_match = re.search(r'REASONING:\s*(.*?)(?:\nEXECUTE:|$)', response, re.DOTALL)
-            if reasoning_match:
-                reasoning = reasoning_match.group(1).strip()
-                self.logger.info(f"🤔 Reasoning: {reasoning}")
-                
-                # Live CoT View - emit to both terminal and UI
-                if getattr(self.config.ollama, 'show_reasoning', True):
-                    self._emit_cot("Reasoning", f"REASONING: {reasoning}")
+            # Live CoT View - emit reasoning to both terminal and UI
+            if reasoning and getattr(self.config.ollama, 'show_reasoning', True):
+                self._emit_cot("Reasoning", f"REASONING: {reasoning}")
             
-            # Parse tool calls from response
-            commands = self.command_parser.extract_commands(response)
-            
+            # Check if any commands were extracted
             if not commands:
                 self.logger.warning(f"⚠️ No tool call found in response at step {step}")
                 # Give AI one more chance
@@ -2199,6 +2986,38 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
                     # Execute the tool
                     result = self.execute_command(cmd_name, cmd_params)
                     
+                    # AUTOMATIC CONTINUATION: Fetch remaining lines for truncated decompilation
+                    # If decompilation shows "[Total Lines: X] [Showing Lines: 1-Y]" where Y < X,
+                    # automatically fetch the remaining lines
+                    if cmd_name in ["decompile_function", "decompile_function_by_address"]:
+                        result_str = str(result)
+                        # Check for truncation pattern: [Total Lines: 427] [Showing Lines: 1-100]
+                        match = re.search(r'\[Total Lines: (\d+)\].*\[Showing Lines: \d+-(\d+)\]', result_str)
+                        if match:
+                            total_lines = int(match.group(1))
+                            shown_lines = int(match.group(2))
+                            
+                            if shown_lines < total_lines:
+                                remaining = total_lines - shown_lines
+                                self.logger.info(f"🔄 Auto-continuation: Fetching remaining {remaining} lines (shown: {shown_lines}/{total_lines})")
+                                
+                                try:
+                                    # Fetch the rest in one call
+                                    remaining_result = self.execute_command(
+                                        cmd_name, 
+                                        {**cmd_params, "offset": shown_lines, "limit": remaining}
+                                    )
+                                    
+                                    # Combine results
+                                    if isinstance(result, str) and isinstance(remaining_result, str):
+                                        # Remove header from continuation
+                                        remaining_clean = re.sub(r'\[Total Lines:.*?\].*?\n', '', remaining_result, count=1)
+                                        result = result + "\n" + remaining_clean
+                                        self.logger.info(f"✅ Auto-continuation complete: Now showing all {total_lines} lines")
+                                    
+                                except Exception as e:
+                                    self.logger.warning(f"⚠️  Auto-continuation failed: {e}. Original result kept.")
+                    
                     # EXECUTION-PHASE RANKING: Filter large results to preserve analysis context
                     LARGE_RESULT_TOOLS = ['list_functions', 'list_imports', 'list_strings', 'list_exports']
                     RANKING_THRESHOLD = 100  # Filter if result has >100 items
@@ -2245,6 +3064,15 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
                         result_str = json.dumps(result, indent=2)
                     else:
                         result_str = str(result)
+
+                    # Deterministic compaction: reduce prompt size and LLM load.
+                    # Full result is cached separately via full_result_str.
+                    prompt_result_str = result_str
+                    if self.result_compactor is not None:
+                        try:
+                            prompt_result_str = self.result_compactor.compact(cmd_name, result)
+                        except Exception:
+                            prompt_result_str = result_str
                     
                     # Store the full result for caching before truncation
                     # If ranking was applied, cache the ORIGINAL unfiltered result
@@ -2270,16 +3098,16 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
                     max_result_chars = self._get_max_result_chars()
                     logging.debug(f"[Context Budget] Allocated for result: {max_result_chars} chars")
                     
-                    if len(result_str) > max_result_chars:
+                    if len(prompt_result_str) > max_result_chars:
                         was_truncated = True
                         truncated_to = max_result_chars
-                        original_len = len(result_str)
+                        original_len = len(prompt_result_str)
                         dropped_chars = original_len - max_result_chars
                         
                         logging.warning(f"[TRUNCATION] Result too large: {original_len} chars > limit {max_result_chars}. Dropped {dropped_chars} chars.")
                         logging.warning(f"[TRUNCATION] Full content cached with ID: {loop_step_id}")
                         
-                        result_str = result_str[:max_result_chars] + (
+                        prompt_result_str = prompt_result_str[:max_result_chars] + (
                             f"\n... [Truncated {dropped_chars} chars. "
                             f"Use get_cached_result(result_id=\"{loop_step_id}\") for full content]"
                         )
@@ -2299,15 +3127,19 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
                     tool_exec = ToolExecution(
                         tool_name=cmd_name,
                         parameters=cmd_params,
-                        result=result_str,
+                        result=prompt_result_str,
                         success=True,
                         reasoning=reasoning
                     )
                     exec_results.add_execution(tool_exec)
                     
                     # Store step result for duplicate reference and caching
-                    result_excerpt = result_str[:200].replace('\n', ' ').strip()
+                    result_excerpt = prompt_result_str[:200].replace('\n', ' ').strip()
                     self.step_result_map[cmd_signature] = (loop_step_id, result_excerpt)
+
+                    # Note: Automatic focus_function tracking was removed to prevent confusion
+                    # during cross-reference analysis. Users should explicitly ask about
+                    # "the current function" when needed.
                     
                     # Cache FULL result with loop-prefixed ID for retrieval via get_cached_result
                     if self.context_manager and self.context_manager.result_cache:
@@ -2322,20 +3154,75 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
                     self.session.add_tool_execution(
                         tool_name=cmd_name,
                         parameters=cmd_params,
-                        result=result_str,
+                        result=prompt_result_str,
                         success=True,
                         reasoning=reasoning
                     )
                     
+                    # MALWARE PATTERN DETECTION: Check code/strings/disassembly in malware task mode
+                    if (self.task_mode_enabled and 
+                        self.task_mode == "malware" and
+                        cmd_name in ["decompile_function", "decompile_function_by_address", 
+                                     "disassemble_function", "list_strings"] and
+                        self.enable_cag and self.cag_manager):
+                        try:
+                            # Extract context for reporting
+                            if cmd_name in ["decompile_function", "decompile_function_by_address", "disassemble_function"]:
+                                context = cmd_params.get("address", cmd_params.get("name", "unknown"))
+                            else:  # list_strings
+                                context = f"strings_filter={cmd_params.get('filter', 'none')}"
+                            
+                            # Fetch assembly if we're decompiling (for better pattern detection)
+                            assembly_code = None
+                            if cmd_name in ["decompile_function_by_address"] and "address" in cmd_params:
+                                try:
+                                    asm_result = self.ghidra_client.disassemble_function(cmd_params["address"])
+                                    # disassemble_function returns a list, convert to string
+                                    if isinstance(asm_result, list):
+                                        assembly_code = "\n".join(asm_result)
+                                    else:
+                                        assembly_code = str(asm_result)
+                                    self.logger.debug(f"Fetched assembly for pattern detection at {cmd_params['address']}")
+                                except Exception as asm_err:
+                                    self.logger.debug(f"Could not fetch assembly for pattern detection: {asm_err}")
+                            
+                            # Run pattern detection
+                            pattern_check = self.cag_manager.check_function_for_malware_patterns(
+                                decompiled_code=full_result_str,
+                                assembly=assembly_code,
+                                function_address=str(context)
+                            )
+                            
+                            # Store result for prompt enhancement in next LLM call (ephemeral - 1 cycle)
+                            if pattern_check.get("has_matches", False):
+                                self.cag_manager._last_pattern_check_result = pattern_check
+                                self.logger.info(f"🚨 Malware patterns detected in {context} ({cmd_name})")
+                                
+                                # PERSISTENT: Store HIGH severity patterns in session state (survives pruning)
+                                high_patterns = [m["pattern_name"] for m in pattern_check["matches"] 
+                                                if m["severity"] == "HIGH"]
+                                if high_patterns and self.session:
+                                    self.session.analysis_state.pattern_detections[str(context)] = high_patterns
+                                    self.logger.debug(f"Stored {len(high_patterns)} HIGH patterns for {context} in session")
+                                
+                                # Emit to UI if available
+                                if pattern_check.get("matches"):
+                                    high_count = sum(1 for m in pattern_check["matches"] if m["severity"] == "HIGH")
+                                    pattern_names = [m["pattern_name"] for m in pattern_check["matches"][:2]]
+                                    self._emit_cot("Pattern Detection",
+                                        f"🚨 {high_count} HIGH severity pattern(s) in {cmd_name}: {', '.join(pattern_names)}")
+                        except Exception as e:
+                            self.logger.warning(f"Pattern detection failed: {e}")
+                    
                     # Update analysis state
-                    self._update_analysis_state({"name": cmd_name, "params": cmd_params}, result_str)
+                    self._update_analysis_state({"name": cmd_name, "params": cmd_params}, prompt_result_str)
                     
                     # Auto-mark coverage from tool results
                     if self.coverage_tracker:
                         newly_covered = self.coverage_tracker.auto_mark_from_result(
                             tool_name=cmd_name,
                             tool_params=cmd_params,
-                            result=result_str
+                            result=prompt_result_str
                         )
                         if newly_covered:
                             self._emit_cot("Coverage",
@@ -2344,8 +3231,9 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
                     self.logger.info(f"Step {step} complete: {cmd_name}")
                     
                     # --- POST-EXECUTION GATE CHECK ---
+                    # Pass session for auto-artifact extraction
                     gate_signal = self.execution_gate.check_after_execution(
-                        cmd_name, result_str, exec_results.tool_executions
+                        cmd_name, prompt_result_str, exec_results.tool_executions, session=self.session
                     )
                     if gate_signal == ExecutionSignal.PAUSE:
                         gate = self.execution_gate.get_gate_reason()
@@ -2457,68 +3345,77 @@ Output ONLY JSON (same structure), top {max_items} items."""
                 user_sections.append(f"\n{step_id}: {tool_exec.tool_name}({tool_exec.parameters})")
                 user_sections.append(f"Result: {result_preview}")
         
-        # Helper to get coverage info
+        # Helper to get coverage info (ONLY when task mode is enabled)
         coverage_section = ""
-        if self.coverage_tracker:
+        task_mode_enabled = bool(getattr(self, 'task_mode_enabled', False))
+        
+        if task_mode_enabled and self.coverage_tracker:
             coverage_section = self.coverage_tracker.format_for_prompt()
 
-        # Helper to get lead info
+        # Helper to get lead info (ONLY when task mode is enabled)
         leads_section = ""
-        if self.lead_tracker:
+        if task_mode_enabled and self.lead_tracker:
             # Parse leads from previous cycle results if any
             if exec_results.analysis_dump:
                 self.lead_tracker.parse_analysis_dump(exec_results.analysis_dump)
             leads_section = self.lead_tracker.format_for_prompt()
         
-        # Instructions for next step with structured methodology
-        user_sections.append(f"""
-{coverage_section}
+        # Instructions for next step - WITH or WITHOUT investigation methodology based on task mode
+        if task_mode_enabled:
+            # Task Mode ON: Simplified instructions (methodology moved to system prompt)
+            
+            # Add hybrid search reminder banner if enabled
+            hybrid_search_banner = ""
+            if self.grep_layer_enabled:
+                hybrid_search_banner = """
+🔥 **HYBRID SEARCH ENABLED** - Use search_function_summaries with BEHAVIORAL queries
+   Example: "Find code that reads credential files with obfuscated path construction"
+   (See system prompt for query construction guide)
 
-## Investigation Methodology
-
-Follow this depth-first pattern for EACH uncovered area:
-
-1. **DISCOVER** → Search for APIs/strings: `list_imports`, `list_strings(filter="keyword")`
-2. **LOCATE**  → Find cross-references: `get_xrefs_to(address="0xADDR")`
-3. **TRACE**   → Decompile callers: `decompile_function_by_address(address="0xADDR")`
-4. **VERIFICATION**  → Check the decompiled code for exploitable patterns
-
-RULE: If you see `StartService` or `CreateService`, you MUST trace to find the service name string.
-Example for service vulnerability:
-  DISCOVER: list_strings(filter="service") → found "StartServiceW"
-  LOCATE:   get_xrefs_to(address="0x...") → called from FUN_004a143c
-  TRACE:    decompile_function_by_address("004a143c") → CreateProcessW(NULL, unquoted_path)
-  VERIFY:   Path contains spaces + no quotes → Unquoted Service Path vulnerability
-
-Do NOT stop at step 1 (discovery). Always trace findings through to step 4 (verification).
-Prioritize the ❌ uncovered areas shown above.
+"""
+            
+            user_sections.append(f"""
+{hybrid_search_banner}{coverage_section}
 
 {leads_section}
 
 ## Your Task
 
-Based on the plan, results, and coverage gaps above, determine the NEXT step(s).
+Based on the goal, plan, and results so far, determine the NEXT step(s).
 
-1. **Reasoning**: Explain WHY you are choosing the specific tool(s). Reference which investigation area you are covering.
-2. **Execution**: Execute one or more tools to gather information.
+Use search_function_summaries with behavioral/semantic queries for discovery.
+Follow the 4-step methodology (DISCOVER → LOCATE → TRACE → VERIFY) from the system prompt.
 
-If the investigation is complete and you have enough information, respond with:
-INVESTIGATION COMPLETE
-
-Otherwise, provide your reasoning and then execute the tool(s) using the standard EXECUTE format:
-
-REASONING: [Your reasoning here]
+REASONING: [Why you're executing these tools - which area/lead are you investigating?]
 EXECUTE: tool_name(param1="value1", param2="value2")
-EXECUTE: another_tool(param1="value1")
 
-If you need user input to decide your next step, you can ask:
-ASK_USER: [Your question here]
-OPTIONS: Option A | Option B | Option C
+If investigation is complete: "INVESTIGATION COMPLETE"
+""")
+        else:
+            # Task Mode OFF: Simple, direct instructions
+            
+            # Add hybrid search reminder banner if enabled
+            hybrid_search_banner = ""
+            if self.grep_layer_enabled:
+                hybrid_search_banner = """
+🔥 **HYBRID SEARCH ENABLED** - Use search_function_summaries with BEHAVIORAL queries
+   Example: "Find functions that decode configuration data at runtime"
+   (See system prompt for full query guide)
 
-The user will answer, and their response will appear in your next prompt.
+"""
+            
+            user_sections.append(f"""
+{hybrid_search_banner}## Your Task
 
-Output the REASONING line followed by one or more EXECUTE lines.
-If you are done, output ONLY "INVESTIGATION COMPLETE".
+Answer the user's question using the appropriate Ghidra tools.
+
+Focus on what was asked - don't over-investigate unless it's a security analysis task.
+Use behavioral queries with search_function_summaries when discovering functions.
+
+REASONING: [What you're doing]
+EXECUTE: tool_name(param1="value1")
+
+If done: "INVESTIGATION COMPLETE"
 """)
         
         user_prompt = "\n".join(user_sections)
@@ -2563,13 +3460,18 @@ If you are done, output ONLY "INVESTIGATION COMPLETE".
         top_n = getattr(self.llm_config, 'top_n_per_category', 10)
         ranker = RelevanceRanker(top_n_per_category=top_n)
         ranked_results = ranker.rank_results(current_cycle_executions, exec_results.goal)
-        formatted_ranked = ranker.format_ranked_for_prompt(ranked_results)
+        max_chars_per_cat = getattr(self.llm_config, 'ranked_max_chars_per_category', 800)
+        formatted_ranked = ranker.format_ranked_for_prompt(
+            ranked_results,
+            max_chars_per_category=max_chars_per_cat,
+        )
         
         # STEP 3: Build correlation hints
         min_mentions = getattr(self.llm_config, 'min_correlation_mentions', 2)
         correlator = CorrelationHintBuilder(min_mentions=min_mentions)
         correlation_hints = correlator.build_hints(current_cycle_executions)
-        formatted_hints = correlator.format_for_prompt(correlation_hints)
+        max_corr_hints = getattr(self.llm_config, 'correlation_max_hints', 8)
+        formatted_hints = correlator.format_for_prompt(correlation_hints, max_hints=max_corr_hints)
         
         self.logger.info(f"📊 Ranked: {sum(len(v) for v in ranked_results.values())} results across {len(ranked_results)} categories")
         self.logger.info(f"🔗 Correlations: {len(correlation_hints)} cross-tool patterns found")
@@ -2618,6 +3520,80 @@ If you are done, output ONLY "INVESTIGATION COMPLETE".
                 self.logger.warning(f"Failed to save analysis dump: {e}")
         
         return final_response
+    
+    def _generate_minimal_findings_from_raw(self, exec_results: ExecutionPhaseResults, 
+                                           formatted_ranked: str, formatted_hints: str) -> dict:
+        """
+        Generate minimal structured findings when LLM consolidation fails or returns empty.
+        Parses raw results directly to extract basic information.
+        
+        Args:
+            exec_results: Execution results
+            formatted_ranked: Ranked results string
+            formatted_hints: Correlation hints string
+            
+        Returns:
+            Minimal findings dict
+        """
+        self.logger.info("📝 Generating minimal findings from raw execution results...")
+        
+        findings = {
+            "binary_purpose": f"Binary analyzed with {exec_results.total_steps} tool executions",
+            "security_apis": [],
+            "investigation_leads": [],
+            "artifacts": [],
+            "key_functions": [],
+            "investigation_gaps": ["LLM consolidation returned empty response - manual review recommended"],
+            "recommended_next_steps": []
+        }
+        
+        # Extract tool names and build next steps
+        tool_names = list(set([te.tool_name for te in exec_results.tool_executions]))
+        if tool_names:
+            findings["recommended_next_steps"].append(f"Review results from: {', '.join(tool_names[:5])}")
+        
+        # Parse formatted_ranked for addresses and API names
+        import re
+        
+        # Look for API names in imports
+        api_matches = re.findall(r'(\w+)\s*->\s*EXTERNAL:([0-9a-fA-F]+)', formatted_ranked)
+        for api_name, address in api_matches[:10]:
+            findings["security_apis"].append({
+                "address": f"EXTERNAL:{address}",
+                "name": api_name,
+                "context": "Imported API (from raw results)"
+            })
+        
+        # Look for function addresses
+        func_matches = re.findall(r'(FUN_[0-9a-fA-F]{8}|0x[0-9a-fA-F]{6,})', formatted_ranked)
+        for func in set(func_matches[:10]):
+            findings["key_functions"].append({
+                "address": func,
+                "name": func if func.startswith("FUN_") else f"FUN_{func}",
+                "purpose": "Identified in analysis (review recommended)"
+            })
+        
+        # Look for memory addresses in correlations
+        if formatted_hints:
+            addr_matches = re.findall(r'0x([0-9a-fA-F]{6,})', formatted_hints)
+            for addr in set(addr_matches[:5]):
+                findings["investigation_leads"].append({
+                    "address": f"0x{addr}",
+                    "observation": "Appears in multiple tool results (correlation detected)",
+                    "hypothesis": "May be significant function or data location",
+                    "priority": "MEDIUM",
+                    "next_step": f"Decompile or investigate 0x{addr}"
+                })
+        
+        # Add recommendation to review full results
+        findings["recommended_next_steps"].append("Use get_cached_result() to retrieve full tool outputs")
+        findings["recommended_next_steps"].append("Re-run analysis with different model or higher token limit")
+        
+        self.logger.info(f"✅ Generated minimal findings: {len(findings['security_apis'])} APIs, "
+                        f"{len(findings['key_functions'])} functions, "
+                        f"{len(findings['investigation_leads'])} leads")
+        
+        return findings
     
     def _consolidate_findings_hybrid(self, exec_results: ExecutionPhaseResults, 
                                       formatted_ranked: str, formatted_hints: str) -> dict:
@@ -2694,8 +3670,16 @@ Output ONLY valid JSON. No markdown code blocks. No explanations. Just the JSON 
         try:
             response = self.ollama.generate(
                 prompt=consolidation_prompt,
-                system_prompt=system_prompt
+                system_prompt=system_prompt,
+                phase="analysis",
+                max_tokens=getattr(self.llm_config, 'analysis_consolidation_max_tokens', 1200)
             )
+            
+            # CRITICAL: Check if response is empty (happens with reasoning models)
+            if not response or len(response.strip()) == 0:
+                self.logger.error("⚠️  Consolidation returned EMPTY response - likely exhausted tokens on reasoning")
+                self.logger.info("📝 Generating minimal findings structure from raw results...")
+                return self._generate_minimal_findings_from_raw(exec_results, formatted_ranked, formatted_hints)
             
             # Clean response - remove any markdown code blocks if present
             cleaned = response.strip()
@@ -2734,14 +3718,31 @@ Output ONLY valid JSON. No markdown code blocks. No explanations. Just the JSON 
             }
         except Exception as e:
             self.logger.error(f"Hybrid consolidation failed: {e}")
+            # Fail-open: return a minimal structure plus compact previews so the run is usable even
+            # under 429/504 conditions.
+            ranked_preview = formatted_ranked
+            hints_preview = formatted_hints
+            try:
+                if self.result_compactor is not None:
+                    ranked_preview = self.result_compactor._cap_chars(str(formatted_ranked))
+                    hints_preview = self.result_compactor._cap_chars(str(formatted_hints))
+                else:
+                    ranked_preview = str(formatted_ranked)[:1500]
+                    hints_preview = str(formatted_hints)[:800]
+            except Exception:
+                ranked_preview = str(formatted_ranked)[:1500]
+                hints_preview = str(formatted_hints)[:800]
+
             return {
                 "binary_purpose": f"Consolidation error: {str(e)}",
                 "security_apis": [],
                 "investigation_leads": [],
                 "artifacts": [],
                 "key_functions": [],
-                "investigation_gaps": [],
-                "recommended_next_steps": []
+                "investigation_gaps": ["LLM consolidation failed; see ranked preview"],
+                "recommended_next_steps": ["Retry analysis", "Use get_cached_result for key steps"],
+                "_ranked_preview": ranked_preview,
+                "_correlation_preview": hints_preview,
             }
     
     def _format_results_with_context(self, exec_results: ExecutionPhaseResults) -> str:
@@ -2891,7 +3892,9 @@ Output ONLY valid JSON. No markdown code blocks. No explanations. Just the JSON 
         try:
             response = self.ollama.generate(
                 prompt=consolidation_prompt,
-                system_prompt=system_prompt
+                system_prompt=system_prompt,
+                phase="analysis",
+                max_tokens=getattr(self.llm_config, 'analysis_consolidation_max_tokens', 1200)
             )
             
             # Clean response - remove any markdown code blocks if present
@@ -2994,30 +3997,119 @@ IMPORTANT: You must provide a COMPLETE report with a conclusion. Do not truncate
         try:
             response = self.ollama.generate(
                 prompt=synthesis_prompt,
-                system_prompt=system_prompt
+                system_prompt=system_prompt,
+                phase="analysis",
+                max_tokens=getattr(self.llm_config, 'analysis_report_max_tokens', 1600)
             )
+            
+            # CRITICAL: Check if response is empty (happens with reasoning models)
+            if not response or len(response.strip()) == 0:
+                self.logger.error("⚠️  LLM returned EMPTY response - likely exhausted tokens on reasoning")
+                self.logger.info("📝 Generating fallback report from structured findings...")
+                
+                # Generate a comprehensive fallback report from findings
+                return self._generate_fallback_report(findings, goal)
             
             return response
             
         except Exception as e:
             self.logger.error(f"Synthesis failed: {e}")
             # Fallback: return findings as formatted text
-            return f"""FINAL RESPONSE:
-
-## Analysis Report (Synthesis Error)
-
-An error occurred during report synthesis: {str(e)}
-
-## Raw Consolidated Findings
-
-**Binary Purpose:** {findings.get('binary_purpose', 'Unknown')}
-
-**Security APIs Found:** {len(findings.get('security_apis', []))}
-**Vulnerabilities:** {len(findings.get('vulnerabilities', []))}
-**Key Functions:** {len(findings.get('key_functions', []))}
-
-Please review the analysis dump for complete details.
-"""
+            return self._generate_fallback_report(findings, goal, error=str(e))
+    
+    def _generate_fallback_report(self, findings: dict, goal: str, error: str = None) -> str:
+        """
+        Generate a comprehensive fallback report when LLM synthesis fails or returns empty.
+        
+        Args:
+            findings: Consolidated findings dict
+            goal: Original investigation goal
+            error: Optional error message if synthesis failed
+            
+        Returns:
+            Formatted report string
+        """
+        report_lines = ["FINAL RESPONSE:", ""]
+        
+        if error:
+            report_lines.append(f"## Analysis Report (Synthesis Error: {error})")
+            report_lines.append("")
+        else:
+            report_lines.append("## Analysis Report")
+            report_lines.append("*(Generated from structured findings due to empty LLM response)*")
+            report_lines.append("")
+        
+        # Binary Purpose
+        report_lines.append("### Binary Purpose")
+        report_lines.append(findings.get('binary_purpose', 'Unknown'))
+        report_lines.append("")
+        
+        # Security APIs
+        security_apis = findings.get('security_apis', [])
+        if security_apis:
+            report_lines.append(f"### Security APIs ({len(security_apis)} found)")
+            for api in security_apis[:10]:
+                report_lines.append(f"- **{api.get('name', 'Unknown')}** @ `{api.get('address', 'unknown')}`")
+                report_lines.append(f"  {api.get('context', '')}")
+            report_lines.append("")
+        
+        # Investigation Leads
+        leads = findings.get('investigation_leads', [])
+        if leads:
+            report_lines.append(f"### Investigation Leads ({len(leads)} identified)")
+            for lead in leads[:10]:
+                priority = lead.get('priority', 'MEDIUM')
+                emoji = "🔴" if priority == "HIGH" else "🟡" if priority == "MEDIUM" else "🟢"
+                report_lines.append(f"{emoji} **{lead.get('address', 'unknown')}** [{priority}]")
+                report_lines.append(f"  - Observation: {lead.get('observation', '')}")
+                report_lines.append(f"  - Hypothesis: {lead.get('hypothesis', '')}")
+                report_lines.append(f"  - Next Step: {lead.get('next_step', '')}")
+                report_lines.append("")
+        
+        # Key Functions
+        functions = findings.get('key_functions', [])
+        if functions:
+            report_lines.append(f"### Key Functions ({len(functions)} identified)")
+            for func in functions[:10]:
+                report_lines.append(f"- **{func.get('name', 'Unknown')}** @ `{func.get('address', 'unknown')}`")
+                report_lines.append(f"  {func.get('purpose', '')}")
+            report_lines.append("")
+        
+        # Artifacts
+        artifacts = findings.get('artifacts', [])
+        if artifacts:
+            report_lines.append(f"### Artifacts ({len(artifacts)} found)")
+            for artifact in artifacts[:10]:
+                report_lines.append(f"- **{artifact.get('type', 'unknown')}** @ `{artifact.get('address', 'unknown')}`")
+                report_lines.append(f"  `{artifact.get('value', '')}`")
+            report_lines.append("")
+        
+        # Investigation Gaps
+        gaps = findings.get('investigation_gaps', [])
+        if gaps:
+            report_lines.append(f"### Investigation Gaps")
+            for gap in gaps[:5]:
+                report_lines.append(f"- {gap}")
+            report_lines.append("")
+        
+        # Recommended Next Steps
+        next_steps = findings.get('recommended_next_steps', [])
+        if next_steps:
+            report_lines.append(f"### Recommended Next Steps")
+            for i, step in enumerate(next_steps[:5], 1):
+                report_lines.append(f"{i}. {step}")
+            report_lines.append("")
+        
+        # Conclusion
+        report_lines.append("### Conclusion")
+        high_priority_count = len([l for l in leads if l.get('priority') == 'HIGH'])
+        if high_priority_count > 0:
+            report_lines.append(f"Found {high_priority_count} high-priority investigation leads that warrant further analysis.")
+        report_lines.append(f"Analysis identified {len(functions)} key functions and {len(security_apis)} security-relevant APIs.")
+        if gaps:
+            report_lines.append(f"There are {len(gaps)} investigation gaps that require additional analysis.")
+        
+        return "\n".join(report_lines)
 
     def _synthesize_report_with_conclusions(self, findings: dict, goal: str, 
                                             cycle_number: int, 
@@ -3255,16 +4347,26 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
         else:
             self.logger.warning(f"DEBUG: No valid summary extracted for {function_identifier}")
 
-    def _add_function_to_rag(self, function_identifier: str, summary: str) -> None:
+    def _add_function_to_rag(self, function_identifier: str, func_data: Dict[str, Any]) -> None:
         """
-        Add a renamed function and its summary as a RAG vector for enhanced context.
+        Add a function with enhanced metadata as a RAG vector AND to the knowledge graph.
         
         Args:
             function_identifier: Function address or name identifier
-            summary: Function behavior summary
+            func_data: Complete function data dict with metadata
         """
         try:
-            self.logger.info(f"DEBUG: _add_function_to_rag called for {function_identifier} with summary: {summary[:50]}...")
+            self.logger.info(f"DEBUG: _add_function_to_rag called for {function_identifier}")
+            
+            # ============ KNOWLEDGE GRAPH: Add function to graph ============
+            if self.function_graph and 'address' in func_data:
+                try:
+                    address = func_data['address']
+                    name = func_data.get('new_name', function_identifier)
+                    self.function_graph.add_function(address, name, func_data)
+                    self.logger.debug(f"📊 Added {name} to Knowledge Graph")
+                except Exception as graph_error:
+                    self.logger.warning(f"Failed to add to graph: {graph_error}")
             
             # Check if CAG manager is available and RAG is enabled
             has_cag = hasattr(self, 'cag_manager') and self.cag_manager
@@ -3276,81 +4378,81 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
                 self.logger.warning(f"DEBUG: Skipping RAG integration - has_cag: {has_cag}, rag_enabled: {rag_enabled}")
                 return
             
-            # Get function details from address mapping
-            function_info = self.function_address_mapping.get(function_identifier, {})
-            old_name = function_info.get('old_name', 'Unknown')
-            new_name = function_info.get('new_name', function_identifier)
+            # ============ ENHANCED RAG DOCUMENT BUILDING ============
+            try:
+                from src.rag_document_builder import RAGDocumentBuilder
+                builder = RAGDocumentBuilder()
+                
+                # Check if we should use multi-vector (configurable)
+                use_multi_vector = getattr(self.config, 'use_multi_vector_rag', False) if hasattr(self, 'config') else False
+                
+                if use_multi_vector:
+                    # Build multiple focused vectors per function
+                    rag_documents = builder.build_multi_vector_documents(func_data)
+                else:
+                    # Build single comprehensive document
+                    rag_documents = [builder.build_primary_document(func_data)]
+                
+            except Exception as build_error:
+                self.logger.error(f"Enhanced RAG document building failed: {build_error}")
+                # Fallback to legacy format
+                new_name = func_data.get('new_name', function_identifier)
+                old_name = func_data.get('old_name', 'Unknown')
+                summary = func_data.get('raw_summary', func_data.get('summary', ''))
+                
+                rag_documents = [{
+                    'title': f"Function: {new_name}",
+                    'content': f"Address: {function_identifier}\nOriginal: {old_name}\nRenamed: {new_name}\n\n{summary}",
+                    'metadata': {
+                        'type': 'function_analysis',
+                        'address': function_identifier,
+                        'new_name': new_name,
+                    }
+                }]
             
-            # Create a comprehensive document for the vector store
-            function_doc = {
-                'title': f"Renamed Function: {new_name}",
-                'content': f"""Function Analysis Result:
-
-Address: {function_identifier}
-Original Name: {old_name}
-Renamed To: {new_name}
-Analysis Summary: {summary}
-
-This function was analyzed and renamed during reverse engineering. The summary provides insights into its behavior and purpose, which can help with understanding similar functions or related code patterns.
-
-Keywords: function analysis, reverse engineering, {old_name}, {new_name}, behavior analysis""",
-                'metadata': {
-                    'type': 'function_analysis',
-                    'address': function_identifier,
-                    'old_name': old_name,
-                    'new_name': new_name,
-                    'summary': summary,
-                    'timestamp': self._get_current_timestamp()
-                }
-            }
-            
-            # Add to vector store using CAG manager  
+            # Add each document to vector store
             if hasattr(self.cag_manager, 'vector_store') and self.cag_manager.vector_store:
                 try:
-                    # Generate embedding
-                    content_text = function_doc['content']
-                    embeddings = Bridge.get_embeddings([content_text])
-                    if not embeddings:
-                        self.logger.warning("Embedding service unavailable – skipping RAG integration for function")
-                        return
                     import numpy as np
-                    embedding = np.array(embeddings[0], dtype=np.float32)
+                    added_count = 0
                     
-                    # Convert our function_doc to the expected SimpleVectorStore format
-                    vector_doc = {
-                        "text": content_text,
-                        "type": "function_analysis", 
-                        "name": new_name,
-                        "metadata": function_doc['metadata']
-                    }
-                    
-                    # Get current counts for debugging
-                    old_doc_count = len(self.cag_manager.vector_store.documents)
-                    old_embedding_count = len(self.cag_manager.vector_store.embeddings)
-                    
-                    # Add document to documents list
-                    self.cag_manager.vector_store.documents.append(vector_doc)
-                    
-                    # Add embedding to embeddings list
-                    if isinstance(self.cag_manager.vector_store.embeddings, list) and len(self.cag_manager.vector_store.embeddings) > 0:
-                        # Check if embeddings are stored as numpy arrays or lists
-                        if isinstance(self.cag_manager.vector_store.embeddings[0], np.ndarray):
-                            self.cag_manager.vector_store.embeddings.append(embedding)
+                    for rag_doc in rag_documents:
+                        # Generate embedding
+                        content_text = rag_doc['content']
+                        embeddings = Bridge.get_embeddings([content_text])
+                        if not embeddings:
+                            self.logger.warning("Embedding service unavailable – skipping this document")
+                            continue
+                        
+                        embedding = np.array(embeddings[0], dtype=np.float32)
+                        
+                        # Convert to SimpleVectorStore format
+                        vector_doc = {
+                            "text": content_text,
+                            "type": rag_doc['metadata'].get('type', 'function_analysis'),
+                            "name": rag_doc['metadata'].get('new_name', 'unknown'),
+                            "metadata": rag_doc['metadata']
+                        }
+                        
+                        # Add document
+                        self.cag_manager.vector_store.documents.append(vector_doc)
+                        
+                        # Add embedding
+                        if isinstance(self.cag_manager.vector_store.embeddings, list) and len(self.cag_manager.vector_store.embeddings) > 0:
+                            if isinstance(self.cag_manager.vector_store.embeddings[0], np.ndarray):
+                                self.cag_manager.vector_store.embeddings.append(embedding)
+                            else:
+                                embeddings_array = np.array(self.cag_manager.vector_store.embeddings)
+                                new_embeddings = np.vstack([embeddings_array, embedding.reshape(1, -1)])
+                                self.cag_manager.vector_store.embeddings = [new_embeddings[i] for i in range(len(new_embeddings))]
                         else:
-                            # Convert to numpy array first
-                            embeddings_array = np.array(self.cag_manager.vector_store.embeddings)
-                            new_embeddings = np.vstack([embeddings_array, embedding.reshape(1, -1)])
-                            self.cag_manager.vector_store.embeddings = [new_embeddings[i] for i in range(len(new_embeddings))]
-                    else:
-                        # First embedding or empty list
-                        self.cag_manager.vector_store.embeddings = [embedding]
+                            self.cag_manager.vector_store.embeddings = [embedding]
+                        
+                        added_count += 1
                     
-                    new_doc_count = len(self.cag_manager.vector_store.documents)
-                    new_embedding_count = len(self.cag_manager.vector_store.embeddings)
-                    
-                    self.logger.info(f"✅ Successfully added function '{new_name}' to RAG vectors")
-                    self.logger.info(f"📊 Documents: {old_doc_count} -> {new_doc_count}")
-                    self.logger.info(f"🔢 Embeddings: {old_embedding_count} -> {new_embedding_count}")
+                    new_name = func_data.get('new_name', function_identifier)
+                    self.logger.info(f"✅ Successfully added {added_count} vector(s) for '{new_name}' to RAG")
+                    self.logger.info(f"📊 Total documents: {len(self.cag_manager.vector_store.documents)}")
                     
                     # Trigger memory panel refresh if UI is available
                     try:
@@ -3492,7 +4594,7 @@ Keywords: function analysis, reverse engineering, {old_name}, {new_name}, behavi
                 try:
                     current_function_result = self.ghidra.get_current_function()
                     if isinstance(current_function_result, str) and "at " in current_function_result:
-                        # Extract address from result like "Function: FUN_00409bd4 at 00409bd4"
+                        # Extract address from result like "Function: FUN_401000 at 401000"
                         match = re.search(r'at\s+([0-9a-fA-F]+)', current_function_result)
                         if match:
                             address = match.group(1)
@@ -4252,8 +5354,9 @@ Keywords: function analysis, reverse engineering, {old_name}, {new_name}, behavi
         response = self.chat_engine.query(prompt)
         logging.info(f"Received review response: {response[:100]}...")
         
-        # Parse any artifacts from the response
-        self._parse_and_save_artifacts(response)
+        # REMOVED: Text-based ARTIFACT parsing (never used)
+        # Artifacts now auto-populated from execution gate triggers
+        # self._parse_and_save_artifacts(response)
         
         return [f"\n=== REVIEW ANALYSIS ===\n{response}"]
 
@@ -6419,8 +7522,8 @@ Now generate the JSON report based on this data.
 
     def _normalize_address(self, identifier: str) -> Optional[str]:
         """Try to extract a pure hexadecimal address from various identifier
-        forms (e.g. 'FUN_004057c0', 'thunk_FUN_004057c0', '0x004057c0',
-        'Function: FUN_004057c0 at 004057c0').
+        forms (e.g. 'FUN_401000', 'thunk_FUN_401000', '0x401000',
+        'Function: FUN_401000 at 401000').
 
         Returns the hex string (lower-case, no '0x' prefix) or ``None`` if
         no valid address can be found.
@@ -6596,4 +7699,4 @@ def main():
         return 0
 
 if __name__ == "__main__":
-    main() 
+    main()

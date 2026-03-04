@@ -1,6 +1,16 @@
-# Ghidra MCP Tool Call Testing
+# OGhidra Test Suite
 
-This directory contains test scripts for verifying the Ghidra MCP API and understanding how tool calls work with the AI agent.
+This directory contains test scripts for verifying OGhidra's core functionality, including the Ghidra MCP API, malware pattern detection, and AI agent integration.
+
+## Disclaimer
+
+Test files in this directory contain:
+- **Example malware patterns** for educational purposes (common techniques found in public security research)
+- **Generic memory addresses** that do not reference any specific proprietary binaries
+- **RFC1918 private IP addresses** (e.g., 192.168.x.x, 10.x.x.x) used as test fixtures
+- **Synthetic code samples** created for testing pattern detection algorithms
+
+All examples are for legitimate security research and educational purposes.
 
 ## Key Findings
 

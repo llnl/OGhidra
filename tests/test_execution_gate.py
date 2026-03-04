@@ -117,19 +117,20 @@ class TestDoomLoopDetection(unittest.TestCase):
         self.gate = ExecutionGatekeeper(MockConfig(gate_repetition_threshold=3))
 
     def test_repetition_triggers_on_threshold(self):
-        """Third identical call should trigger PAUSE."""
-        params = {"address": "0x401000"}
+        """Third identical call should trigger PAUSE (for non-investigation tools)."""
+        # Use a tool that's NOT in INVESTIGATION_TOOLS
+        params = {"name": "test_func"}
         # First two calls: fine
         self.assertEqual(
-            self.gate.check_before_execution("decompile_function", params, []),
+            self.gate.check_before_execution("rename_function", params, []),
             ExecutionSignal.CONTINUE
         )
         self.assertEqual(
-            self.gate.check_before_execution("decompile_function", params, []),
+            self.gate.check_before_execution("rename_function", params, []),
             ExecutionSignal.CONTINUE
         )
         # Third call: doom-loop
-        signal = self.gate.check_before_execution("decompile_function", params, [])
+        signal = self.gate.check_before_execution("rename_function", params, [])
         self.assertEqual(signal, ExecutionSignal.PAUSE)
         gate = self.gate.get_gate_reason()
         self.assertEqual(gate.trigger, "repetition")
@@ -137,9 +138,10 @@ class TestDoomLoopDetection(unittest.TestCase):
 
     def test_different_params_no_trigger(self):
         """Same tool with different params should NOT trigger."""
+        # Use a non-investigation tool
         for i in range(5):
             signal = self.gate.check_before_execution(
-                "decompile_function", {"address": f"0x40{i}000"}, []
+                "rename_function", {"name": f"func_{i}"}, []
             )
             self.assertEqual(signal, ExecutionSignal.CONTINUE)
 
@@ -151,22 +153,59 @@ class TestDoomLoopDetection(unittest.TestCase):
             signal = self.gate.check_before_execution(tool, params, [])
             self.assertEqual(signal, ExecutionSignal.CONTINUE)
 
+    def test_investigation_tools_exempt_from_doom_loop(self):
+        """Investigation tools (xrefs, decompile, list_*) should be exempt from doom-loop detection."""
+        # Test that xrefs tool can be called many times with same params
+        params = {"address": "0x401000"}
+        for _ in range(10):  # Well over the threshold of 3
+            signal = self.gate.check_before_execution("get_xrefs_to", params, [])
+            self.assertEqual(signal, ExecutionSignal.CONTINUE, 
+                "get_xrefs_to should be exempt from doom-loop detection")
+        
+        # Test other investigation tools
+        investigation_tools = [
+            "get_xrefs_from",
+            "get_function_xrefs", 
+            "decompile_function_by_address",
+            "list_strings",
+            "list_imports",
+        ]
+        for tool in investigation_tools:
+            for _ in range(5):
+                signal = self.gate.check_before_execution(tool, params, [])
+                self.assertEqual(signal, ExecutionSignal.CONTINUE,
+                    f"{tool} should be exempt from doom-loop detection")
+    
+    def test_non_investigation_tool_still_triggers(self):
+        """Non-investigation tools should still trigger doom-loop detection."""
+        # Use a tool that's NOT in INVESTIGATION_TOOLS
+        params = {"name": "test_function"}
+        for _ in range(2):
+            signal = self.gate.check_before_execution("rename_function", params, [])
+            self.assertEqual(signal, ExecutionSignal.CONTINUE)
+        
+        # Third call should trigger
+        signal = self.gate.check_before_execution("rename_function", params, [])
+        self.assertEqual(signal, ExecutionSignal.PAUSE)
+        gate = self.gate.get_gate_reason()
+        self.assertEqual(gate.trigger, "repetition")
+
     def test_repetition_disabled(self):
         """With gate_on_repetition=False, duplicates should not trigger."""
         gate = ExecutionGatekeeper(MockConfig(gate_on_repetition=False))
-        params = {"address": "0x401000"}
+        params = {"name": "test_func"}
         for _ in range(5):
-            signal = gate.check_before_execution("decompile_function", params, [])
+            signal = gate.check_before_execution("rename_function", params, [])
             self.assertEqual(signal, ExecutionSignal.CONTINUE)
 
     def test_reset_clears_repetition(self):
         """Reset should clear repetition counts."""
-        params = {"address": "0x401000"}
-        self.gate.check_before_execution("decompile_function", params, [])
-        self.gate.check_before_execution("decompile_function", params, [])
+        params = {"name": "test_func"}
+        self.gate.check_before_execution("rename_function", params, [])
+        self.gate.check_before_execution("rename_function", params, [])
         self.gate.reset()
         # After reset, count starts at 1 again
-        signal = self.gate.check_before_execution("decompile_function", params, [])
+        signal = self.gate.check_before_execution("rename_function", params, [])
         self.assertEqual(signal, ExecutionSignal.CONTINUE)
 
 
@@ -253,8 +292,8 @@ class TestReset(unittest.TestCase):
         # Trigger artifact gate
         gate.check_after_execution("test", "SeTakeOwnershipPrivilege", [])
         self.assertIsNotNone(gate.get_gate_reason())
-        # Accumulate repetitions
-        gate.check_before_execution("decompile_function", {"a": "1"}, [])
+        # Accumulate repetitions (use non-investigation tool)
+        gate.check_before_execution("rename_function", {"name": "test"}, [])
         # Inject feedback
         gate.inject_feedback("feedback")
 
@@ -264,7 +303,7 @@ class TestReset(unittest.TestCase):
         self.assertIsNone(gate.consume_feedback())
         # Repetition tracker should be cleared (first call returns CONTINUE)
         self.assertEqual(
-            gate.check_before_execution("decompile_function", {"a": "1"}, []),
+            gate.check_before_execution("rename_function", {"name": "test"}, []),
             ExecutionSignal.CONTINUE
         )
 

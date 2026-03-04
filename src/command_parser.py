@@ -85,7 +85,7 @@ class CommandParser:
     ]
     
     @staticmethod
-    def validate_command_parameters(command_name: str, params: Dict[str, str]) -> Tuple[bool, str]:
+    def validate_command_parameters(command_name: str, params: Dict[str, Any]) -> Tuple[bool, str]:
         """
         Validate that a command has all required parameters.
         
@@ -110,9 +110,10 @@ class CommandParser:
         return True, ""
     
     @staticmethod
-    def extract_commands(response: str) -> List[Tuple[str, Dict[str, str]]]:
+    def extract_commands(response: str) -> List[Tuple[str, Dict[str, Any]]]:
         """
         Extract commands and their parameters from an AI response.
+        Handles malformed responses gracefully and provides feedback.
         
         Args:
             response: The AI's response text
@@ -122,17 +123,48 @@ class CommandParser:
         """
         commands = []
         seen_commands = set()  # Track unique command signatures for deduplication
+        format_violations = []  # Track format violations for feedback
         
         # Clean up malformed output - sometimes AI outputs "EXECUTE: cmd()REASONING:"
         # Split on known keywords to isolate EXECUTE statements
         cleaned_response = response
-        for keyword in ['REASONING:', 'EXPLANATION:', 'INVESTIGATION', 'GOAL']:
+        for keyword in ['REASONING:', 'EXPLANATION:', 'INVESTIGATION', 'GOAL', 'I don\'t', 'I cannot', 'To proceed']:
             # Ensure newline before keyword if it follows a command
             cleaned_response = re.sub(
                 r'(\))\s*(' + keyword + ')', 
                 r'\1\n\2', 
                 cleaned_response
             )
+        
+        # Detect if there's explanatory text mixed with EXECUTE commands
+        lines = cleaned_response.split('\n')
+        has_mixed_text = False
+        execute_line_indices = []
+        
+        for idx, line in enumerate(lines):
+            if 'EXECUTE:' in line:
+                execute_line_indices.append(idx)
+                # Check if there's non-command text on the same line after the closing paren
+                match = re.match(r'EXECUTE:\s*[\w_]+\([^)]*\)(.*)', line)
+                if match and match.group(1).strip():
+                    trailing_text = match.group(1).strip()
+                    # Ignore if it's just another EXECUTE command
+                    if not trailing_text.startswith('EXECUTE:'):
+                        has_mixed_text = True
+                        format_violations.append(f"Text after EXECUTE on same line: '{trailing_text[:50]}...'")
+        
+        # Check if there's prose text between EXECUTE commands
+        if len(execute_line_indices) > 1:
+            for i in range(len(execute_line_indices) - 1):
+                start_idx = execute_line_indices[i]
+                end_idx = execute_line_indices[i + 1]
+                between_text = '\n'.join(lines[start_idx+1:end_idx]).strip()
+                if between_text and not between_text.startswith('EXECUTE:'):
+                    # Check if it's substantial prose (not just blank lines or short connectors)
+                    if len(between_text) > 30:
+                        has_mixed_text = True
+                        format_violations.append(f"Explanatory text between commands: '{between_text[:50]}...'")
+                        break
         
         # Find all command occurrences in the response using the correct format
         matches = re.finditer(CommandParser.COMMAND_PATTERN, cleaned_response, re.MULTILINE)
@@ -159,12 +191,23 @@ class CommandParser:
             
             # Skip if we've already seen this exact command
             if cmd_signature in seen_commands:
-                logger.debug(f"Skipping duplicate command: {command_name}")
+                logger.info(f"⚠️  Duplicate command detected and removed: {command_name}({params_text[:30]}...)")
+                format_violations.append(f"Duplicate: {command_name}")
                 continue
             
             seen_commands.add(cmd_signature)
             commands.append((command_name, params))
             logger.debug(f"Extracted command: {command_name} with params: {params}")
+        
+        # Log format violations for user feedback
+        if format_violations:
+            logger.warning(f"⚠️  FORMAT VIOLATIONS DETECTED ({len(format_violations)}):")
+            for violation in format_violations[:3]:  # Show first 3
+                logger.warning(f"   - {violation}")
+            logger.warning("📝 Reminder: Use ONLY 'EXECUTE: command()' lines with no additional text")
+            
+        if has_mixed_text and commands:
+            logger.warning("⚠️  LLM mixed explanatory text with EXECUTE commands - commands extracted successfully but format should be improved")
         
         # If no commands found with correct format, check for alternate formats
         if not commands:
@@ -203,7 +246,7 @@ class CommandParser:
         return commands
     
     @staticmethod
-    def _validate_and_transform_params(command_name: str, params: Dict[str, str]) -> Dict[str, str]:
+    def _validate_and_transform_params(command_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
         """
         Validate and potentially transform parameters for specific commands.
         This helps catch common errors before they reach the GhidraMCP client.
@@ -276,10 +319,29 @@ class CommandParser:
                 if wrong_name in validated_params and correct_name not in validated_params:
                     logger.info(f"Correcting parameter for '{command_name}': from '{wrong_name}' to '{correct_name}'")
                     validated_params[correct_name] = validated_params.pop(wrong_name)
+
+        # Coerce common numeric parameters even if quoted
+        numeric_param_names = {
+            "offset",
+            "limit",
+            "length",
+            "start_port",
+            "end_port",
+            "min_table_entries",
+            "pointer_size",
+        }
+        for n in numeric_param_names:
+            if n in validated_params and isinstance(validated_params[n], str):
+                s = validated_params[n].strip()
+                if re.fullmatch(r"-?\d+", s):
+                    try:
+                        validated_params[n] = int(s)
+                    except ValueError:
+                        pass
         
         # For rename_function_by_address, check if function_address is a function name
         if command_name == "rename_function_by_address" and "function_address" in validated_params:
-            addr = validated_params["function_address"]
+            addr = str(validated_params["function_address"])
             
             # If it starts with "FUN_" and the rest is hex, extract just the hex part
             if addr.startswith("FUN_") and all(c in "0123456789abcdefABCDEF" for c in addr[4:]):
@@ -300,7 +362,7 @@ class CommandParser:
         return validated_params
     
     @staticmethod
-    def _parse_parameters(params_text: str) -> Dict[str, str]:
+    def _parse_parameters(params_text: str) -> Dict[str, Any]:
         """
         Parse parameters from the parameter text string.
         
@@ -310,7 +372,7 @@ class CommandParser:
         Returns:
             Dictionary of parameter names to values
         """
-        params = {}
+        params: Dict[str, Any] = {}
         
         if not params_text:
             return params
@@ -338,19 +400,41 @@ class CommandParser:
         if current:
             param_list.append(current.strip())
             
+        def _coerce_unquoted_value(raw: str) -> Any:
+            v = raw.strip()
+            if not v:
+                return ""
+            low = v.lower()
+            if low == "true":
+                return True
+            if low == "false":
+                return False
+            # Int
+            try:
+                # Support negative integers too
+                if re.fullmatch(r"-?\d+", v):
+                    return int(v)
+            except Exception:
+                pass
+            return v
+
         # Process each parameter
         for param in param_list:
             if '=' in param:
                 key, value = param.split('=', 1)
                 key = key.strip()
                 value = value.strip()
-                
-                # Remove quotes if present
-                if (value.startswith('"') and value.endswith('"')) or \
-                   (value.startswith("'") and value.endswith("'")):
-                    value = value[1:-1]
-                    
-                params[key] = value
+
+                # Preserve types: quoted values remain strings, unquoted are coerced
+                was_quoted = (
+                    (value.startswith('"') and value.endswith('"')) or
+                    (value.startswith("'") and value.endswith("'"))
+                )
+
+                if was_quoted:
+                    params[key] = value[1:-1]
+                else:
+                    params[key] = _coerce_unquoted_value(value)
         
         return params
     
@@ -469,3 +553,64 @@ class CommandParser:
                 )
                 
         return enhanced_error 
+    
+    @staticmethod
+    def generate_format_feedback(response: str, commands: List[Tuple[str, Dict[str, Any]]]) -> Optional[str]:
+        """
+        Generate feedback message when format violations are detected.
+        This can be returned to the LLM to help it improve.
+        
+        Args:
+            response: The original AI response
+            commands: The extracted commands
+            
+        Returns:
+            Feedback message if violations detected, None otherwise
+        """
+        issues = []
+        
+        # Check for text after EXECUTE commands
+        lines = response.split('\n')
+        for line in lines:
+            if 'EXECUTE:' in line:
+                match = re.match(r'EXECUTE:\s*[\w_]+\([^)]*\)(.*)', line)
+                if match and match.group(1).strip():
+                    trailing = match.group(1).strip()
+                    if not trailing.startswith('EXECUTE:'):
+                        issues.append(f"❌ Found text after EXECUTE command: '{trailing[:50]}'")
+                        break
+        
+        # Check for duplicate commands
+        if commands:
+            cmd_names = [cmd[0] for cmd in commands]
+            duplicates = [cmd for cmd in set(cmd_names) if cmd_names.count(cmd) > 1]
+            if duplicates:
+                issues.append(f"❌ Duplicate commands detected: {', '.join(duplicates)}")
+        
+        # Check for explanatory text between commands
+        execute_indices = [i for i, line in enumerate(lines) if 'EXECUTE:' in line]
+        if len(execute_indices) > 1:
+            for i in range(len(execute_indices) - 1):
+                between = '\n'.join(lines[execute_indices[i]+1:execute_indices[i+1]]).strip()
+                if between and len(between) > 20:
+                    issues.append(f"❌ Explanatory text found between EXECUTE commands")
+                    break
+        
+        if not issues:
+            return None
+        
+        feedback = ["⚠️  FORMAT VIOLATIONS DETECTED:"]
+        feedback.extend(issues)
+        feedback.append("")
+        feedback.append("📝 CORRECT FORMAT:")
+        feedback.append("EXECUTE: tool_name(param=\"value\")")
+        feedback.append("EXECUTE: another_tool(param=\"value\")")
+        feedback.append("")
+        feedback.append("❌ INCORRECT - Don't add explanatory text:")
+        feedback.append("EXECUTE: tool_name(param=\"value\")")
+        feedback.append("I don't yet have results...  ← WRONG")
+        feedback.append("")
+        feedback.append("Please output ONLY the EXECUTE lines with no additional text.")
+        
+        return "\n".join(feedback)
+

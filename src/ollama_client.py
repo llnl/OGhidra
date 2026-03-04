@@ -136,8 +136,10 @@ def average_embeddings(embeddings: List[List[float]]) -> List[float]:
 def is_retryable_exception(e):
     """Check if an exception is retryable (429, 503, or connection/timeout)."""
     if isinstance(e, requests.exceptions.HTTPError):
-        # Retry on 429 (Rate Limit) and 503 (Service Unavailable)
-        return e.response is not None and e.response.status_code in [429, 503]
+        # Retry on transient upstream/proxy failures
+        # 429 = rate limited
+        # 5xx = overloaded / gateway timeout / bad gateway
+        return e.response is not None and e.response.status_code in [429, 500, 502, 503, 504]
     # Also retry on connection and timeout errors
     return isinstance(e, (requests.exceptions.ConnectionError, requests.exceptions.Timeout))
 
@@ -316,13 +318,16 @@ class OllamaClient:
         used_model = model or self.default_model
         used_system = system_prompt or self.default_system_prompt
         used_temp = temperature or self.temperature
+        used_max_tokens = max_tokens or self.max_tokens
         
         payload = {
             "model": used_model,
             "prompt": prompt,
             "system": used_system,
             "temperature": used_temp,
-            "stream": False  # Disable streaming to get a single response
+            "stream": False,  # Disable streaming to get a single response
+            # Limit generation to reduce latency/timeouts; Ollama uses num_predict
+            "num_predict": int(used_max_tokens) if used_max_tokens is not None else 2000,
         }
         
         try:

@@ -9,3 +9,4 @@ ijson>=3.2.0              # Optional: for streaming large JSON files (large sess
 pydantic>=2.7.1
 pydantic-settings>=2.2.1
 tenacity>=9.0.0
+psutil>=5.9.0             # For system memory and CPU statistics in system information

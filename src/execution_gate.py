@@ -39,6 +39,23 @@ class ExecutionGatekeeper:
         'rename_function_by_address',
     }
     
+    # Investigation tools that should be exempt from doom-loop detection
+    # These are read-only tools that analysts legitimately need to call many times
+    # with different parameters during deep analysis
+    INVESTIGATION_TOOLS = {
+        'get_xrefs_to',
+        'get_xrefs_from',
+        'get_function_xrefs',
+        'decompile_function',
+        'decompile_function_by_address',
+        'disassemble_function',
+        'list_strings',
+        'list_imports',
+        'list_exports',
+        'list_functions',
+        'get_function_by_address',
+    }
+    
     # Patterns that indicate critical artifacts worth pausing for.
     # These are checked against stringified tool results.
     CRITICAL_ARTIFACT_PATTERNS = [
@@ -144,27 +161,31 @@ class ExecutionGatekeeper:
         
         # --- Repetition / doom-loop check ---
         if self.gate_on_repetition:
-            param_sig = str(sorted(cmd_params.items())) if cmd_params else ""
-            cmd_signature = f"{cmd_name}:{param_sig}"
-            self._repetition_tracker[cmd_signature] += 1
-            
-            if self._repetition_tracker[cmd_signature] >= self.repetition_threshold:
-                self._last_gate = ExecutionGate(
-                    reason=(
-                        f"Doom-loop detected: '{cmd_name}' called {self._repetition_tracker[cmd_signature]} times "
-                        f"with identical parameters (threshold={self.repetition_threshold})"
-                    ),
-                    signal=ExecutionSignal.PAUSE,
-                    trigger="repetition",
-                    context={
-                        "tool": cmd_name,
-                        "params": cmd_params,
-                        "call_count": self._repetition_tracker[cmd_signature],
-                        "threshold": self.repetition_threshold,
-                    }
-                )
-                self.logger.warning(f"🚧 GATE [repetition]: {self._last_gate.reason}")
-                return ExecutionSignal.PAUSE
+            # Skip doom-loop detection for investigation tools (xrefs, decompile, etc.)
+            # These tools are meant to be called many times with different addresses/parameters
+            # during legitimate deep analysis
+            if cmd_name not in self.INVESTIGATION_TOOLS:
+                param_sig = str(sorted(cmd_params.items())) if cmd_params else ""
+                cmd_signature = f"{cmd_name}:{param_sig}"
+                self._repetition_tracker[cmd_signature] += 1
+                
+                if self._repetition_tracker[cmd_signature] >= self.repetition_threshold:
+                    self._last_gate = ExecutionGate(
+                        reason=(
+                            f"Doom-loop detected: '{cmd_name}' called {self._repetition_tracker[cmd_signature]} times "
+                            f"with identical parameters (threshold={self.repetition_threshold})"
+                        ),
+                        signal=ExecutionSignal.PAUSE,
+                        trigger="repetition",
+                        context={
+                            "tool": cmd_name,
+                            "params": cmd_params,
+                            "call_count": self._repetition_tracker[cmd_signature],
+                            "threshold": self.repetition_threshold,
+                        }
+                    )
+                    self.logger.warning(f"🚧 GATE [repetition]: {self._last_gate.reason}")
+                    return ExecutionSignal.PAUSE
         
         return ExecutionSignal.CONTINUE
     
@@ -172,17 +193,22 @@ class ExecutionGatekeeper:
         self,
         cmd_name: str,
         result: str,
-        exec_history: List[ToolExecution]
+        exec_history: List[ToolExecution],
+        session=None
     ) -> ExecutionSignal:
         """Check AFTER a tool runs. Returns signal if critical artifact found.
         
         Scans the tool result text for patterns indicating critical security
         findings that warrant user attention before the loop continues.
         
+        When critical findings are detected, automatically extracts and saves
+        structured artifacts to the session knowledge base.
+        
         Args:
             cmd_name: Name of the tool that just executed
             result: String result from the tool execution
             exec_history: List of tool executions so far
+            session: Optional session memory for auto-populating artifacts
             
         Returns:
             ExecutionSignal.CONTINUE if no critical findings,
@@ -206,6 +232,16 @@ class ExecutionGatekeeper:
                 })
         
         if matched_artifacts:
+            # Auto-extract and save artifacts to knowledge base
+            if session:
+                auto_artifacts = self._extract_artifacts_from_findings(result, matched_artifacts)
+                for artifact in auto_artifacts:
+                    category = artifact.get("category", "security")
+                    key = artifact.get("key", "finding")
+                    value = artifact.get("value", "")
+                    session.add_knowledge(key, value, category)
+                    self.logger.info(f"💾 Auto-saved artifact: [{category}] {key} = {value[:100]}")
+            
             artifact_summary = "; ".join(a["pattern"] for a in matched_artifacts[:3])
             if len(matched_artifacts) > 3:
                 artifact_summary += f" (+{len(matched_artifacts) - 3} more)"
@@ -224,6 +260,81 @@ class ExecutionGatekeeper:
             return ExecutionSignal.PAUSE
         
         return ExecutionSignal.CONTINUE
+    
+    def _extract_artifacts_from_findings(
+        self,
+        result_text: str,
+        matched_artifacts: List[Dict[str, Any]]
+    ) -> List[Dict[str, str]]:
+        """Extract structured artifacts from tool results based on matched patterns.
+        
+        Converts raw security findings into structured knowledge artifacts
+        that can be stored in the session knowledge base.
+        
+        Args:
+            result_text: Full tool result text
+            matched_artifacts: List of pattern matches with metadata
+            
+        Returns:
+            List of artifact dicts with {category, key, value} fields
+        """
+        artifacts = []
+        
+        # Extract addresses mentioned in the result
+        address_pattern = r'\b(?:0x)?[0-9a-fA-F]{6,8}\b'
+        addresses = re.findall(address_pattern, result_text)
+        
+        for matched in matched_artifacts:
+            pattern_desc = matched["pattern"]
+            match_text = matched["match"]
+            
+            # Categorize based on pattern type
+            if "privilege" in pattern_desc.lower() or "token" in pattern_desc.lower():
+                category = "privilege_escalation"
+                key = f"Privilege_API_{match_text[:30]}"
+                value = f"{pattern_desc}: {match_text}"
+                
+            elif "crypto" in pattern_desc.lower() or "credential" in pattern_desc.lower():
+                category = "crypto"
+                key = f"Crypto_Finding_{match_text[:30]}"
+                value = f"{pattern_desc}: {match_text}"
+                
+            elif "c2" in pattern_desc.lower() or "ip" in pattern_desc.lower() or "url" in pattern_desc.lower():
+                category = "network"
+                key = f"Network_IOC"
+                value = match_text
+                
+            elif "shellcode" in pattern_desc.lower() or "injection" in pattern_desc.lower():
+                category = "code_injection"
+                key = f"Injection_API_{match_text[:30]}"
+                value = f"{pattern_desc}: {match_text}"
+                
+            elif "service" in pattern_desc.lower():
+                category = "persistence"
+                key = f"Service_Finding_{match_text[:30]}"
+                value = f"{pattern_desc}: {match_text}"
+                
+            elif "debug" in pattern_desc.lower():
+                category = "anti_analysis"
+                key = f"AntiDebug_API_{match_text[:30]}"
+                value = f"{pattern_desc}: {match_text}"
+                
+            else:
+                category = "security"
+                key = f"Security_Finding_{match_text[:30]}"
+                value = f"{pattern_desc}: {match_text}"
+            
+            # Add associated addresses if found
+            if addresses:
+                value += f" | Addresses: {', '.join(addresses[:5])}"
+            
+            artifacts.append({
+                "category": category,
+                "key": key,
+                "value": value
+            })
+        
+        return artifacts
     
     def get_gate_reason(self) -> Optional[ExecutionGate]:
         """Return the most recent gate event, or None if no gate was triggered."""

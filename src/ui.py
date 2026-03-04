@@ -70,7 +70,7 @@ class ServerConfigDialog:
         # Create the dialog window
         self.dialog = tk.Toplevel(parent)
         self.dialog.title("Server Configuration")
-        self.dialog.geometry("600x650")
+        self.dialog.geometry("600x750")
         self.dialog.transient(parent)
         self.dialog.grab_set()
         
@@ -82,7 +82,7 @@ class ServerConfigDialog:
         parent_height = parent.winfo_height()
         
         dialog_width = 600
-        dialog_height = 650
+        dialog_height = 750
         
         x = parent_x + (parent_width - dialog_width) // 2
         y = parent_y + (parent_height - dialog_height) // 2
@@ -116,7 +116,7 @@ class ServerConfigDialog:
         self.provider_combo = ttk.Combobox(
             provider_frame, 
             textvariable=self.provider_var, 
-            values=['ollama', 'google'],
+            values=['ollama', 'google', 'custom_api'],
             state='readonly',
             width=20
         )
@@ -149,6 +149,36 @@ class ServerConfigDialog:
         
         self.external_frame.columnconfigure(1, weight=1)
         
+        # --- Custom API Configuration ---
+        self.custom_api_frame = ttk.LabelFrame(main_frame, text="Custom API Configuration (OpenAI-compatible)", padding=10)
+        
+        ttk.Label(self.custom_api_frame, text="API URL:").grid(row=0, column=0, sticky='w', pady=5)
+        self.custom_api_url_var = tk.StringVar(value=str(getattr(self.config.custom_api, 'api_url', 'https://api.example.com/v1/chat/completions')))
+        custom_url_entry = ttk.Entry(self.custom_api_frame, textvariable=self.custom_api_url_var, width=50)
+        custom_url_entry.grid(row=0, column=1, sticky='ew', padx=(10, 0), pady=5)
+        
+        ttk.Label(self.custom_api_frame, text="API Key:").grid(row=1, column=0, sticky='w', pady=5)
+        self.custom_api_key_var = tk.StringVar(value=getattr(self.config.custom_api, 'api_key', ''))
+        custom_key_entry = ttk.Entry(self.custom_api_frame, textvariable=self.custom_api_key_var, width=50, show="*")
+        custom_key_entry.grid(row=1, column=1, sticky='ew', padx=(10, 0), pady=5)
+        
+        ttk.Label(self.custom_api_frame, text="Model:").grid(row=2, column=0, sticky='w', pady=5)
+        self.custom_api_model_var = tk.StringVar(value=getattr(self.config.custom_api, 'model', 'gpt-4'))
+        custom_model_entry = ttk.Entry(self.custom_api_frame, textvariable=self.custom_api_model_var, width=50)
+        custom_model_entry.grid(row=2, column=1, sticky='ew', padx=(10, 0), pady=5)
+        
+        ttk.Label(self.custom_api_frame, text="Embedding Model:").grid(row=3, column=0, sticky='w', pady=5)
+        self.custom_api_embed_var = tk.StringVar(value=getattr(self.config.custom_api, 'embedding_model', 'text-embedding-ada-002'))
+        custom_embed_entry = ttk.Entry(self.custom_api_frame, textvariable=self.custom_api_embed_var, width=50)
+        custom_embed_entry.grid(row=3, column=1, sticky='ew', padx=(10, 0), pady=5)
+        
+        ttk.Label(self.custom_api_frame, text="Max Tokens:").grid(row=4, column=0, sticky='w', pady=5)
+        self.custom_api_max_tokens_var = tk.StringVar(value=str(getattr(self.config.custom_api, 'max_tokens', 4096)))
+        custom_tokens_entry = ttk.Entry(self.custom_api_frame, textvariable=self.custom_api_max_tokens_var, width=50)
+        custom_tokens_entry.grid(row=4, column=1, sticky='ew', padx=(10, 0), pady=5)
+        
+        self.custom_api_frame.columnconfigure(1, weight=1)
+        
         # --- Ollama Configuration ---
         self.ollama_frame = ttk.LabelFrame(main_frame, text="Ollama Server", padding=10)
         
@@ -165,20 +195,8 @@ class ServerConfigDialog:
         # Embedding model selection
         ttk.Label(self.ollama_frame, text="Embedding Model:").grid(row=2, column=0, sticky='w', pady=5)
         self.embedding_model_var = tk.StringVar(value=getattr(self.config.ollama, 'embedding_model', 'nomic-embed-text'))
-        self.embedding_combo = ttk.Combobox(self.ollama_frame, textvariable=self.embedding_model_var, width=47, state='readonly')
-        self.embedding_combo.grid(row=2, column=1, sticky='ew', padx=(10, 0), pady=5)
-        
-        # Set default embedding model options (include code-centric model)
-        self.embedding_combo['values'] = (
-            'nomic-embed-text',
-            'nomic-embed-text:latest',
-            'mxbai-embed-large',
-            'all-minilm:33m'
-        )
-        
-        # Button to refresh available models
-        refresh_button = ttk.Button(self.ollama_frame, text="Refresh Models", command=self._refresh_models)
-        refresh_button.grid(row=3, column=1, sticky='e', padx=(10, 0), pady=5)
+        embedding_entry = ttk.Entry(self.ollama_frame, textvariable=self.embedding_model_var, width=50)
+        embedding_entry.grid(row=2, column=1, sticky='ew', padx=(10, 0), pady=5)
         
         self.ollama_frame.columnconfigure(1, weight=1)
         
@@ -231,52 +249,22 @@ class ServerConfigDialog:
         if provider == 'google': # Alias for 'external' in UI logic
             provider = 'external'
             
+        # Hide all provider frames first
+        self.ollama_frame.pack_forget()
+        self.external_frame.pack_forget()
+        self.custom_api_frame.pack_forget()
+        
+        # Show the selected provider frame
         if provider == 'external':
             # External API selected
-            self.ollama_frame.pack_forget()
-            self.external_frame.pack(fill='x', pady=(0, 10), after=self.dialog.winfo_children()[0].winfo_children()[1]) 
+            self.external_frame.pack(fill='x', pady=(0, 10), after=self.dialog.winfo_children()[0].winfo_children()[1])
+        elif provider == 'custom_api':
+            # Custom API selected
+            self.custom_api_frame.pack(fill='x', pady=(0, 10), after=self.dialog.winfo_children()[0].winfo_children()[1])
         else:
             # Ollama selected
-            self.external_frame.pack_forget()
             self.ollama_frame.pack(fill='x', pady=(0, 10), after=self.dialog.winfo_children()[0].winfo_children()[1])
 
-    def _refresh_models(self):
-        """Refresh the available embedding models from the Ollama server."""
-        def fetch_models():
-            try:
-                import requests
-                response = requests.get(f"{self.ollama_url_var.get()}/api/tags", timeout=10)
-                if response.status_code == 200:
-                    data = response.json()
-                    models = data.get('models', [])
-                    
-                    # Filter for embedding models (typically contain 'embed', 'minilm', or common embedding model names)
-                    embedding_models = []
-                    for model in models:
-                        model_name = model.get('name', '').lower()
-                        if any(keyword in model_name for keyword in ['embed', 'minilm', 'sentence', 'all-minilm']):
-                            embedding_models.append(model.get('name', ''))
-                    
-                    # Add default options and fetched models
-                    all_models = ['nomic-embed-text', 'nomic-embed-text:latest', 'mxbai-embed-large', 'all-minilm:33m'] + embedding_models
-                    # Remove duplicates while preserving order
-                    seen = set()
-                    unique_models = []
-                    for model in all_models:
-                        if model not in seen:
-                            seen.add(model)
-                            unique_models.append(model)
-                    
-                    # Update combobox values
-                    self.embedding_combo['values'] = unique_models
-                    messagebox.showinfo("Models Refreshed", f"Found {len(unique_models)} embedding models")
-                else:
-                    messagebox.showerror("Error", f"Failed to fetch models: HTTP {response.status_code}")
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to connect to Ollama server:\n{str(e)}")
-        
-        threading.Thread(target=fetch_models, daemon=True).start()
-    
     def _test_connections(self):
         """Test the connections to the configured servers."""
         def test():
@@ -309,6 +297,42 @@ class ServerConfigDialog:
                             results.append(f"External API: ❌ HTTP {response.status_code}")
                 except Exception as e:
                     results.append(f"External API: ❌ {str(e)}")
+            elif provider == 'custom_api':
+                # Test Custom API
+                try:
+                    import requests
+                    api_url = self.custom_api_url_var.get()
+                    api_key = self.custom_api_key_var.get()
+                    
+                    if not api_key:
+                        results.append("Custom API: ❌ API Key is missing")
+                    elif not api_url:
+                        results.append("Custom API: ❌ API URL is missing")
+                    else:
+                        # Test with a minimal request
+                        headers = {
+                            'Authorization': f'Bearer {api_key}',
+                            'Content-Type': 'application/json'
+                        }
+                        test_payload = {
+                            "model": self.custom_api_model_var.get(),
+                            "messages": [{"role": "user", "content": "test"}],
+                            "max_tokens": 1
+                        }
+                        
+                        response = requests.post(api_url, headers=headers, json=test_payload, timeout=10, verify=False)
+                        if response.status_code == 200:
+                            results.append("Custom API: ✅ Connected")
+                            results.append(f"Model ({self.custom_api_model_var.get()}): ✅ Available")
+                        else:
+                            results.append(f"Custom API: ❌ HTTP {response.status_code}")
+                            try:
+                                error_detail = response.json()
+                                results.append(f"Error: {error_detail}")
+                            except:
+                                pass
+                except Exception as e:
+                    results.append(f"Custom API: ❌ {str(e)}")
             else:
                 # Test Ollama
                 try:
@@ -395,6 +419,18 @@ class ServerConfigDialog:
             self.config.external.model = self.ext_model_var.get()
             self.config.external.embedding_model = self.ext_embed_var.get()
             
+            # Custom API Config
+            from pydantic import AnyHttpUrl
+            custom_api_url = AnyHttpUrl(self.custom_api_url_var.get())
+            self.config.custom_api.api_url = custom_api_url
+            self.config.custom_api.api_key = self.custom_api_key_var.get()
+            self.config.custom_api.model = self.custom_api_model_var.get()
+            self.config.custom_api.embedding_model = self.custom_api_embed_var.get()
+            try:
+                self.config.custom_api.max_tokens = int(self.custom_api_max_tokens_var.get())
+            except ValueError:
+                pass  # Keep default if invalid
+            
             # Provider
             provider = self.provider_var.get()
             # If user selected 'google' in dropdown, map to 'external' internally or keep alias if preferred
@@ -408,18 +444,26 @@ class ServerConfigDialog:
             # (No need to update _bridge_ref here; handled by main UI)
 
             # --- Update .env file ---
-            self._update_env_file({
+            env_updates = {
                 'OLLAMA_BASE_URL': str(ollama_url),
                 'OLLAMA_MODEL': self.ollama_model_var.get(),
                 'OLLAMA_EMBEDDING_MODEL': self.embedding_model_var.get(),
                 'GHIDRA_BASE_URL': str(ghidra_url),
-                # New External Configs
+                # External Configs
                 'EXTERNAL_PROVIDER': self.ext_provider_var.get(),
                 'EXTERNAL_API_KEY': self.ext_key_var.get(),
                 'EXTERNAL_MODEL': self.ext_model_var.get(),
                 'EXTERNAL_EMBEDDING_MODEL': self.ext_embed_var.get(),
+                # Custom API Configs
+                'CUSTOM_API_URL': self.custom_api_url_var.get(),
+                'CUSTOM_API_KEY': self.custom_api_key_var.get(),
+                'CUSTOM_API_MODEL': self.custom_api_model_var.get(),
+                'CUSTOM_API_EMBEDDING_MODEL': self.custom_api_embed_var.get(),
+                'CUSTOM_API_MAX_TOKENS': self.custom_api_max_tokens_var.get(),
+                # Provider
                 'LLM_PROVIDER': 'external' if provider == 'google' else provider
-            })
+            }
+            self._update_env_file(env_updates)
             # ---
             
             self.result = True
@@ -1095,10 +1139,13 @@ class RenamedFunctionsPanel:
     """Panel displaying renamed functions with their addresses and behavior summaries."""
     
     def __init__(self, parent, bridge: Bridge):
+        import threading
         self.frame = ttk.LabelFrame(parent, text="Analyzed Functions", padding=10)
         self.bridge = bridge
         self.function_summaries = {}  # Store behavior summaries for functions
         self._streaming_load_active = False  # Flag to prevent updates during streaming
+        self.batch_operation_in_progress = False  # Flag to prevent auto-refresh during batch operations
+        self.dict_lock = threading.RLock()  # Thread-safe lock for dictionary access
         self._setup_widgets()
         self._update_function_list()
     
@@ -1256,8 +1303,29 @@ class RenamedFunctionsPanel:
                 
                 functions_to_process = []
                 
-                # Collect from function_address_mapping
-                if hasattr(self.bridge, 'function_address_mapping'):
+                # PRIMARY SOURCE: Collect from the tree widget (has ALL functions with summaries)
+                for item in self.tree.get_children():
+                    try:
+                        values = self.tree.item(item, 'values')
+                        if len(values) >= 4:
+                            address = values[0]
+                            old_name = values[1]
+                            new_name = values[2]
+                            summary = values[3]
+                            
+                            if summary and summary.strip():  # Only process functions with summaries
+                                functions_to_process.append({
+                                    'address': address,
+                                    'old_name': old_name,
+                                    'new_name': new_name,
+                                    'summary': summary
+                                })
+                    except Exception as e:
+                        logger.warning(f"Error reading tree item: {e}")
+                        continue
+                
+                # FALLBACK: If tree is empty, try bridge.function_address_mapping
+                if not functions_to_process and hasattr(self.bridge, 'function_address_mapping'):
                     function_address_mapping = self.bridge.function_address_mapping
                     bridge_summaries = getattr(self.bridge, 'function_summaries', {})
                     
@@ -1265,28 +1333,10 @@ class RenamedFunctionsPanel:
                         old_name = info.get('old_name', 'Unknown')
                         new_name = info.get('new_name', 'Unknown')
                         
-                        # Get summary from multiple sources (bridge and panel)
-                        summary = ''
-                        
-                        # Try bridge function_summaries first
+                        # Get summary from bridge
                         summary = (bridge_summaries.get(address, '') or 
                                  bridge_summaries.get(old_name, '') or
                                  bridge_summaries.get(new_name, ''))
-                        
-                        # If not found, try panel's function_summaries with various key formats
-                        if not summary:
-                            summary_key = f"{address}_{new_name}" if address != "Unknown" else f"{old_name}_{new_name}"
-                            summary = self.function_summaries.get(summary_key, '')
-                            
-                            # Also try alternate key formats
-                            if not summary:
-                                summary = self.function_summaries.get(f"{address}_{old_name}", '')
-                            if not summary:
-                                # Try matching by just the address or name in the key
-                                for key, val in self.function_summaries.items():
-                                    if address in key or new_name in key or old_name in key:
-                                        summary = val
-                                        break
                         
                         if summary:  # Only process functions with summaries
                             functions_to_process.append({
@@ -1296,38 +1346,20 @@ class RenamedFunctionsPanel:
                                 'summary': summary
                             })
                 
-                # Collect from analysis_state if not already included
-                if hasattr(self.bridge, 'analysis_state'):
+                # SECONDARY FALLBACK: Try analysis_state
+                if not functions_to_process and hasattr(self.bridge, 'analysis_state'):
                     renamed_functions = self.bridge.analysis_state.get('functions_renamed', {})
                     bridge_summaries = getattr(self.bridge, 'function_summaries', {})
                     
-                    # Create a set of all processed function identifiers to avoid duplicates
-                    processed_identifiers = set()
-                    for f in functions_to_process:
-                        processed_identifiers.add(f['address'])
-                        processed_identifiers.add(f['old_name'])
-                        processed_identifiers.add(f['new_name'])
-                    
                     for identifier, new_name in renamed_functions.items():
-                        # Check if this function is already processed from address mapping
-                        already_processed = False
-                        for f in functions_to_process:
-                            if (f['address'] == identifier or 
-                                f['old_name'] == identifier or 
-                                f['new_name'] == identifier or
-                                f['new_name'] == new_name):
-                                already_processed = True
-                                break
-                        
-                        if not already_processed:
-                            summary = bridge_summaries.get(identifier, '')
-                            if summary:
-                                functions_to_process.append({
-                                    'address': identifier if self._looks_like_address(identifier) else 'Unknown',
-                                    'old_name': identifier if not self._looks_like_address(identifier) else 'Unknown',
-                                    'new_name': new_name,
-                                    'summary': summary
-                                })
+                        summary = bridge_summaries.get(identifier, '')
+                        if summary:
+                            functions_to_process.append({
+                                'address': identifier if self._looks_like_address(identifier) else 'Unknown',
+                                'old_name': identifier if not self._looks_like_address(identifier) else 'Unknown',
+                                'new_name': new_name,
+                                'summary': summary
+                            })
                 
                 total_functions = len(functions_to_process)
                 progress_bar.config(maximum=total_functions)
@@ -1530,131 +1562,133 @@ class RenamedFunctionsPanel:
     
     def _update_function_list(self):
         """Update the list of renamed functions."""
-        try:
-            # Clear existing items
-            for item in self.tree.get_children():
-                self.tree.delete(item)
-            
-            if not hasattr(self.bridge, 'analysis_state'):
-                self.count_label.config(text="Functions: 0")
-                return
-            
-            renamed_functions = self.bridge.analysis_state.get('functions_renamed', {})
-            
-            # Get improved function address mapping and summaries from bridge
-            function_address_mapping = getattr(self.bridge, 'function_address_mapping', {})
-            bridge_summaries = getattr(self.bridge, 'function_summaries', {})
-            
-            # Debug logging
-            logger.info(f"DEBUG: Updating function list - renamed_functions: {len(renamed_functions)}, address_mapping: {len(function_address_mapping)}")
-            if renamed_functions:
-                logger.info(f"DEBUG: Renamed functions keys: {list(renamed_functions.keys())}")
-                logger.info(f"DEBUG: Renamed functions values: {list(renamed_functions.values())}")
-            if function_address_mapping:
-                logger.info(f"DEBUG: Address mappings keys: {list(function_address_mapping.keys())}")
-                for addr, info in function_address_mapping.items():
-                    logger.info(f"DEBUG: Address {addr} -> {info}")
-            
-            # Also check if bridge has the expected attributes
-            if hasattr(self.bridge, 'analysis_state'):
-                logger.info(f"DEBUG: Bridge analysis_state exists with keys: {list(self.bridge.analysis_state.keys())}")
-            else:
-                logger.warning("DEBUG: Bridge has no analysis_state attribute!")
+        # THREAD SAFETY: Acquire lock before accessing shared dictionaries
+        with self.dict_lock:
+            try:
+                # Clear existing items
+                for item in self.tree.get_children():
+                    self.tree.delete(item)
                 
-            if hasattr(self.bridge, 'function_address_mapping'):
-                logger.info(f"DEBUG: Bridge function_address_mapping exists with {len(self.bridge.function_address_mapping)} entries")
-            else:
-                logger.warning("DEBUG: Bridge has no function_address_mapping attribute!")
+                if not hasattr(self.bridge, 'analysis_state'):
+                    self.count_label.config(text="Functions: 0")
+                    return
+                
+                renamed_functions = self.bridge.analysis_state.get('functions_renamed', {})
             
-            # Update count with total unique functions - use address mapping as primary source
-            # to avoid duplicates between renamed_functions and function_address_mapping
-            unique_functions = set()
-            
-            # Add all functions from address mapping (most complete data)
-            for address in function_address_mapping.keys():
-                unique_functions.add(address)
-            
-            # Add any functions from renamed_functions that aren't in address mapping
-            for identifier in renamed_functions.keys():
-                # Check if this identifier is already covered by address mapping
-                already_covered = False
-                for addr, info in function_address_mapping.items():
-                    if (addr == identifier or 
-                        info.get('old_name') == identifier or 
-                        info.get('new_name') == identifier):
-                        already_covered = True
-                        break
+                # Get improved function address mapping and summaries from bridge
+                function_address_mapping = getattr(self.bridge, 'function_address_mapping', {})
+                bridge_summaries = getattr(self.bridge, 'function_summaries', {})
                 
-                if not already_covered:
-                    unique_functions.add(identifier)
-            
-            total_functions = len(unique_functions)
-            self.count_label.config(text=f"Functions: {total_functions}")
-            
-            # Use the function address mapping as the primary source to avoid duplicates
-            processed_functions = set()
-            
-            # Process functions from the address mapping first (most complete data)
-            for address, info in function_address_mapping.items():
-                old_name = info.get('old_name', 'Unknown')
-                new_name = info.get('new_name', 'Unknown')
+                # Debug logging
+                logger.info(f"DEBUG: Updating function list - renamed_functions: {len(renamed_functions)}, address_mapping: {len(function_address_mapping)}")
+                if renamed_functions:
+                    logger.info(f"DEBUG: Renamed functions keys: {list(renamed_functions.keys())}")
+                    logger.info(f"DEBUG: Renamed functions values: {list(renamed_functions.values())}")
+                if function_address_mapping:
+                    logger.info(f"DEBUG: Address mappings keys: {list(function_address_mapping.keys())}")
+                    for addr, info in function_address_mapping.items():
+                        logger.info(f"DEBUG: Address {addr} -> {info}")
                 
-                # Skip if we've already processed this function
-                function_key = f"{address}_{new_name}"
-                if function_key in processed_functions:
-                    continue
-                processed_functions.add(function_key)
+                # Also check if bridge has the expected attributes
+                if hasattr(self.bridge, 'analysis_state'):
+                    logger.info(f"DEBUG: Bridge analysis_state exists with keys: {list(self.bridge.analysis_state.keys())}")
+                else:
+                    logger.warning("DEBUG: Bridge has no analysis_state attribute!")
+                    
+                if hasattr(self.bridge, 'function_address_mapping'):
+                    logger.info(f"DEBUG: Bridge function_address_mapping exists with {len(self.bridge.function_address_mapping)} entries")
+                else:
+                    logger.warning("DEBUG: Bridge has no function_address_mapping attribute!")
                 
-                # Clean up fake address prefix for display
-                display_address = address.replace('name_', '') if address.startswith('name_') else address
+                # Update count with total unique functions - use address mapping as primary source
+                # to avoid duplicates between renamed_functions and function_address_mapping
+                unique_functions = set()
                 
-                # Get summary from bridge first, then fallback to local storage
-                summary_key = f"{address}_{new_name}"
-                summary = (bridge_summaries.get(address, '') or 
-                          bridge_summaries.get(old_name, '') or
-                          bridge_summaries.get(new_name, '') or
-                          self.function_summaries.get(summary_key, "No summary available"))
+                # Add all functions from address mapping (most complete data)
+                for address in function_address_mapping.keys():
+                    unique_functions.add(address)
                 
-                # Insert into tree with summary_key as a hidden column
-                item_id = self.tree.insert('', 'end', values=(display_address, old_name, new_name, summary, summary_key))
-            
-            # Process any remaining functions from renamed_functions that weren't in address mapping
-            for identifier, new_name in renamed_functions.items():
-                # Skip if this function was already processed from address mapping
-                already_processed = False
-                for addr, info in function_address_mapping.items():
-                    if (info.get('new_name') == new_name and 
-                        (addr == identifier or info.get('old_name') == identifier)):
-                        already_processed = True
-                        break
+                # Add any functions from renamed_functions that aren't in address mapping
+                for identifier in renamed_functions.keys():
+                    # Check if this identifier is already covered by address mapping
+                    already_covered = False
+                    for addr, info in function_address_mapping.items():
+                        if (addr == identifier or 
+                            info.get('old_name') == identifier or 
+                            info.get('new_name') == identifier):
+                            already_covered = True
+                            break
+                    
+                    if not already_covered:
+                        unique_functions.add(identifier)
                 
-                if already_processed:
-                    continue
+                total_functions = len(unique_functions)
+                self.count_label.config(text=f"Functions: {total_functions}")
                 
-                # This is a function not in our enhanced mapping - add it with limited info
-                function_key = f"{identifier}_{new_name}"
-                if function_key in processed_functions:
-                    continue
-                processed_functions.add(function_key)
+                # Use the function address mapping as the primary source to avoid duplicates
+                processed_functions = set()
                 
-                is_address = self._looks_like_address(identifier)
-                address = identifier if is_address else "Unknown"
-                old_name = "Unknown" if is_address else identifier
+                # Process functions from the address mapping first (most complete data)
+                for address, info in function_address_mapping.items():
+                    old_name = info.get('old_name', 'Unknown')
+                    new_name = info.get('new_name', 'Unknown')
+                    
+                    # Skip if we've already processed this function
+                    function_key = f"{address}_{new_name}"
+                    if function_key in processed_functions:
+                        continue
+                    processed_functions.add(function_key)
+                    
+                    # Clean up fake address prefix for display
+                    display_address = address.replace('name_', '') if address.startswith('name_') else address
+                    
+                    # Get summary from bridge first, then fallback to local storage
+                    summary_key = f"{address}_{new_name}"
+                    summary = (bridge_summaries.get(address, '') or 
+                              bridge_summaries.get(old_name, '') or
+                              bridge_summaries.get(new_name, '') or
+                              self.function_summaries.get(summary_key, "No summary available"))
+                    
+                    # Insert into tree with summary_key as a hidden column
+                    item_id = self.tree.insert('', 'end', values=(display_address, old_name, new_name, summary, summary_key))
                 
-                summary_key = f"{address}_{new_name}" if address != "Unknown" else f"{old_name}_{new_name}"
-                summary = (bridge_summaries.get(identifier, '') or
-                          self.function_summaries.get(summary_key, "No summary available"))
+                # Process any remaining functions from renamed_functions that weren't in address mapping
+                for identifier, new_name in renamed_functions.items():
+                    # Skip if this function was already processed from address mapping
+                    already_processed = False
+                    for addr, info in function_address_mapping.items():
+                        if (info.get('new_name') == new_name and 
+                            (addr == identifier or info.get('old_name') == identifier)):
+                            already_processed = True
+                            break
+                    
+                    if already_processed:
+                        continue
+                    
+                    # This is a function not in our enhanced mapping - add it with limited info
+                    function_key = f"{identifier}_{new_name}"
+                    if function_key in processed_functions:
+                        continue
+                    processed_functions.add(function_key)
+                    
+                    is_address = self._looks_like_address(identifier)
+                    address = identifier if is_address else "Unknown"
+                    old_name = "Unknown" if is_address else identifier
+                    
+                    summary_key = f"{address}_{new_name}" if address != "Unknown" else f"{old_name}_{new_name}"
+                    summary = (bridge_summaries.get(identifier, '') or
+                              self.function_summaries.get(summary_key, "No summary available"))
+                    
+                    # Insert into tree
+                    item_id = self.tree.insert('', 'end', values=(address, old_name, new_name, summary, summary_key))
                 
-                # Insert into tree
-                item_id = self.tree.insert('', 'end', values=(address, old_name, new_name, summary, summary_key))
-            
-        except Exception as e:
-            # During streaming loads, tree updates can fail due to rapid changes
-            # Log as debug instead of error to reduce noise
-            if "not found" in str(e).lower():
-                logger.debug(f"Tree item not found during function list update: {e}")
-            else:
-                logger.error(f"Error updating function list: {e}")
+            except Exception as e:
+                # During streaming loads, tree updates can fail due to rapid changes
+                # Log as debug instead of error to reduce noise
+                if "not found" in str(e).lower():
+                    logger.debug(f"Tree item not found during function list update: {e}")
+                else:
+                    logger.error(f"Error updating function list: {e}")
     
     def _looks_like_address(self, text: str) -> bool:
         """Check if a string looks like a memory address."""
@@ -2043,7 +2077,11 @@ class RenamedFunctionsPanel:
         """Start auto-refresh of the function list."""
         def refresh():
             try:
-                self._update_function_list()
+                # THREAD SAFETY: Skip refresh during batch operations to prevent race conditions
+                if self.batch_operation_in_progress:
+                    logger.debug("Skipping auto-refresh during batch operation")
+                else:
+                    self._update_function_list()
             except Exception as e:
                 logger.error(f"Error in auto-refresh: {e}")
             
@@ -2062,44 +2100,46 @@ class RenamedFunctionsPanel:
             self.function_summaries[summary_key] = summary
         
         if update_state:
-            # CRITICAL FIX: Update bridge data structures that the UI actually reads from
-            # Update bridge's function_address_mapping
-            if not hasattr(self.bridge, 'function_address_mapping'):
-                self.bridge.function_address_mapping = {}
-            
-            self.bridge.function_address_mapping[address] = {
-                'old_name': old_name, 
-                'new_name': new_name
-            }
-            
-            # Update bridge's function summaries
-            if not hasattr(self.bridge, 'function_summaries'):
-                self.bridge.function_summaries = {}
-            
-            if summary:
-                # Store summary using multiple keys for robust retrieval
-                self.bridge.function_summaries[address] = summary
-                if old_name != "Unknown":
-                    self.bridge.function_summaries[old_name] = summary
-                if new_name != "Unknown":
-                    self.bridge.function_summaries[new_name] = summary
-            
-            # Update bridge's analysis_state for legacy compatibility
-            if not hasattr(self.bridge, 'analysis_state'):
-                self.bridge.analysis_state = {}
-            
-            if 'functions_renamed' not in self.bridge.analysis_state:
-                self.bridge.analysis_state['functions_renamed'] = {}
-            
-            # Store in analysis_state using only address as key to avoid duplicate name entries
-            self.bridge.analysis_state['functions_renamed'][address] = new_name
-            
-            # Debug logging to verify data storage
-            import logging
-            logger = logging.getLogger("ollama-ghidra-bridge.ui")
-            logger.info(f"Added function to session: {address} | {old_name} -> {new_name}")
-            logger.info(f"Bridge function_address_mapping now has {len(self.bridge.function_address_mapping)} entries")
-            logger.info(f"Bridge analysis_state functions_renamed now has {len(self.bridge.analysis_state['functions_renamed'])} entries")
+            # THREAD SAFETY: Acquire lock before writing to shared dictionaries
+            with self.dict_lock:
+                # CRITICAL FIX: Update bridge data structures that the UI actually reads from
+                # Update bridge's function_address_mapping
+                if not hasattr(self.bridge, 'function_address_mapping'):
+                    self.bridge.function_address_mapping = {}
+                
+                self.bridge.function_address_mapping[address] = {
+                    'old_name': old_name, 
+                    'new_name': new_name
+                }
+                
+                # Update bridge's function summaries
+                if not hasattr(self.bridge, 'function_summaries'):
+                    self.bridge.function_summaries = {}
+                
+                if summary:
+                    # Store summary using multiple keys for robust retrieval
+                    self.bridge.function_summaries[address] = summary
+                    if old_name != "Unknown":
+                        self.bridge.function_summaries[old_name] = summary
+                    if new_name != "Unknown":
+                        self.bridge.function_summaries[new_name] = summary
+                
+                # Update bridge's analysis_state for legacy compatibility
+                if not hasattr(self.bridge, 'analysis_state'):
+                    self.bridge.analysis_state = {}
+                
+                if 'functions_renamed' not in self.bridge.analysis_state:
+                    self.bridge.analysis_state['functions_renamed'] = {}
+                
+                # Store in analysis_state using only address as key to avoid duplicate name entries
+                self.bridge.analysis_state['functions_renamed'][address] = new_name
+                
+                # Debug logging to verify data storage
+                import logging
+                logger = logging.getLogger("ollama-ghidra-bridge.ui")
+                logger.info(f"Added function to session: {address} | {old_name} -> {new_name}")
+                logger.info(f"Bridge function_address_mapping now has {len(self.bridge.function_address_mapping)} entries")
+                logger.info(f"Bridge analysis_state functions_renamed now has {len(self.bridge.analysis_state['functions_renamed'])} entries")
         
         # Only refresh the UI list if not in streaming mode
         # During streaming, we'll do batch updates to prevent UI freezing
@@ -2364,10 +2404,100 @@ class QueryInputPanel:
             relief='flat', borderwidth=1, padx=6, pady=6
         )
         self.query_entry.grid(row=1, column=0, columnspan=2, sticky='ew', pady=(0, 10))
+
+        # Task mode controls (simple UI toggle + mode selection)
+        taskmode_frame = ttk.Frame(self.frame)
+        taskmode_frame.grid(row=2, column=0, columnspan=2, sticky='ew', pady=(0, 6))
+        taskmode_frame.grid_columnconfigure(3, weight=1)
+
+        self.task_mode_enabled_var = tk.BooleanVar(value=False)
+        self.task_mode_var = tk.StringVar(value="purpose_id")
+
+        # Initialize from Bridge if available (sticky across restarts)
+        try:
+            if hasattr(self.bridge, 'get_task_mode_state'):
+                st = self.bridge.get_task_mode_state()
+                if isinstance(st, dict):
+                    self.task_mode_enabled_var.set(bool(st.get('enabled', False)))
+                    mode = str(st.get('mode', 'off') or 'off')
+                    if mode in ("purpose_id", "malware", "vuln", "custom"):
+                        self.task_mode_var.set(mode)
+                    else:
+                        self.task_mode_var.set('purpose_id')
+        except Exception:
+            pass
+
+        self.task_mode_check = ttk.Checkbutton(
+            taskmode_frame,
+            text="Task Mode",
+            variable=self.task_mode_enabled_var,
+            command=self._on_task_mode_change
+        )
+        self.task_mode_check.grid(row=0, column=0, sticky='w')
+
+        ttk.Label(taskmode_frame, text="Mode:").grid(row=0, column=1, sticky='w', padx=(10, 4))
+        self.task_mode_combo = ttk.Combobox(
+            taskmode_frame,
+            textvariable=self.task_mode_var,
+            values=["purpose_id", "malware", "vuln", "custom"],
+            state="readonly",
+            width=12
+        )
+        self.task_mode_combo.grid(row=0, column=2, sticky='w')
+        self.task_mode_combo.bind('<<ComboboxSelected>>', lambda e: self._on_task_mode_change())
+
+        self.task_mode_status = ttk.Label(taskmode_frame, text="Off", foreground='gray')
+        self.task_mode_status.grid(row=0, column=3, sticky='e')
+
+        # Apply initial status
+        self._on_task_mode_change()
+        
+        # Grep Layer Frame (NEW) - for hybrid search functionality
+        # Note: This should be placed in the grid right after taskmode_frame (row 2, after row 2 which is taskmode)
+        grep_container = ttk.Frame(self.frame)
+        grep_container.grid(row=3, column=0, columnspan=2, sticky='ew', pady=(0, 6))
+        
+        grep_frame = ttk.LabelFrame(grep_container, text="Function Search", padding=(10, 5))
+        grep_frame.pack(fill='x', expand=True)
+        
+        # Initialize grep layer variable
+        self.grep_enabled_var = tk.BooleanVar(value=False)
+        
+        # Try to restore previous grep state from bridge
+        try:
+            if hasattr(self.bridge, 'grep_layer_enabled'):
+                self.grep_enabled_var.set(bool(self.bridge.grep_layer_enabled))
+        except Exception:
+            pass
+        
+        self.grep_check = ttk.Checkbutton(
+            grep_frame,
+            text="Enable Hybrid Search",
+            variable=self.grep_enabled_var,
+            command=self._on_grep_layer_change
+        )
+        self.grep_check.grid(row=0, column=0, sticky='w')
+        
+        self.grep_status = ttk.Label(grep_frame, text="Off - No summaries loaded", foreground='gray')
+        self.grep_status.grid(row=0, column=1, padx=(10, 0), sticky='w')
+        
+        # Info label
+        info_label = ttk.Label(
+            grep_frame, 
+            text="Combines keyword search + semantic embeddings for finding functions",
+            font=('TkDefaultFont', 8),
+            foreground='gray'
+        )
+        info_label.grid(row=1, column=0, columnspan=2, sticky='w', pady=(2, 0))
+        
+        grep_frame.columnconfigure(1, weight=1)
+        
+        # Call initial update
+        self._on_grep_layer_change()
         
         # Buttons
         button_frame = ttk.Frame(self.frame)
-        button_frame.grid(row=2, column=0, columnspan=2, sticky='ew')
+        button_frame.grid(row=4, column=0, columnspan=2, sticky='ew')
         
         self.send_button = ttk.Button(button_frame, text="Send Query", command=self._send_query)
         self.send_button.pack(side='left', padx=(0, 5))
@@ -2386,11 +2516,11 @@ class QueryInputPanel:
         
         # Status and progress
         self.status_label = ttk.Label(self.frame, text="Ready", foreground='green')
-        self.status_label.grid(row=3, column=0, columnspan=2, pady=(10, 0))
+        self.status_label.grid(row=5, column=0, columnspan=2, pady=(10, 0))
         
         # Progress bar and stop button frame
         progress_frame = ttk.Frame(self.frame)
-        progress_frame.grid(row=4, column=0, columnspan=2, sticky='ew', pady=(5, 0))
+        progress_frame.grid(row=6, column=0, columnspan=2, sticky='ew', pady=(5, 0))
         progress_frame.grid_columnconfigure(0, weight=1)
         
         self.progress = ttk.Progressbar(progress_frame, mode='indeterminate')
@@ -2427,6 +2557,15 @@ class QueryInputPanel:
                 monitor_thread.start()
                 
                 # Process query with full AI agent workflow
+                # Apply task mode (if enabled) to bridge before processing
+                try:
+                    if hasattr(self.bridge, 'set_task_mode'):
+                        enabled = bool(self.task_mode_enabled_var.get())
+                        mode = str(self.task_mode_var.get())
+                        self.bridge.set_task_mode(enabled=enabled, mode=mode)
+                except Exception:
+                    pass
+
                 result = self.bridge.process_query(query)
                 
                 # Add result to response panel
@@ -2444,6 +2583,77 @@ class QueryInputPanel:
                 self._set_query_running(False)
         
         threading.Thread(target=worker, daemon=True).start()
+
+    def _on_task_mode_change(self):
+        """Update task mode status label and push state to bridge."""
+        enabled = bool(self.task_mode_enabled_var.get())
+        mode = str(self.task_mode_var.get())
+        if enabled:
+            self.task_mode_status.config(text=f"On ({mode})", foreground='green')
+        else:
+            self.task_mode_status.config(text="Off", foreground='gray')
+
+        try:
+            if hasattr(self.bridge, 'set_task_mode'):
+                self.bridge.set_task_mode(enabled=enabled, mode=mode)
+        except Exception:
+            pass
+    
+    def _on_grep_layer_change(self):
+        """Handle grep layer checkbox changes."""
+        enabled = bool(self.grep_enabled_var.get())
+        
+        # Check if we have function summaries available
+        has_summaries = False
+        summary_count = 0
+        
+        try:
+            if hasattr(self, 'renamed_functions_panel') and self.renamed_functions_panel:
+                # RenamedFunctionsPanel stores entries in a Treeview; count rows.
+                if hasattr(self.renamed_functions_panel, 'tree'):
+                    summary_count = len(self.renamed_functions_panel.tree.get_children())
+                    has_summaries = summary_count > 0
+                elif hasattr(self.renamed_functions_panel, 'function_summaries'):
+                    summary_count = len(self.renamed_functions_panel.function_summaries)
+                    has_summaries = summary_count > 0
+        except Exception:
+            pass
+        
+        # Update status label
+        if enabled:
+            if has_summaries:
+                self.grep_status.config(
+                    text=f"On - {summary_count} function(s) indexed", 
+                    foreground='green'
+                )
+            else:
+                self.grep_status.config(
+                    text="On - Waiting for summaries", 
+                    foreground='orange'
+                )
+        else:
+            if has_summaries:
+                self.grep_status.config(
+                    text=f"Off - {summary_count} function(s) available",
+                    foreground='gray'
+                )
+            else:
+                self.grep_status.config(
+                    text="Off - No summaries loaded",
+                    foreground='gray'
+                )
+        
+        # Update bridge
+        try:
+            if hasattr(self.bridge, 'set_grep_layer_enabled'):
+                self.bridge.set_grep_layer_enabled(enabled)
+            else:
+                # Set attribute directly if method doesn't exist yet
+                self.bridge.grep_layer_enabled = enabled
+            
+            logger.info(f"Grep layer {'enabled' if enabled else 'disabled'} ({summary_count} functions available)")
+        except Exception as e:
+            logger.error(f"Error setting grep layer: {e}")
     
     def _clear_query(self):
         """Clear the query input."""
@@ -2524,6 +2734,14 @@ class ToolButtonsPanel:
         self.renamed_functions_panel = renamed_functions_panel
         self.tool_running = False
         self.should_stop = False  # Flag to control stopping
+        
+        # DECOMPILATION CACHE: LRU cache for frequently accessed functions
+        from functools import lru_cache
+        self._decompilation_cache = {}  # address -> decompiled_code
+        self._cache_max_size = 1000  # Cache up to 1000 functions
+        self._cache_hits = 0  # Track cache performance
+        self._cache_misses = 0
+        
         self._setup_widgets()
     
     def _setup_widgets(self):
@@ -2615,11 +2833,20 @@ class ToolButtonsPanel:
                 self.workflow_diagram.set_current_stage(None)
                 
             except Exception as e:
-                error_msg = f"Error running {tool_name}: {e}"
+                error_msg = f"Error running {display_name}: {e}"
                 logger.error(error_msg)
                 self.response_panel.add_response("Error", error_msg)
                 self.workflow_diagram.set_current_stage(None)
             finally:
+                # THREAD SAFETY: Clear batch operation flag to re-enable auto-refresh
+                if self.renamed_functions_panel:
+                    self.renamed_functions_panel.batch_operation_in_progress = False
+                    # Trigger a final refresh to show all completed functions
+                    try:
+                        self.renamed_functions_panel._update_function_list()
+                    except Exception as refresh_error:
+                        logger.warning(f"Error refreshing function list after batch operation: {refresh_error}")
+                
                 self._set_tool_running(False)
         
         threading.Thread(target=worker, daemon=True).start()
@@ -2834,7 +3061,7 @@ class ToolButtonsPanel:
                     # Extract function name from the result
                     function_name = None
                     if isinstance(current_function_result, str):
-                        # Parse function name from result like "Function: FUN_00409bd4 at 00409bd4"
+                        # Parse function name from result like "Function: FUN_401000 at 401000"
                         import re
                         match = re.search(r'Function:\s*(\w+)', current_function_result)
                         if match:
@@ -3055,6 +3282,374 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
         
         threading.Thread(target=worker, daemon=True).start()
     
+    def _process_single_function_for_bulk_rename(self, function_index, full_function_string, enumeration_mode, total_functions):
+        """
+        Process a single function for bulk rename (designed for parallel execution).
+        
+        Returns:
+            dict with keys: 'success', 'result_type', 'function_data', 'error_msg'
+        """
+        import re
+        import time
+        
+        result = {
+            'success': False,
+            'result_type': None,  # 'renamed', 'enumerated', 'skipped', 'failed'
+            'function_data': None,
+            'error_msg': None,
+            'function_name': None,
+            'address': None,
+            'suggested_name': None,
+            'summary': None
+        }
+        
+        try:
+            # Extract function name and address
+            if " at " in full_function_string:
+                function_name = full_function_string.split(" at ")[0].strip()
+                address = full_function_string.split(" at ")[1].strip()
+            else:
+                function_name = full_function_string.strip()
+                name_address_match = re.search(r'([0-9a-fA-F]{8,})', function_name)
+                address = name_address_match.group(1) if name_address_match else function_name
+            
+            result['function_name'] = function_name
+            result['address'] = address
+            
+            # Determine if should process based on enumeration mode
+            is_generic_name = function_name.startswith(('FUN_', 'sub_', 'loc_', 'unk_', 'j_'))
+            should_process = False
+            
+            if enumeration_mode == "rename_only":
+                should_process = is_generic_name
+                if not should_process:
+                    result['result_type'] = 'skipped'
+                    result['success'] = True
+                    return result
+            elif enumeration_mode == "full_enumeration":
+                should_process = True
+            elif enumeration_mode == "smart_enumeration":
+                # ENHANCED SMART ENUMERATION FILTERS
+                important_keywords = ['main', 'init', 'crypto', 'encrypt', 'decrypt', 'hash', 'key', 'auth', 'login', 'password', 'network', 'socket', 'http', 'tcp', 'udp', 'file', 'read', 'write', 'open', 'close', 'connect', 'send', 'recv', 'malloc', 'free', 'alloc', 'buffer', 'parse', 'validate', 'check', 'verify', 'process', 'handle', 'execute', 'run', 'start', 'stop', 'config', 'setting', 'registry', 'service', 'thread', 'mutex', 'lock', 'sync', 'async']
+                
+                function_lower = function_name.lower()
+                
+                # FILTER 1: Skip thunk functions and wrappers
+                skip_patterns = ['thunk', 'stub', 'wrapper']
+                if any(pattern in function_lower for pattern in skip_patterns):
+                    result['result_type'] = 'skipped'
+                    result['success'] = True
+                    return result
+                
+                # FILTER 2: Skip import/export wrappers
+                if function_name.startswith('__imp_') or function_name.startswith('__exp_') or function_name.startswith('_imp_'):
+                    result['result_type'] = 'skipped'
+                    result['success'] = True
+                    return result
+                
+                # FILTER 3: Skip simple accessor functions (get/set/is with short names)
+                accessor_prefixes = ['get', 'set', 'is']
+                if any(function_lower.startswith(prefix) for prefix in accessor_prefixes) and len(function_name) < 15:
+                    result['result_type'] = 'skipped'
+                    result['success'] = True
+                    return result
+                
+                # FILTER 4: Skip C runtime library and standard library functions
+                crt_patterns = ['_crt_', '__cxx_', '__std_', '__cxa_', '__gnu_', '__gxx_', '_runtim']
+                if any(pattern in function_lower for pattern in crt_patterns):
+                    result['result_type'] = 'skipped'
+                    result['success'] = True
+                    return result
+                
+                # FILTER 5: Check if function should be processed based on importance
+                if is_generic_name:
+                    # Always process generic names (FUN_*, sub_*, etc.)
+                    should_process = True
+                else:
+                    # For renamed functions, check if they contain important keywords
+                    should_process = any(keyword in function_lower for keyword in important_keywords)
+                
+                if not should_process:
+                    result['result_type'] = 'skipped'
+                    result['success'] = True
+                    return result
+            
+            # STEP 1: Decompile function
+            try:
+                function_decompile_result = self.bridge.ghidra.decompile_function(name=function_name)
+                if isinstance(function_decompile_result, str) and function_decompile_result.lower().startswith("error:"):
+                    result['error_msg'] = f"Failed to decompile: {function_decompile_result}"
+                    result['result_type'] = 'failed'
+                    return result
+                
+                # SMART ENUMERATION FILTER: Check decompiled code complexity
+                # Skip trivial functions with very small code bodies
+                if enumeration_mode == "smart_enumeration" and function_decompile_result:
+                    # Count actual code lines (excluding braces, empty lines, simple returns)
+                    code_lines = [line.strip() for line in function_decompile_result.split('\n') 
+                                  if line.strip() and 
+                                  not line.strip() in ['{', '}', ''] and
+                                  not line.strip().startswith('//')]
+                    
+                    # Functions with <= 3 lines of actual code are typically trivial
+                    # Examples: simple getters, setters, wrappers, return statements
+                    if len(code_lines) <= 3:
+                        result['result_type'] = 'skipped'
+                        result['success'] = True
+                        return result
+                    
+                    # Additional check: very short total code (< 50 chars) is likely trivial
+                    if len(function_decompile_result.strip()) < 50:
+                        result['result_type'] = 'skipped'
+                        result['success'] = True
+                        return result
+                        
+            except Exception as e:
+                result['error_msg'] = f"Error decompiling: {e}"
+                result['result_type'] = 'failed'
+                return result
+            
+            # STEP 1.5: Gather context
+            try:
+                context = self._gather_function_context(function_name, address, max_chars=8000)
+            except Exception as e:
+                context = {'callers_code': [], 'callees_code': [], 'truncated': False}
+            
+            # STEP 2: AI Analysis (with retry logic for LLM failures)
+            max_retries = 2
+            retry_count = 0
+            ai_response = None
+            
+            while retry_count <= max_retries and not ai_response:
+                contextual_info = self._format_context_for_prompt(context)
+                analysis_query = f"""Analyze the function '{function_name}' and provide a highly descriptive rename suggestion.
+
+## TARGET FUNCTION: {function_name}
+```c
+{function_decompile_result}
+```
+{contextual_info}
+
+Based on the target function's code AND the contextual information about its callers and callees above, analyze the function thoroughly and provide a highly descriptive rename suggestion.
+
+You MUST follow this EXACT format in your response:
+
+**Function Analysis:**
+[Provide comprehensive analysis: What does this function do? Identify specific operations like memory allocation, string manipulation, network operations, file I/O, cryptographic operations, data validation, etc. Examine parameters, return values, called functions, and code patterns. Look for domain-specific functionality.]
+
+**Behavior Summary:**
+[Write a precise 1-4 sentence summary describing the function's primary behavior, data flow, and purpose in the program architecture]
+
+**Suggested Name:** [descriptiveSpecificFunctionName]
+**Rationale:** [Explain in detail why this name accurately captures the function's specific purpose and distinguishes it from other functions]
+
+ENHANCED NAMING REQUIREMENTS:
+- Be HIGHLY SPECIFIC about the operation (e.g., "parseHttpHeaders" not "parseData", "validateEmailFormat" not "validateInput")
+- Include data type/domain context (e.g., "processNetworkPacket", "decryptUserCredentials", "compressImageBuffer")
+- Use action verbs that describe the EXACT operation: parse, validate, encrypt, decrypt, compress, decompress, serialize, deserialize, allocate, deallocate, transform, convert, extract, insert, remove, update, calculate, generate, verify, authenticate, etc.
+- Use precise nouns: Buffer, Packet, Header, Payload, Token, Credential, Session, Connection, Registry, Configuration, Certificate, Signature, etc.
+- Be domain-aware: If it's crypto operations use crypto terms, if it's network use network terms, if it's file system use file terms
+- Use camelCase format
+- Length: 2-5 words (prioritize clarity over brevity)
+- Avoid generic terms: process, handle, manage, data, function, method, routine, etc.
+
+EXAMPLES of good names:
+- parseJsonConfiguration (not parseData)
+- validateTlsCertificate (not validateInput)  
+- encryptAesPayload (not encryptData)
+- allocateMemoryBuffer (not allocateMemory)
+- extractRegistryKeys (not extractData)
+- calculateChecksumValue (not calculateValue)
+
+CRITICAL: You MUST include all four sections with the exact headers shown above. Focus on making the suggested name as specific and descriptive as possible."""
+                
+                ai_response = self.bridge.ollama.generate(prompt=analysis_query)
+                
+                if ai_response and ai_response.strip():
+                    function_summary = ai_response.strip()
+                    result['summary'] = function_summary
+                    
+                    # Extract suggested name
+                    suggested_name = None
+                    lines = ai_response.split('\n')
+                    
+                    for line in lines:
+                        line = line.strip()
+                        if 'Suggested Name:' in line:
+                            name_part = line.split('Suggested Name:', 1)[1].strip()
+                            name_part = name_part.replace('**', '').replace('*', '').strip()
+                            name_match = re.search(r'\b([a-z][a-zA-Z0-9_]*[a-zA-Z0-9]|[a-z][a-zA-Z0-9]*)\b', name_part)
+                            if name_match:
+                                suggested_name = name_match.group(1)
+                                break
+                    
+                    # Fallback extraction
+                    if not suggested_name:
+                        camel_case_matches = re.findall(r'\b([a-z][a-zA-Z0-9]*[A-Z][a-zA-Z0-9]*)\b', ai_response)
+                        excluded_words = {'function', 'name', 'suggest', 'analysis', 'code', 'parameter', 'value', 'data', 'result', 'return', 'call', 'method', 'functionName', 'newFunctionName', 'descriptiveFunctionName'}
+                        
+                        for match in camel_case_matches:
+                            if (len(match) > 4 and 
+                                match.lower() not in excluded_words and 
+                                not match.startswith('FUN_') and
+                                not any(word in match.lower() for word in ['function', 'name', 'example'])):
+                                suggested_name = match
+                                break
+                        
+                        if not suggested_name:
+                            simple_matches = re.findall(r'\b([a-z][a-zA-Z0-9_]*)\b', ai_response)
+                            for match in simple_matches:
+                                if (len(match) > 6 and 
+                                    match.lower() not in excluded_words and 
+                                    not match.startswith('FUN_') and
+                                    not any(word in match.lower() for word in ['function', 'name', 'example', 'analysis', 'response'])):
+                                    suggested_name = match
+                                    break
+                    
+                    # Handle enumeration vs renaming
+                    # FIXED: Process renamed functions correctly in enumeration modes
+                    if enumeration_mode in ["full_enumeration", "smart_enumeration"]:
+                        # In enumeration modes, always process functions (generic or renamed)
+                        if not is_generic_name:
+                            # Already renamed function - just enumerate it
+                            suggested_name = function_name
+                            result['result_type'] = 'enumerated'
+                        elif suggested_name and is_generic_name:
+                            # Generic function with AI-suggested name - rename it
+                            try:
+                                rename_result = self.bridge.execute_command("rename_function", {"old_name": function_name, "new_name": suggested_name})
+                                if isinstance(rename_result, str) and rename_result.lower().startswith("error:"):
+                                    result['error_msg'] = f"Rename failed: {rename_result}"
+                                    result['result_type'] = 'failed'
+                                    return result
+                                result['result_type'] = 'renamed'
+                            except Exception as e:
+                                result['error_msg'] = f"Exception during rename: {e}"
+                                result['result_type'] = 'failed'
+                                return result
+                        else:
+                            # Generic function but AI didn't provide a name - still enumerate it
+                            suggested_name = function_name
+                            result['result_type'] = 'enumerated'
+                    else:
+                        # rename_only mode - only process generic names
+                        if suggested_name and is_generic_name:
+                            # Perform rename
+                            try:
+                                rename_result = self.bridge.execute_command("rename_function", {"old_name": function_name, "new_name": suggested_name})
+                                if isinstance(rename_result, str) and rename_result.lower().startswith("error:"):
+                                    result['error_msg'] = f"Rename failed: {rename_result}"
+                                    result['result_type'] = 'failed'
+                                    return result
+                                result['result_type'] = 'renamed'
+                            except Exception as e:
+                                result['error_msg'] = f"Exception during rename: {e}"
+                                result['result_type'] = 'failed'
+                                return result
+                        else:
+                            result['error_msg'] = "Could not extract function name from AI response"
+                            result['result_type'] = 'failed'
+                            return result
+                    
+                    result['suggested_name'] = suggested_name
+                    
+                    # ============ ENHANCED METADATA EXTRACTION ============
+                    # Extract structured metadata from decompiled code
+                    try:
+                        from src.function_metadata_extractor import FunctionMetadataExtractor
+                        metadata_extractor = FunctionMetadataExtractor()
+                        
+                        # Extract all metadata
+                        metadata = metadata_extractor.extract_all_metadata(
+                            function_decompile_result, 
+                            suggested_name if suggested_name else function_name,
+                            context
+                        )
+                        
+                        # Parse AI response into structured sections
+                        structured_summary = self._parse_ai_response_sections(ai_response)
+                        
+                    except Exception as meta_error:
+                        logger.warning(f"Metadata extraction failed: {meta_error}")
+                        # Fallback to minimal metadata
+                        metadata = {
+                            'metrics': {},
+                            'categories': {},
+                            'signature': {},
+                            'patterns': [],
+                            'security': {},
+                            'data_flow': {},
+                            'dependencies': {},
+                        }
+                        structured_summary = {'raw': function_summary}
+                    
+                    # Build enhanced function data
+                    result['function_data'] = {
+                        # Core Identity
+                        'address': address,
+                        'old_name': function_name,
+                        'new_name': suggested_name if suggested_name else function_name,
+                        
+                        # Enhanced Metadata (NEW)
+                        'metrics': metadata.get('metrics', {}),
+                        'categories': metadata.get('categories', {}),
+                        'signature': metadata.get('signature', {}),
+                        'patterns': metadata.get('patterns', []),
+                        'security': metadata.get('security', {}),
+                        'data_flow': metadata.get('data_flow', {}),
+                        'dependencies': metadata.get('dependencies', {}),
+                        
+                        # Structured Summary (NEW)
+                        'summary': structured_summary,
+                        
+                        # Legacy raw summary (for backward compat)
+                        'raw_summary': function_summary,
+                        
+                        'timestamp': time.time()
+                    }
+                    
+                    # Store in bridge (both formats for compatibility)
+                    # THREAD SAFETY: Acquire lock before writing to shared dictionaries
+                    if self.renamed_functions_panel and hasattr(self.renamed_functions_panel, 'dict_lock'):
+                        with self.renamed_functions_panel.dict_lock:
+                            if function_summary and hasattr(self.bridge, 'function_summaries'):
+                                self.bridge.function_summaries[address] = function_summary
+                            
+                            # Store enhanced metadata in address mapping
+                            if hasattr(self.bridge, 'function_address_mapping'):
+                                self.bridge.function_address_mapping[address] = result['function_data']
+                    else:
+                        # Fallback if no lock available (shouldn't happen)
+                        if function_summary and hasattr(self.bridge, 'function_summaries'):
+                            self.bridge.function_summaries[address] = function_summary
+                        
+                        if hasattr(self.bridge, 'function_address_mapping'):
+                            self.bridge.function_address_mapping[address] = result['function_data']
+                    
+                    result['success'] = True
+                    return result
+                else:
+                    # Empty response - retry if attempts remaining
+                    retry_count += 1
+                    if retry_count <= max_retries:
+                        logger.warning(f"Empty AI response for {function_name}, retry {retry_count}/{max_retries}")
+                        import time
+                        time.sleep(1)  # Brief delay before retry
+                    else:
+                        result['error_msg'] = "AI returned empty response after retries"
+                        result['result_type'] = 'failed'
+                        return result
+            
+            # If we get here, all retries failed
+            result['error_msg'] = "All retry attempts failed"
+            result['result_type'] = 'failed'
+            return result
+                
+        except Exception as e:
+            result['error_msg'] = f"Exception processing function: {e}"
+            result['result_type'] = 'failed'
+            return result
+    
     def _create_batch_rag_vectors(self, processed_functions_data):
         """Create RAG vectors in batches for processed functions with visual progress feedback."""
         if not processed_functions_data:
@@ -3119,6 +3714,66 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
         
         return rag_success_count
     
+    def _decompile_function_cached(self, address: str) -> str:
+        """
+        Decompile a function by address with LRU caching.
+        
+        This dramatically reduces redundant Ghidra calls when the same function
+        is referenced as a caller/callee by multiple functions.
+        
+        Args:
+            address: Function address to decompile
+            
+        Returns:
+            Decompiled code string or error message
+        """
+        # Normalize address format (remove 0x prefix if present, convert to uppercase)
+        normalized_addr = address.replace('0x', '').replace('0X', '').upper()
+        
+        # Check cache first
+        if normalized_addr in self._decompilation_cache:
+            self._cache_hits += 1
+            return self._decompilation_cache[normalized_addr]
+        
+        # Cache miss - fetch from Ghidra
+        self._cache_misses += 1
+        try:
+            code = self.bridge.ghidra.decompile_function_by_address(address=str(address))
+            
+            # Only cache successful results (not errors)
+            if code and not code.lower().startswith("error"):
+                # Implement LRU eviction if cache is full
+                if len(self._decompilation_cache) >= self._cache_max_size:
+                    # Remove oldest entry (simple FIFO for now, true LRU would need OrderedDict)
+                    oldest_key = next(iter(self._decompilation_cache))
+                    del self._decompilation_cache[oldest_key]
+                
+                self._decompilation_cache[normalized_addr] = code
+            
+            return code
+        except Exception as e:
+            return f"Error: {e}"
+    
+    def _get_cache_stats(self) -> dict:
+        """Get decompilation cache statistics."""
+        total_requests = self._cache_hits + self._cache_misses
+        hit_rate = (self._cache_hits / total_requests * 100) if total_requests > 0 else 0
+        
+        return {
+            'hits': self._cache_hits,
+            'misses': self._cache_misses,
+            'total_requests': total_requests,
+            'hit_rate_pct': hit_rate,
+            'cache_size': len(self._decompilation_cache),
+            'max_size': self._cache_max_size
+        }
+    
+    def _clear_decompilation_cache(self):
+        """Clear the decompilation cache and reset statistics."""
+        self._decompilation_cache.clear()
+        self._cache_hits = 0
+        self._cache_misses = 0
+    
     def _gather_function_context(self, function_name: str, address: str, max_chars: int = 8000) -> dict:
         """
         Gather contextual information about a function (callers and callees).
@@ -3166,7 +3821,8 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                     # Try to get function names for caller addresses
                     for caller_addr in context['callers'][:3]:  # Only decompile top 3 callers
                         try:
-                            caller_code = self.bridge.ghidra.decompile_function_by_address(address=str(caller_addr))
+                            # USE CACHE: This dramatically reduces redundant Ghidra calls
+                            caller_code = self._decompile_function_cached(address=str(caller_addr))
                             if caller_code and not caller_code.lower().startswith("error"):
                                 # Truncate individual caller code to 1000 chars
                                 if len(caller_code) > 1000:
@@ -3205,7 +3861,8 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                     # Try to get function names for callee addresses
                     for callee_addr in context['callees'][:3]:  # Only decompile top 3 callees
                         try:
-                            callee_code = self.bridge.ghidra.decompile_function_by_address(address=str(callee_addr))
+                            # USE CACHE: This dramatically reduces redundant Ghidra calls
+                            callee_code = self._decompile_function_cached(address=str(callee_addr))
                             if callee_code and not callee_code.lower().startswith("error"):
                                 # Truncate individual callee code to 1000 chars
                                 if len(callee_code) > 1000:
@@ -3269,6 +3926,77 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
             sections.append("\n*Note: Context truncated to fit character limits. Showing most relevant callers/callees.*")
         
         return "\n".join(sections)
+    
+    def _parse_ai_response_sections(self, ai_response: str) -> Dict[str, Any]:
+        """
+        Parse AI response into structured sections.
+        
+        Args:
+            ai_response: Raw AI response text
+        
+        Returns:
+            Dict with parsed sections
+        """
+        sections = {
+            'function_analysis': '',
+            'behavior_summary': '',
+            'suggested_name': '',
+            'rationale': '',
+            'key_operations': [],
+            'raw': ai_response  # Keep raw for backward compat
+        }
+        
+        try:
+            # Split by common section markers
+            lines = ai_response.split('\n')
+            current_section = None
+            current_content = []
+            
+            for line in lines:
+                line_stripped = line.strip()
+                
+                # Detect section headers
+                if 'Function Analysis:' in line or '**Function Analysis:**' in line:
+                    if current_section and current_content:
+                        sections[current_section] = '\n'.join(current_content).strip()
+                    current_section = 'function_analysis'
+                    current_content = []
+                elif 'Behavior Summary:' in line or '**Behavior Summary:**' in line:
+                    if current_section and current_content:
+                        sections[current_section] = '\n'.join(current_content).strip()
+                    current_section = 'behavior_summary'
+                    current_content = []
+                elif 'Suggested Name:' in line or '**Suggested Name:**' in line:
+                    if current_section and current_content:
+                        sections[current_section] = '\n'.join(current_content).strip()
+                    current_section = 'suggested_name'
+                    # Extract name directly
+                    name_part = line.split(':', 1)[1] if ':' in line else ''
+                    sections['suggested_name'] = name_part.strip().replace('**', '').replace('*', '')
+                    current_section = None
+                elif 'Rationale:' in line or '**Rationale:**' in line:
+                    if current_section and current_content:
+                        sections[current_section] = '\n'.join(current_content).strip()
+                    current_section = 'rationale'
+                    current_content = []
+                elif current_section:
+                    # Add to current section
+                    # Extract bullet points for key operations
+                    if current_section == 'function_analysis':
+                        if line_stripped.startswith(('- ', '* ', '• ', '1.', '2.', '3.')):
+                            clean_line = line_stripped.lstrip('-*•0123456789. ')
+                            if clean_line:
+                                sections['key_operations'].append(clean_line)
+                    current_content.append(line)
+            
+            # Save final section
+            if current_section and current_content:
+                sections[current_section] = '\n'.join(current_content).strip()
+            
+        except Exception as e:
+            logger.warning(f"Error parsing AI response sections: {e}")
+        
+        return sections
 
     def _run_bulk_rename_workflow(self, display_name: str, enumeration_mode: str = "rename_only"):
         """Optimized bulk function analysis workflow with deferred RAG vector creation and batch processing."""
@@ -3277,6 +4005,10 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
             try:
                 self._set_tool_running(True, display_name)
                 self.workflow_diagram.set_current_stage('planning')
+                
+                # THREAD SAFETY: Set flag to prevent auto-refresh during batch operations
+                if self.renamed_functions_panel:
+                    self.renamed_functions_panel.batch_operation_in_progress = True
                 
                 # Performance tracking
                 start_time = time.time()
@@ -3293,7 +4025,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                     
                     all_functions = []
                     offset = 0
-                    limit = 200 # Process 200 functions per page
+                    limit = 200 # Request 200 functions per page
                     
                     while True:
                         batch_result = self.bridge.ghidra.list_functions(offset=offset, limit=limit)
@@ -3304,26 +4036,54 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                         
                         # Parse the batch
                         if isinstance(batch_result, list):
-                            batch = batch_result
+                            raw_batch = batch_result
                         elif isinstance(batch_result, str):
-                            batch = [f.strip() for f in batch_result.split('\n') if f.strip()]
+                            raw_batch = [f.strip() for f in batch_result.split('\n') if f.strip()]
                         else:
                             self.response_panel.add_response("Error", f"Unexpected function list format: {type(batch_result)}")
                             break
                         
+                        # IMPROVED: Check for pagination metadata BEFORE filtering
+                        # Look for [Next: offset=X] to determine if more data exists
+                        has_more_data = any('[Next:' in line for line in raw_batch if isinstance(line, str))
+                        
+                        # Extract total count from metadata if available
+                        # Format: [Total: 3000] [Showing: 1-200] [Next: offset=200, limit=200]
+                        total_count = None
+                        for line in raw_batch:
+                            if isinstance(line, str) and '[Total:' in line:
+                                import re
+                                match = re.search(r'\[Total:\s*(\d+)\]', line)
+                                if match:
+                                    total_count = int(match.group(1))
+                                    break
+                        
+                        # Filter out pagination metadata lines
+                        # Remove lines like [Total: 655], [Showing: 1-20], [Next: offset=20]
+                        batch = [f for f in raw_batch if f and not f.startswith('[') and not f.lower().startswith("error")]
+                        
                         if not batch:
+                            # No more functions - we've reached the end
                             break
                             
                         # Add to our collection
                         all_functions.extend(batch)
                         
-                        # Update progress
-                        self.response_panel.add_response("Step 1 Progress", f"Found {len(all_functions)} functions so far...")
+                        # Update progress with better information
+                        if total_count:
+                            progress_msg = f"Found {len(all_functions)} of {total_count} functions..."
+                        else:
+                            progress_msg = f"Found {len(all_functions)} functions so far..."
+                        self.response_panel.add_response("Step 1 Progress", progress_msg)
                         
-                        # Check if we've reached the end
-                        if len(batch) < limit:
+                        # IMPROVED: Use server metadata to determine if more data exists
+                        # This is more reliable than checking batch size
+                        if not has_more_data:
+                            # Server indicates no more data available
                             break
-                            
+                        
+                        # Move to next page - use the requested limit, not actual batch size
+                        # The server handles the offset correctly even if some items were filtered
                         offset += limit
                     
                     functions = all_functions
@@ -3338,325 +4098,110 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                     total_functions = len(valid_functions)
                     self.response_panel.add_response("Step 1 Complete", f"Found {total_functions} functions to process")
                     
-                    # Step 2: Process each function using the EXACT same workflow as "Rename Current Function"
+                    # PARALLEL PROCESSING CONFIGURATION
+                    max_workers = 5  # Process 5 functions concurrently (configurable)
+                    self.response_panel.add_response("⚡ Parallel Processing", f"Using {max_workers} concurrent workers for faster processing")
+                    
+                    # Step 2: Process functions in parallel using ThreadPoolExecutor
+                    from concurrent.futures import ThreadPoolExecutor, as_completed
+                    
                     successful_renames = 0
                     failed_renames = 0
                     skipped_functions = 0
                     enumerated_functions = 0  # Functions analyzed but not renamed (for enumeration)
+                    completed_count = 0  # Track completion for progress updates
                     
-                    for i, full_function_string in enumerate(valid_functions, 1):
-                        try:
+                    # PARALLEL PROCESSING: Submit all functions to thread pool
+                    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                        # Submit all functions for processing
+                        future_to_function = {
+                            executor.submit(self._process_single_function_for_bulk_rename, i, full_function_string, enumeration_mode, total_functions): (i, full_function_string)
+                            for i, full_function_string in enumerate(valid_functions, 1)
+                        }
+                        
+                        # Process results as they complete
+                        for future in as_completed(future_to_function):
                             # Check for stop signal
                             if self.should_stop:
-                                self.response_panel.add_response("Cancelled", f"🛑 Operation cancelled by user at function {i}/{total_functions}")
-                                # IMPORTANT: Still create RAG vectors for processed functions before stopping
+                                self.response_panel.add_response("Cancelled", f"🛑 Operation cancelled by user")
+                                # Cancel remaining futures
+                                for remaining_future in future_to_function:
+                                    remaining_future.cancel()
+                                # Still create RAG vectors for completed functions
                                 if processed_functions_data:
                                     self.response_panel.add_response("🔄 RAG Processing", f"Creating RAG vectors for {len(processed_functions_data)} processed functions before stopping...")
-                                    self.response_panel.add_response("📊 Vector Status", "Please wait while RAG vectors are being created. This ensures no function analysis is lost.")
                                     rag_count = self._create_batch_rag_vectors(processed_functions_data)
                                     self.response_panel.add_response("✅ Stop Complete", f"Operation stopped. Successfully created {rag_count} RAG vectors from processed functions.")
                                 break
+                            
+                            i, full_function_string = future_to_function[future]
+                            completed_count += 1
+                            
+                            try:
+                                result = future.result()
                                 
-                            # Extract just the function name from the full string (e.g., "FUN_00401000" from "FUN_00401000 at 00401000")
-                            if " at " in full_function_string:
-                                function_name = full_function_string.split(" at ")[0].strip()
-                                # Extract address early for consistent use
-                                address = full_function_string.split(" at ")[1].strip()
-                            else:
-                                function_name = full_function_string.strip()
-                                # Try to extract address from function name if possible
-                                import re
-                                name_address_match = re.search(r'([0-9a-fA-F]{8,})', function_name)
-                                address = name_address_match.group(1) if name_address_match else function_name
-                            
-                            # Update progress
-                            progress_msg = f"Processing function {i}/{total_functions}: {function_name}"
-                            self.response_panel.add_response("Progress", progress_msg)
-                            
-                            # Determine processing logic based on enumeration mode
-                            should_process = False
-                            is_generic_name = function_name.startswith(('FUN_', 'sub_', 'loc_', 'unk_', 'j_'))
-                            
-                            if enumeration_mode == "rename_only":
-                                # Standard mode: Only process functions with generic names
-                                should_process = is_generic_name
-                                if not should_process:
-                                    self.response_panel.add_response("Skipped", f"Function {function_name} appears to already have a descriptive name")
+                                # Handle result based on type
+                                if result['result_type'] == 'skipped':
                                     skipped_functions += 1
-                                    continue
-                            
-                            elif enumeration_mode == "full_enumeration":
-                                # Full enumeration: Process ALL functions
-                                should_process = True
-                                
-                            elif enumeration_mode == "smart_enumeration":
-                                # Smart enumeration: Process generic functions + important descriptive functions
-                                important_keywords = ['main', 'init', 'crypto', 'encrypt', 'decrypt', 'hash', 'key', 'auth', 'login', 'password', 'network', 'socket', 'http', 'tcp', 'udp', 'file', 'read', 'write', 'open', 'close', 'connect', 'send', 'recv', 'malloc', 'free', 'alloc', 'buffer', 'parse', 'validate', 'check', 'verify', 'process', 'handle', 'execute', 'run', 'start', 'stop', 'config', 'setting', 'registry', 'service', 'thread', 'mutex', 'lock', 'sync', 'async']
-                                
-                                if is_generic_name:
-                                    should_process = True
-                                else:
-                                    # Check if descriptive function contains important keywords
-                                    function_lower = function_name.lower()
-                                    should_process = any(keyword in function_lower for keyword in important_keywords)
+                                    if completed_count % 10 == 0:  # Batch UI updates
+                                        self.response_panel.add_response("Progress", f"Processed {completed_count}/{total_functions} functions")
                                     
-                                if not should_process:
-                                    self.response_panel.add_response("Skipped", f"Function {function_name} doesn't match smart enumeration criteria")
-                                    skipped_functions += 1
-                                    continue
-                            
-                            # Log the processing decision
-                            if enumeration_mode != "rename_only":
-                                mode_desc = {"full_enumeration": "Full Enumeration", "smart_enumeration": "Smart Enumeration"}.get(enumeration_mode, enumeration_mode)
-                                self.response_panel.add_response("Processing", f"{mode_desc}: Analyzing {function_name} {'(generic name)' if is_generic_name else '(descriptive name)'}")
-                            
-                            # STEP 1 (per function): Get function info using decompile_function
-                            try:
-                                # Use decompile_function to get the function code (FIX: add name parameter)
-                                function_decompile_result = self.bridge.ghidra.decompile_function(name=function_name)
-                                if isinstance(function_decompile_result, str) and function_decompile_result.lower().startswith("error:"):
-                                    self.response_panel.add_response("Error", f"Failed to decompile function {function_name}: {function_decompile_result}")
+                                elif result['result_type'] == 'failed':
                                     failed_renames += 1
-                                    continue
-                                
-                                self.response_panel.add_response(f"Step 1 (Function {i}): Decompiled {function_name}", f"Successfully retrieved function code (length: {len(function_decompile_result)} chars)")
-                                
-                            except Exception as e:
-                                self.response_panel.add_response("Error", f"Error decompiling function {function_name}: {e}")
-                                failed_renames += 1
-                                continue
-                            
-                            # STEP 1.5 (NEW): Gather contextual information (callers and callees)
-                            try:
-                                self.response_panel.add_response(f"🔍 Gathering context for {function_name}", "Fetching callers and callees...")
-                                context = self._gather_function_context(function_name, address, max_chars=8000)
-                                
-                                if context['callers_code'] or context['callees_code']:
-                                    callers_count = len(context['callers_code'])
-                                    callees_count = len(context['callees_code'])
-                                    truncated_msg = " (truncated)" if context['truncated'] else ""
-                                    self.response_panel.add_response(f"✅ Context gathered", 
-                                        f"Found {callers_count} caller(s) and {callees_count} callee(s){truncated_msg} " +
-                                        f"({context['total_chars']} chars total)")
-                                else:
-                                    self.response_panel.add_response(f"ℹ️ Context", "No callers/callees found (function may be entry point or leaf)")
-                            except Exception as e:
-                                # If context gathering fails, continue without it
-                                context = {'callers_code': [], 'callees_code': [], 'truncated': False}
-                                self.response_panel.add_response("Warning", f"Could not gather context: {e}")
-                            
-                            # STEP 2 (per function): Enhanced AI analysis with contextual information
-                            try:
-                                self.workflow_diagram.set_current_stage('analysis')
-                                
-                                # Format contextual information
-                                contextual_info = self._format_context_for_prompt(context)
-                                
-                                # Create enhanced analysis query with contextual information
-                                analysis_query = f"""Analyze the function '{function_name}' and provide a highly descriptive rename suggestion.
-
-## TARGET FUNCTION: {function_name}
-```c
-{function_decompile_result}
-```
-{contextual_info}
-
-Based on the target function's code AND the contextual information about its callers and callees above, analyze the function thoroughly and provide a highly descriptive rename suggestion.
-
-You MUST follow this EXACT format in your response:
-
-**Function Analysis:**
-[Provide comprehensive analysis: What does this function do? Identify specific operations like memory allocation, string manipulation, network operations, file I/O, cryptographic operations, data validation, etc. Examine parameters, return values, called functions, and code patterns. Look for domain-specific functionality.]
-
-**Behavior Summary:**
-[Write a precise 1-4 sentence summary describing the function's primary behavior, data flow, and purpose in the program architecture]
-
-**Suggested Name:** [descriptiveSpecificFunctionName]
-**Rationale:** [Explain in detail why this name accurately captures the function's specific purpose and distinguishes it from other functions]
-
-ENHANCED NAMING REQUIREMENTS:
-- Be HIGHLY SPECIFIC about the operation (e.g., "parseHttpHeaders" not "parseData", "validateEmailFormat" not "validateInput")
-- Include data type/domain context (e.g., "processNetworkPacket", "decryptUserCredentials", "compressImageBuffer")
-- Use action verbs that describe the EXACT operation: parse, validate, encrypt, decrypt, compress, decompress, serialize, deserialize, allocate, deallocate, transform, convert, extract, insert, remove, update, calculate, generate, verify, authenticate, etc.
-- Use precise nouns: Buffer, Packet, Header, Payload, Token, Credential, Session, Connection, Registry, Configuration, Certificate, Signature, etc.
-- Be domain-aware: If it's crypto operations use crypto terms, if it's network use network terms, if it's file system use file terms
-- Use camelCase format
-- Length: 2-5 words (prioritize clarity over brevity)
-- Avoid generic terms: process, handle, manage, data, function, method, routine, etc.
-
-EXAMPLES of good names:
-- parseJsonConfiguration (not parseData)
-- validateTlsCertificate (not validateInput)  
-- encryptAesPayload (not encryptData)
-- allocateMemoryBuffer (not allocateMemory)
-- extractRegistryKeys (not extractData)
-- calculateChecksumValue (not calculateValue)
-
-CRITICAL: You MUST include all four sections with the exact headers shown above. Focus on making the suggested name as specific and descriptive as possible."""
-                                
-                                # Use direct ollama.generate instead of bridge.process_query to avoid infinite loops
-                                # This follows the same fix pattern as the "Analyze Current Function" tool
-                                ai_response = self.bridge.ollama.generate(prompt=analysis_query)
-                                
-                                if ai_response and ai_response.strip():
-                                    self.response_panel.add_response(f"Step 2 (Function {i}): AI Analysis for {function_name}", ai_response)
+                                    self.response_panel.add_response("Error", f"❌ {result['function_name']}: {result['error_msg']}")
                                     
-                                    # USE THE ENTIRE AI RESPONSE as the behavior summary (EXACT same as original)
-                                    function_summary = ai_response.strip()
+                                elif result['result_type'] == 'renamed':
+                                    successful_renames += 1
+                                    self.response_panel.add_response("Success", f"✅ {result['function_name']} → {result['suggested_name']}")
                                     
-                                    # Extract suggested name from AI response (EXACT same logic as original)
-                                    suggested_name = None
-                                    lines = ai_response.split('\n')
+                                    # Add function data
+                                    if result['function_data']:
+                                        processed_functions_data.append(result['function_data'])
                                     
-                                    # Look for the "Suggested Name:" pattern (EXACT same as original)
-                                    for line in lines:
-                                        line = line.strip()
-                                        if 'Suggested Name:' in line:
-                                            name_part = line.split('Suggested Name:', 1)[1].strip()
-                                            name_part = name_part.replace('**', '').replace('*', '').strip()
-                                            import re
-                                            name_match = re.search(r'\b([a-z][a-zA-Z0-9_]*[a-zA-Z0-9]|[a-z][a-zA-Z0-9]*)\b', name_part)
-                                            if name_match:
-                                                suggested_name = name_match.group(1)
-                                                break
-                                    
-                                    # Fallback extraction logic (EXACT same as original)
-                                    if not suggested_name:
-                                        import re
-                                        camel_case_matches = re.findall(r'\b([a-z][a-zA-Z0-9]*[A-Z][a-zA-Z0-9]*)\b', ai_response)
-                                        excluded_words = {'function', 'name', 'suggest', 'analysis', 'code', 'parameter', 'value', 'data', 'result', 'return', 'call', 'method', 'functionName', 'newFunctionName', 'descriptiveFunctionName'}
-                                        
-                                        for match in camel_case_matches:
-                                            if (len(match) > 4 and 
-                                                match.lower() not in excluded_words and 
-                                                not match.startswith('FUN_') and
-                                                not any(word in match.lower() for word in ['function', 'name', 'example'])):
-                                                suggested_name = match
-                                                break
-                                        
-                                        # If still no match, look for any reasonable identifier (EXACT same as original)
-                                        if not suggested_name:
-                                            simple_matches = re.findall(r'\b([a-z][a-zA-Z0-9_]*)\b', ai_response)
-                                            for match in simple_matches:
-                                                if (len(match) > 6 and 
-                                                    match.lower() not in excluded_words and 
-                                                    not match.startswith('FUN_') and
-                                                    not any(word in match.lower() for word in ['function', 'name', 'example', 'analysis', 'response'])):
-                                                    suggested_name = match
-                                                    break
-                                    
-                                    # Handle enumeration vs renaming logic
-                                    if not is_generic_name and enumeration_mode in ["full_enumeration", "smart_enumeration"]:
-                                        # This is a descriptive function being analyzed for enumeration only
-                                        suggested_name = function_name  # Keep the existing name
-                                        self.response_panel.add_response(f"Step 3a (Function {i}): Enumeration Mode", f"Function {function_name} already has descriptive name - analyzing for enumeration only")
-                                        rename_result = f"Enumeration: Kept existing name '{function_name}'"
-                                        
-                                    elif suggested_name and is_generic_name:
-                                        self.response_panel.add_response(f"Step 3a (Function {i}): Extracted Name for {function_name}", suggested_name)
-                                        
-                                        # STEP 3 (per function): Perform the rename using bridge.execute_command (EXACT same as original)
-                                        self.workflow_diagram.set_current_stage('execution')
+                                    # Add to UI panel
+                                    if self.renamed_functions_panel and result['function_data']:
                                         try:
-                                            rename_result = self.bridge.execute_command("rename_function", {"old_name": function_name, "new_name": suggested_name})
-                                        except Exception as e:
-                                            self.response_panel.add_response("Rename Error", f"Exception renaming {function_name}: {e}")
-                                            failed_renames += 1
-                                            continue
-                                    
-                                    else:
-                                        # No suggested name could be extracted, but we still want to add to enumeration in enumeration modes
-                                        if enumeration_mode in ["full_enumeration", "smart_enumeration"]:
-                                            suggested_name = function_name  # Keep existing name
-                                            rename_result = f"Enumeration: Kept existing name '{function_name}' (no AI suggestion)"
-                                            self.response_panel.add_response(f"Step 3a (Function {i}): Enumeration Fallback", f"No rename suggestion for {function_name}, keeping existing name for enumeration")
-                                        else:
-                                            self.response_panel.add_response("AI Error", f"Could not extract function name from AI response for {function_name}")
-                                            failed_renames += 1
-                                            continue
-                                    
-                                    # Address was already extracted earlier - no need to re-extract
-                                    # (address variable is already available from the early extraction)
-                                    
-                                    # STORE the function summary for batch processing
-                                    if function_summary and hasattr(self.bridge, 'function_summaries'):
-                                        self.bridge.function_summaries[address] = function_summary
-                                        
-                                        # DEFERRED: Store function data for batch RAG creation at the end
-                                        processed_functions_data.append({
-                                            'address': address,
-                                            'old_name': function_name,
-                                            'new_name': suggested_name if suggested_name else function_name,
-                                            'summary': function_summary,
-                                            'timestamp': time.time()
-                                        })
-                                    
-                                    # Process results based on operation type
-                                    if isinstance(rename_result, str) and rename_result.lower().startswith("error:"):
-                                        self.response_panel.add_response("Rename Error", f"Failed to rename {function_name} to {suggested_name}: {rename_result}")
-                                        failed_renames += 1
-                                    elif isinstance(rename_result, str) and rename_result.startswith("Enumeration:"):
-                                        # This was an enumeration (analysis only) operation
-                                        self.response_panel.add_response(f"Step 3b (Function {i}): Enumeration Result", f"Successfully analyzed '{function_name}' for enumeration")
-                                        self.response_panel.add_response("Success", f"✅ Function {i}/{total_functions}: {function_name} (analyzed)")
-                                        enumerated_functions += 1
-                                    else:
-                                        self.response_panel.add_response(f"Step 3b (Function {i}): Rename Result", f"Successfully renamed '{function_name}' to '{suggested_name}'")
-                                        self.response_panel.add_response("Success", f"✅ Function {i}/{total_functions}: {function_name} → {suggested_name}")
-                                        successful_renames += 1
-                                                
-                                    # CRITICAL: Always add to UI renamed functions panel (for all processed functions)
-                                    # This should happen regardless of rename vs enumeration mode
-                                    if self.renamed_functions_panel:
-                                        try:
-                                            # Ensure we have a summary (use a default if needed)
-                                            display_summary = function_summary if function_summary else "Function processed but no summary available"
-                                            
-                                            # Ensure we have a suggested name (fallback to original name)
-                                            display_new_name = suggested_name if suggested_name else function_name
-                                            
                                             self.renamed_functions_panel.add_function_with_summary(
-                                                address=address, 
-                                                old_name=function_name, 
-                                                new_name=display_new_name, 
-                                                summary=display_summary
+                                                address=result['address'],
+                                                old_name=result['function_name'],
+                                                new_name=result['suggested_name'],
+                                                summary=result['summary']
                                             )
-                                            
-                                            # Debug log for verification
-                                            self.response_panel.add_response("UI Update", f"✅ Added {function_name} to Renamed Functions panel (Address: {address})")
-                                                
                                         except Exception as e:
-                                            self.response_panel.add_response("UI Warning", f"Could not update renamed functions panel for {function_name}: {e}")
-                                    else:
-                                        self.response_panel.add_response("UI Warning", f"Renamed functions panel not available for {function_name}")
-                                        
-                                else:
-                                    self.response_panel.add_response("AI Error", f"AI agent returned empty response for {function_name}")
-                                    failed_renames += 1
+                                            logger.warning(f"Could not update UI panel: {e}")
                                     
-                                    # Even for failed AI responses in enumeration mode, try to add with basic info
-                                    if enumeration_mode in ["full_enumeration", "smart_enumeration"] and self.renamed_functions_panel:
+                                elif result['result_type'] == 'enumerated':
+                                    enumerated_functions += 1
+                                    self.response_panel.add_response("Success", f"✅ {result['function_name']} (analyzed)")
+                                    
+                                    # Add function data
+                                    if result['function_data']:
+                                        processed_functions_data.append(result['function_data'])
+                                    
+                                    # Add to UI panel
+                                    if self.renamed_functions_panel and result['function_data']:
                                         try:
-                                            # address is always available since we extract it early
                                             self.renamed_functions_panel.add_function_with_summary(
-                                                address=address, 
-                                                old_name=function_name, 
-                                                new_name=function_name, 
-                                                summary="Function enumerated but AI analysis failed"
+                                                address=result['address'],
+                                                old_name=result['function_name'],
+                                                new_name=result['suggested_name'],
+                                                summary=result['summary']
                                             )
-                                            self.response_panel.add_response("UI Update", f"⚠️ Added {function_name} to panel despite AI failure (Address: {address})")
                                         except Exception as e:
-                                            self.response_panel.add_response("UI Warning", f"Could not add failed function {function_name}: {e}")
+                                            logger.warning(f"Could not update UI panel: {e}")
+                                
+                                # Periodic progress updates (every 10 functions)
+                                if completed_count % 10 == 0:
+                                    progress_pct = (completed_count / total_functions) * 100
+                                    self.response_panel.add_response("Progress", 
+                                        f"⚡ Parallel Progress: {completed_count}/{total_functions} ({progress_pct:.1f}%) | " +
+                                        f"✅ {successful_renames + enumerated_functions} processed | " +
+                                        f"❌ {failed_renames} failed | " +
+                                        f"⏭️ {skipped_functions} skipped")
                                 
                             except Exception as e:
-                                self.response_panel.add_response("AI Error", f"Exception during AI analysis for {function_name}: {e}")
                                 failed_renames += 1
-                                continue
-                            
-                        except Exception as e:
-                            self.response_panel.add_response("Process Error", f"Exception processing {function_name}: {e}")
-                            failed_renames += 1
-                            continue
+                                self.response_panel.add_response("Process Error", f"Exception processing function: {e}")
                     
                     # BATCH RAG VECTOR CREATION (Performance Optimization)
                     self.workflow_diagram.set_current_stage('analysis')
@@ -3669,8 +4214,105 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                     total_time = time.time() - start_time
                     avg_time_per_function = total_time / max(1, (successful_renames + enumerated_functions))
                     
+                    # SKIP REASON SUMMARY
+                    if skipped_functions > 0:
+                        skip_reason_msg = "\n📊 **Functions Skipped Breakdown:**\n"
+                        if enumeration_mode == "smart_enumeration":
+                            skip_reason_msg += "Smart Enumeration filters applied:\n"
+                            skip_reason_msg += "• Thunk/stub/wrapper functions\n"
+                            skip_reason_msg += "• Import/export wrappers (__imp_, __exp_)\n"
+                            skip_reason_msg += "• Simple getters/setters (< 15 chars)\n"
+                            skip_reason_msg += "• C runtime library functions\n"
+                            skip_reason_msg += "• Trivial code (≤ 3 lines)\n"
+                            skip_reason_msg += "• Non-security-relevant renamed functions\n"
+                            skip_reason_msg += f"\n💡 **Tip:** Use 'Enumerate All Functions' to process ALL {total_functions} functions without filtering."
+                        elif enumeration_mode == "rename_only":
+                            skip_reason_msg += "Rename-only mode: Only generic function names (FUN_*, sub_*) were processed.\n"
+                            skip_reason_msg += f"💡 **Tip:** {skipped_functions} functions were already renamed and were skipped."
+                        self.response_panel.add_response("⏭️ Skip Summary", skip_reason_msg)
+                    
+                    # AUTOMATIC SESSION SAVE
+                    session_save_success = False
+                    try:
+                        self.response_panel.add_response("💾 Auto-Save", "Automatically saving session...")
+                        
+                        # Define operation type for session description
+                        operation_type = {"rename_only": "BULK RENAME", "full_enumeration": "FULL ENUMERATION", "smart_enumeration": "SMART ENUMERATION"}.get(enumeration_mode, "BULK RENAME")
+                        
+                        # Initialize session manager if not exists
+                        if not hasattr(self, 'session_manager'):
+                            from src.enhanced_session_manager import EnhancedSessionManager
+                            self.session_manager = EnhancedSessionManager()
+                        
+                        # Collect analyzed functions from the renamed functions panel
+                        analyzed_functions = {}
+                        if self.renamed_functions_panel and hasattr(self.renamed_functions_panel, 'functions'):
+                            for addr, func_data in self.renamed_functions_panel.functions.items():
+                                analyzed_functions[addr] = {
+                                    'address': addr,
+                                    'old_name': func_data.get('old_name', 'Unknown'),
+                                    'new_name': func_data.get('new_name', 'Unknown'),
+                                    'behavior_summary': func_data.get('summary', ''),
+                                    'timestamp': func_data.get('timestamp', time.time())
+                                }
+                        
+                        # Collect RAG vectors
+                        rag_vectors = []
+                        if hasattr(self.bridge, 'cag_manager') and self.bridge.cag_manager:
+                            if hasattr(self.bridge.cag_manager, 'vector_store') and self.bridge.cag_manager.vector_store:
+                                if hasattr(self.bridge.cag_manager.vector_store, 'documents'):
+                                    rag_vectors = self.bridge.cag_manager.vector_store.documents or []
+                        
+                        # Save session with auto-generated name
+                        auto_session_name = f"BulkRename_{enumeration_mode}_{int(time.time())}"
+                        
+                        # Always create a new session for bulk operations (don't reuse old sessions)
+                        # This ensures clean state and proper data persistence
+                        self.session_manager.create_session(
+                            session_name=auto_session_name,
+                            binary_path=getattr(self.bridge, 'current_binary_path', 'Unknown'),
+                            description=f"Auto-saved after {operation_type} operation"
+                        )
+                        
+                        # Save the session data
+                        session_save_success = self.session_manager.save_current_session(
+                            analyzed_functions=analyzed_functions,
+                            rag_vectors=rag_vectors,
+                            performance_stats={
+                                'total_functions': total_functions,
+                                'successful_renames': successful_renames,
+                                'enumerated_functions': enumerated_functions,
+                                'failed_renames': failed_renames,
+                                'skipped_functions': skipped_functions,
+                                'total_time': total_time,
+                                'avg_time_per_function': avg_time_per_function,
+                                'rag_vectors_count': len(processed_functions_data),
+                                'enumeration_mode': enumeration_mode,
+                                'save_timestamp': time.time()
+                            }
+                        )
+                        
+                        if session_save_success:
+                            self.response_panel.add_response("✅ Auto-Save Complete", 
+                                f"Session automatically saved as '{auto_session_name}'\n" +
+                                f"• {len(analyzed_functions)} analyzed functions\n" +
+                                f"• {len(rag_vectors)} RAG vectors")
+                        else:
+                            self.response_panel.add_response("⚠️ Auto-Save Warning", 
+                                "Session save attempted but may have failed. Check logs for details.")
+                            
+                    except Exception as save_error:
+                        self.response_panel.add_response("⚠️ Auto-Save Error", 
+                            f"Could not automatically save session: {save_error}\n" +
+                            "You can manually save via File > Save Session")
+                        logger.error(f"Auto-save error: {save_error}")
+                        import traceback
+                        logger.error(traceback.format_exc())
+                    
+                    # Get cache statistics
+                    cache_stats = self._get_cache_stats()
+                    
                     # Final summary with performance metrics
-                    operation_type = {"rename_only": "BULK RENAME", "full_enumeration": "FULL ENUMERATION", "smart_enumeration": "SMART ENUMERATION"}.get(enumeration_mode, "BULK RENAME")
                     summary_msg = f"""
 🎉 {operation_type} OPERATION COMPLETE 🎉
 
@@ -3685,13 +4327,24 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
 • Total processing time: {total_time:.1f} seconds
 • Average time per function: {avg_time_per_function:.2f} seconds
 • RAG vectors created: {len(processed_functions_data)}
+• Parallel workers: {max_workers}
+
+💾 Decompilation Cache Stats:
+• Cache hits: {cache_stats['hits']} ({cache_stats['hit_rate_pct']:.1f}% hit rate)
+• Cache misses: {cache_stats['misses']}
+• Total requests: {cache_stats['total_requests']}
+• Ghidra calls saved: {cache_stats['hits']}
 
 🎯 Mode: {enumeration_mode.replace('_', ' ').title()}
+💾 Session Auto-Saved: {'✅ Yes' if session_save_success else '⚠️ Failed (save manually)'}
 
 All processed functions have been added to the 'Analyzed Functions' tab with behavior summaries.
 Check the tab to see detailed analysis results and manage function information.
 """
                     self.response_panel.add_response("🏁 Final Summary", summary_msg)
+                    
+                    # Clear cache after operation completes
+                    self._clear_decompilation_cache()
                     
                 except Exception as e:
                     error_msg = f"Error during bulk rename: {e}"
@@ -3741,7 +4394,7 @@ Check the tab to see detailed analysis results and manage function information.
                     # Extract function name from the result
                     function_name = None
                     if isinstance(current_function_result, str):
-                        # Parse function name from result like "Function: FUN_00409bd4 at 00409bd4"
+                        # Parse function name from result like "Function: FUN_401000 at 401000"
                         import re
                         match = re.search(r'Function:\s*(\w+)', current_function_result)
                         if match:
@@ -4328,6 +4981,12 @@ class OGhidraUI:
     def __init__(self, bridge: Bridge, config: BridgeConfig):
         self.bridge = bridge
         self.config = config
+
+        # Allow Bridge to access UI state (e.g., analyzed functions tree) for prompt enrichment.
+        try:
+            setattr(self.bridge, '_ui_instance', self)
+        except Exception:
+            pass
         
         # Use ttkbootstrap Window for modern dark theme with rounded corners
         self.root = tb.Window(
@@ -4364,6 +5023,9 @@ class OGhidraUI:
              # Legacy google support (will be mapped to external effectively but kept distinct in config if needed)
             config_src = self.config.google
             provider_display = "Google (Legacy)"
+        elif provider == 'custom_api':
+            config_src = self.config.custom_api
+            provider_display = "Custom API"
         else: # external or specific external provider name
             config_src = self.config.external
             # For external, show the sub-provider type if available
@@ -4374,10 +5036,16 @@ class OGhidraUI:
         timeout = getattr(config_src, 'timeout', 'N/A')
         request_delay = getattr(config_src, 'request_delay', 0.0)
         model = getattr(config_src, 'model', 'unknown')
+        embedding_model = getattr(config_src, 'embedding_model', 'unknown')
         
+        # Build startup message with more details
         startup_msg = (
+            f"═══════════════════════════════════════════════════════════\n"
             f"LLM Provider: {provider_display}\n"
-            f"Config: model={model}, timeout={timeout}s, delay={request_delay}s\n"
+            f"Chat Model: {model}\n"
+            f"Embedding Model: {embedding_model}\n"
+            f"Timeout: {timeout}s | Request Delay: {request_delay}s\n"
+            f"═══════════════════════════════════════════════════════════\n"
             f"Ready for queries."
         )
         self.response_panel.add_response("System", startup_msg)
@@ -4427,6 +5095,16 @@ class OGhidraUI:
         self.renamed_functions_panel.get_widget().pack(fill='both', expand=True)
         # Start auto-refresh for renamed functions
         self.renamed_functions_panel._start_auto_refresh()
+
+        # Wire analyzed-functions panel into the query panel so Hybrid Search status can
+        # accurately reflect whether summaries are available.
+        try:
+            if hasattr(self, 'query_panel') and self.query_panel:
+                setattr(self.query_panel, 'renamed_functions_panel', self.renamed_functions_panel)
+                if hasattr(self.query_panel, '_on_grep_layer_change'):
+                    self.query_panel._on_grep_layer_change()
+        except Exception:
+            pass
         
         # Hidden components (memory panel - accessed via Tools > System Info menu)
         hidden_frame = ttk.Frame(parent)  # Don't pack this
@@ -5011,6 +5689,8 @@ class OGhidraUI:
                         # Clear session loading flag and update memory panel
                         if hasattr(self, 'memory_panel'):
                             self.memory_panel.set_session_loading(False)
+
+                        # Task mode and custom notepad are persisted outside saved sessions (data/user_prefs.json).
                         
                         result["loaded"] = True
                         result["session"] = session
@@ -5174,6 +5854,8 @@ class OGhidraUI:
                     # Clear session loading flag
                     if hasattr(self, 'memory_panel'):
                         self.memory_panel.set_session_loading(False)
+
+                    # Task mode and custom notepad are persisted outside saved sessions (data/user_prefs.json).
                     
                     # Close progress dialog and show success
                     if not cancel_requested.is_set():

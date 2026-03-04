@@ -20,6 +20,33 @@ logger = logging.getLogger("ollama-ghidra-bridge.ghidra")
 class GhidraMCPClient:
     """Client for interacting with GhidraMCP API."""
     
+    # Safe limit enforcement for bulk operations to prevent context overflow
+    MAX_SAFE_LIMIT = 20
+    LIMIT_WARNING_TEMPLATE = (
+        "⚠️  {method} limit {limit} exceeds MAX_SAFE_LIMIT={max_safe}. "
+        "Using targeted searches with 'filter' parameter is recommended. Capping to MAX_SAFE_LIMIT."
+    )
+
+    def _coerce_int_param(self, value: Any, *, param_name: str, default: int) -> int:
+        """Best-effort conversion for int params crossing the LLM boundary."""
+        if value is None:
+            return default
+        # bool is a subclass of int; treat it as invalid here
+        if isinstance(value, bool):
+            logger.warning(f"Invalid {param_name}=bool; using default={default}")
+            return default
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str):
+            s = value.strip()
+            try:
+                return int(s)
+            except ValueError:
+                logger.warning(f"Invalid {param_name}='{value}'; using default={default}")
+                return default
+        logger.warning(f"Invalid {param_name} type={type(value).__name__}; using default={default}")
+        return default
+    
     def __init__(self, config: GhidraMCPConfig, ollama_client=None):
         """
         Initialize the GhidraMCP client.
@@ -217,14 +244,14 @@ class GhidraMCPClient:
         """
         return self.safe_get("classes", {"offset": offset, "limit": limit})
     
-    def decompile_function(self, name: str, offset: int = 0, limit: int = 100) -> str:
+    def decompile_function(self, name: str, offset: int = 0, limit: int = 500) -> str:
         """
         Decompile a specific function by name and return the decompiled C code.
         
         Args:
             name: Function name
             offset: Line offset (default: 0)
-            limit: Max lines to return (default: 100)
+            limit: Max lines to return (default: 500)
             
         Returns:
             Decompiled C code
@@ -274,6 +301,14 @@ class GhidraMCPClient:
         Returns:
             List of memory segments
         """
+        offset = self._coerce_int_param(offset, param_name="offset", default=0)
+        limit = self._coerce_int_param(limit, param_name="limit", default=100)
+
+        if limit > self.MAX_SAFE_LIMIT:
+            logger.warning(self.LIMIT_WARNING_TEMPLATE.format(
+                method="list_segments", limit=limit, max_safe=self.MAX_SAFE_LIMIT
+            ))
+            limit = self.MAX_SAFE_LIMIT
         return self.safe_get("segments", {"offset": offset, "limit": limit})
     
     def list_imports(self, offset: int = 0, limit: int = 100) -> List[str]:
@@ -287,6 +322,16 @@ class GhidraMCPClient:
         Returns:
             List of imported symbols
         """
+        offset = self._coerce_int_param(offset, param_name="offset", default=0)
+        limit = self._coerce_int_param(limit, param_name="limit", default=100)
+
+        # Enforce safe limit to prevent context overflow
+        if limit > self.MAX_SAFE_LIMIT:
+            logger.warning(self.LIMIT_WARNING_TEMPLATE.format(
+                method="list_imports", limit=limit, max_safe=self.MAX_SAFE_LIMIT
+            ))
+            limit = self.MAX_SAFE_LIMIT
+        
         return self.safe_get("imports", {"offset": offset, "limit": limit})
     
     def list_exports(self, offset: int = 0, limit: int = 100) -> List[str]:
@@ -300,6 +345,16 @@ class GhidraMCPClient:
         Returns:
             List of exported symbols
         """
+        offset = self._coerce_int_param(offset, param_name="offset", default=0)
+        limit = self._coerce_int_param(limit, param_name="limit", default=100)
+
+        # Enforce safe limit to prevent context overflow
+        if limit > self.MAX_SAFE_LIMIT:
+            logger.warning(self.LIMIT_WARNING_TEMPLATE.format(
+                method="list_exports", limit=limit, max_safe=self.MAX_SAFE_LIMIT
+            ))
+            limit = self.MAX_SAFE_LIMIT
+        
         return self.safe_get("exports", {"offset": offset, "limit": limit})
     
     def list_namespaces(self, offset: int = 0, limit: int = 100) -> List[str]:
@@ -326,6 +381,14 @@ class GhidraMCPClient:
         Returns:
             List of data items
         """
+        offset = self._coerce_int_param(offset, param_name="offset", default=0)
+        limit = self._coerce_int_param(limit, param_name="limit", default=100)
+
+        if limit > self.MAX_SAFE_LIMIT:
+            logger.warning(self.LIMIT_WARNING_TEMPLATE.format(
+                method="list_data_items", limit=limit, max_safe=self.MAX_SAFE_LIMIT
+            ))
+            limit = self.MAX_SAFE_LIMIT
         return self.safe_get("data", {"offset": offset, "limit": limit})
     
     def list_strings(self, offset: int = 0, limit: int = 100, filter: str | None = None) -> List[str]:
@@ -340,6 +403,16 @@ class GhidraMCPClient:
         Returns:
             List of strings (raw API response)
         """
+        offset = self._coerce_int_param(offset, param_name="offset", default=0)
+        limit = self._coerce_int_param(limit, param_name="limit", default=100)
+
+        # Enforce safe limit to prevent context overflow (especially when no filter)
+        if limit > self.MAX_SAFE_LIMIT and not filter:
+            logger.warning(self.LIMIT_WARNING_TEMPLATE.format(
+                method="list_strings", limit=limit, max_safe=self.MAX_SAFE_LIMIT
+            ) + " Consider using 'filter' parameter for targeted searches.")
+            limit = self.MAX_SAFE_LIMIT
+        
         params = {"offset": offset, "limit": limit}
         if filter:
             params["filter"] = filter
@@ -423,20 +496,35 @@ class GhidraMCPClient:
         Returns:
             List of functions with pagination metadata
         """
+        offset = self._coerce_int_param(offset, param_name="offset", default=0)
+        limit = self._coerce_int_param(limit, param_name="limit", default=100)
+
+        # Note: list_functions returns only function names (strings), not full content
+        # so we can safely allow larger limits without context overflow risk
+        # MAX_SAFE_LIMIT is primarily for operations that return large content
+        # Increased limit to support large binaries with 3000+ functions
+        MAX_FUNCTIONS_LIMIT = 10000  # Allow pagination up to 10K functions per request
+        if limit > MAX_FUNCTIONS_LIMIT:
+            logger.warning(f"list_functions limit {limit} exceeds MAX_FUNCTIONS_LIMIT={MAX_FUNCTIONS_LIMIT}. Capping to MAX_FUNCTIONS_LIMIT.")
+            limit = MAX_FUNCTIONS_LIMIT
+        
         return self.safe_get("list_functions", {"offset": offset, "limit": limit})
     
-    def decompile_function_by_address(self, address: str, offset: int = 0, limit: int = 100) -> str:
+    def decompile_function_by_address(self, address: str, offset: int = 0, limit: int = 500) -> str:
         """
-        Decompile a function at the given address.
+        Decompile a function by address and return the decompiled C code.
         
         Args:
-            address: Function address
+            address: Function address (e.g., "0x401000")
             offset: Line offset (default: 0)
-            limit: Max lines to return (default: 100)
+            limit: Max lines to return (default: 500)
             
         Returns:
             Decompiled function
         """
+        offset = self._coerce_int_param(offset, param_name="offset", default=0)
+        limit = self._coerce_int_param(limit, param_name="limit", default=500)
+
         result = self.safe_get("decompile_function", {
             "address": address,
             "offset": offset,
@@ -667,11 +755,11 @@ class GhidraMCPClient:
         """Return canonical hexadecimal address **without** any "0x" prefix, lower-cased.
 
         Accepts typical variants such as:
-        • "0x0047DE88"
-        • "0047de88"
-        • "FUN_0047DE88" / "thunk_FUN_0047DE88"
+        • "0x401000"
+        • "401000"
+        • "FUN_401000" / "thunk_FUN_401000"
 
-        and converts them to "0047de88" which is the address format required by
+        and converts them to "401000" which is the address format required by
         most GhidraMCP endpoints (all lowercase, no prefix).
         """
 
@@ -815,7 +903,7 @@ class GhidraMCPClient:
         data_segments = []
         
         for line in segments_raw:
-            # Parse segment info - Ghidra format: ".text: 100401000 - 10041d5ff"
+            # Parse segment info - Ghidra format: ".text: 401000 - 41d5ff"
             # Look for the pattern after the colon: "start - end" where start/end are hex
             seg_match = re.match(r'^([^:]+):\s*([0-9a-fA-F]+)\s*-\s*([0-9a-fA-F]+)', line)
             if seg_match:

@@ -262,7 +262,7 @@ class ToolCapabilityTester:
 
         # Special handling for format_table_scan_results - provide dummy data
         if 'format_table_scan_results' in tools_to_test:
-             self.test_data['tables'] = [{'table_address': 0x00401000, 'entry_count': 5, 'count': 5, 'entries': []}]
+             self.test_data['tables'] = [{'table_address': 0x401000, 'entry_count': 5, 'count': 5, 'entries': []}]
 
         # Gather function data if not already available
         if not self.available_functions or not self.available_addresses:

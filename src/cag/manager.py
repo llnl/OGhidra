@@ -12,6 +12,7 @@ from typing import Dict, Any, Optional, List, Tuple
 from .knowledge_cache import GhidraKnowledgeCache
 from .init_dirs import ensure_cag_directories
 from .vector_store import create_vector_store_from_docs
+from .malware_patterns import analyze_all_patterns, list_all_patterns
 
 logger = logging.getLogger("ollama-ghidra-bridge.cag.manager")
 
@@ -91,6 +92,20 @@ class CAGManager:
         enhanced_sections = []
         total_tokens = 0
         
+        # PRIORITY: Check if we have pattern detection results to inject
+        # Pattern alerts get highest priority and are prepended
+        if hasattr(self, '_last_pattern_check_result'):
+            pattern_result = self._last_pattern_check_result
+            if pattern_result.get("has_matches", False):
+                pattern_alert = pattern_result.get("summary", "")
+                if pattern_alert:
+                    enhanced_sections.insert(0, pattern_alert)
+                    pattern_tokens = len(pattern_alert) // 4
+                    total_tokens += pattern_tokens
+                    logger.debug(f"Injected malware pattern alert ({pattern_tokens} tokens)")
+            # Clear after use to avoid duplicate injections
+            delattr(self, '_last_pattern_check_result')
+        
         # Add relevant knowledge if enabled, available, and RAG is not disabled
         if self._ollama_available and self.vector_store and self.use_vector_store_for_prompts:
             # Adjust token limit based on the phase
@@ -103,7 +118,46 @@ class CAGManager:
             
             knowledge_token_limit = int(token_limit * phase_token_allocation.get(phase, 0.4))
             
-            knowledge_section = self.vector_store.get_relevant_knowledge(query, knowledge_token_limit)
+            # If the user explicitly enabled Hybrid Search in the UI, prefer hybrid retrieval
+            # (keyword + semantic) for selecting knowledge snippets.
+            use_hybrid = False
+            try:
+                bridge_ref = getattr(self, '_bridge_ref', None)
+                use_hybrid = bool(getattr(bridge_ref, 'grep_layer_enabled', False))
+            except Exception:
+                use_hybrid = False
+
+            knowledge_section = ""
+            if use_hybrid and hasattr(self.vector_store, 'search_hybrid'):
+                try:
+                    results = self.vector_store.search_hybrid(query, top_k=3, use_keywords=True)
+                    if results:
+                        char_limit = knowledge_token_limit * 4
+                        relevant_docs = []
+                        total_chars = 0
+
+                        for result in results:
+                            doc = result.get("document", {})
+                            doc_text = doc.get("text", doc.get("content", ""))
+                            doc_type = doc.get("type", "unknown")
+                            doc_name = doc.get("name", doc.get("title", "Unnamed"))
+                            header = f"## {doc_type.upper()}: {doc_name} (hybrid)\n"
+
+                            if total_chars + len(header) + len(doc_text) > char_limit:
+                                if not relevant_docs:
+                                    truncated_text = doc_text[:max(0, char_limit - len(header) - 3)] + "..."
+                                    relevant_docs.append(f"{header}\n{truncated_text}")
+                                break
+
+                            relevant_docs.append(f"{header}\n{doc_text}")
+                            total_chars += len(header) + len(doc_text)
+
+                        knowledge_section = "\n\n".join(relevant_docs)
+                except Exception as e:
+                    logger.debug(f"Hybrid knowledge retrieval failed, falling back to semantic: {e}")
+
+            if not knowledge_section:
+                knowledge_section = self.vector_store.get_relevant_knowledge(query, knowledge_token_limit)
             if knowledge_section:
                 knowledge_tokens = len(knowledge_section) // 4  # Rough approximation
                 enhanced_sections.append(knowledge_section)
@@ -869,6 +923,159 @@ class CAGManager:
                 analysis_section += f"### Analysis: {analysis['query'][:50]}...\n\n"
                 analysis_section += f"{analysis['result']}\n\n"
             sections.append(analysis_section)
+        
+        # Format pattern detections (if any HIGH severity patterns were found)
+        if self.session and hasattr(self.session.analysis_state, 'pattern_detections'):
+            detections = self.session.analysis_state.pattern_detections
+            if detections:
+                pattern_section = "## Malware Patterns Detected (HIGH Severity):\n\n"
+                for address, patterns in detections.items():
+                    pattern_section += f"- **{address}**: {', '.join(patterns)}\n"
+                sections.append(pattern_section)
             
         return "\n".join(sections)
+    
+    # ========================================================================
+    # MALWARE PATTERN DETECTION
+    # ========================================================================
+    
+    def check_function_for_malware_patterns(
+        self,
+        decompiled_code: str,
+        assembly: Optional[str] = None,
+        function_address: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Check decompiled code against malware pattern library.
+        
+        This method analyzes function code for known malware techniques including:
+        - API evasion (PEB walking, API hashing)
+        - Process injection (remote/local)
+        - Anti-analysis (debugger/VM detection)
+        - Persistence mechanisms
+        - Obfuscation techniques
+        
+        Args:
+            decompiled_code: Decompiled C code from Ghidra
+            assembly: Optional assembly code for additional pattern matching
+            function_address: Optional function address for logging/reporting
+            
+        Returns:
+            Dictionary with:
+            {
+                "has_matches": bool,
+                "matches": [
+                    {
+                        "pattern_name": str,
+                        "severity": "HIGH" | "MEDIUM" | "LOW",
+                        "confidence": float (0.0-1.0),
+                        "intent": str,
+                        "mitre": str,
+                        "indicators_found": list
+                    },
+                    ...
+                ],
+                "summary": str (formatted alert text)
+            }
+        """
+        try:
+            # Run pattern analysis
+            matches = analyze_all_patterns(decompiled_code, assembly)
+            
+            if not matches:
+                return {
+                    "has_matches": False,
+                    "matches": [],
+                    "summary": ""
+                }
+            
+            # Generate formatted summary
+            high_severity = [m for m in matches if m["severity"] == "HIGH"]
+            summary = self._format_pattern_alert(matches, high_severity, function_address)
+            
+            # Log detection
+            if high_severity:
+                logger.warning(f"HIGH severity malware patterns detected in function {function_address or 'unknown'}")
+                for match in high_severity:
+                    logger.warning(f"  - {match['pattern_name']} (confidence: {match['confidence']:.0%})")
+            else:
+                logger.info(f"Malware patterns detected in function {function_address or 'unknown'}")
+            
+            return {
+                "has_matches": True,
+                "matches": matches,
+                "summary": summary
+            }
+            
+        except Exception as e:
+            logger.error(f"Error checking malware patterns: {e}", exc_info=True)
+            return {
+                "has_matches": False,
+                "matches": [],
+                "summary": ""
+            }
+    
+    def _format_pattern_alert(
+        self,
+        all_matches: List[Dict],
+        high_severity: List[Dict],
+        address: Optional[str]
+    ) -> str:
+        """
+        Format pattern matches as alert text for prompt injection.
+        
+        Args:
+            all_matches: All pattern matches
+            high_severity: HIGH severity matches only
+            address: Optional function address
+            
+        Returns:
+            Formatted alert string
+        """
+        lines = ["\n" + "="*70]
+        lines.append("🚨 MALWARE PATTERN DETECTION ALERT")
+        lines.append("="*70 + "\n")
+        
+        if address:
+            lines.append(f"Function Address: {address}\n")
+        
+        # Show HIGH severity patterns first
+        if high_severity:
+            lines.append("🔴 HIGH SEVERITY PATTERNS:\n")
+            for match in high_severity:
+                lines.append(f"⚠️  **{match['pattern_name']}**")
+                lines.append(f"   Confidence: {match['confidence']:.0%}")
+                lines.append(f"   Intent: {match['intent']}")
+                lines.append(f"   MITRE ATT&CK: {match.get('mitre', 'N/A')}")
+                
+                # Show first 3 indicators
+                if match['indicators_found']:
+                    indicators_preview = match['indicators_found'][:3]
+                    lines.append(f"   Evidence: {', '.join(indicators_preview)}")
+                    if len(match['indicators_found']) > 3:
+                        lines.append(f"   ... and {len(match['indicators_found']) - 3} more indicators")
+                lines.append("")
+        
+        # Show MEDIUM/LOW severity patterns
+        medium_low = [m for m in all_matches if m["severity"] != "HIGH"]
+        if medium_low:
+            lines.append(f"ℹ️  Additional {len(medium_low)} pattern(s) detected (MEDIUM/LOW severity):\n")
+            for match in medium_low:
+                lines.append(f"   • {match['pattern_name']} ({match['severity']}, {match['confidence']:.0%} confidence)")
+            lines.append("")
+        
+        lines.append("="*70)
+        lines.append("⚡ RECOMMENDATION: Investigate this function immediately!")
+        lines.append("="*70 + "\n")
+        
+        return "\n".join(lines)
+    
+    def get_available_patterns(self) -> List[Dict[str, str]]:
+        """
+        Get list of all available malware patterns.
+        
+        Returns:
+            List of pattern info dictionaries
+        """
+        return list_all_patterns()
  
