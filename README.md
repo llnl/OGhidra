@@ -1,4 +1,4 @@
-# OGhidra - AI-Powered Reverse Engineering with Ghidra
+# OGhidra3 - AI-Powered Reverse Engineering with Ghidra
 
 ![Python Version](https://img.shields.io/badge/python-3.12%2B-blue?logo=python)
 ![License](https://img.shields.io/badge/license-BSD--3--Clause-green)
@@ -6,6 +6,8 @@
 
 **OGhidra** bridges Large Language Models with Ghidra's reverse engineering platform, enabling AI-driven binary analysis through natural language. Analyze binaries conversationally, automate complex workflows, and maintain complete privacy with local AI models.
 
+
+**THIS IS A YOUTUBE LINK**
 [![OGhidra Introduction](https://img.youtube.com/vi/hBD92FUgR0Y/0.jpg)](https://www.youtube.com/watch?v=hBD92FUgR0Y)
 
 ---
@@ -87,10 +89,11 @@ Theres also a youtube video https://www.youtube.com/watch?v=hBD92FUgR0Y
 
 3. **Enable the plugin**:
    - Open a Ghidra project
-   - **File** → **Configure** → Search "OGhidraMCP"
+   - **File** → **Configure** → **Enable Developer**
    - Check the box to enable
-   - The server will start on `http://localhost:8080`
-
+   - The server will start on `http://localhost:8080/methods`
+     
+   > **YOU NEED TO HAVE CODE BROWSER OPEN**
    > **Note**: The plugin is compatible with Ghidra 11.0.3+ and optimized for Ghidra 12.0.3
 
 ### Pull AI Models
@@ -165,7 +168,7 @@ CONTEXT_BUDGET=100000              # 100K tokens for mid-size models
 
 # Execution settings
 MAX_EXECUTION_STEPS=5              # Steps per planning cycle
-MAX_AGENTIC_CYCLES=2               # How many plan-execute-review loops
+MAX_AGENTIC_CYCLES=3               # How many plan-execute-review loops
 AGENTIC_LOOP_ENABLED=true          # Enable adaptive replanning
 ```
 
@@ -416,7 +419,7 @@ COMPACTION_THRESHOLD=0.75
 We welcome contributions! Areas of interest:
 
 - **New malware patterns** for detection
-- **LLM provider integrations** (AWS Bedrock, Azure OpenAI)
+- **LLM provider integrations** 
 - **UI/UX improvements**
 - **Performance optimizations**
 - **Documentation** and examples
