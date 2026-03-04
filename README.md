@@ -95,6 +95,7 @@ Theres also a youtube video https://www.youtube.com/watch?v=hBD92FUgR0Y
    - The server will start on `http://localhost:8080/methods`
      
    > **YOU NEED TO HAVE CODE BROWSER OPEN**
+
    > **Note**: The plugin is compatible with Ghidra 11.0.3+ and optimized for Ghidra 12.0.3
 
 ### Pull AI Models
