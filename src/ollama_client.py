@@ -169,7 +169,9 @@ class OllamaClient:
         self.timeout = getattr(config, 'timeout', 120)  # Default 120 seconds for LLM requests
         self.logger = logging.getLogger("ollama-client")
         self.model_map = config.model_map
-        self.auth = (getattr(config, "username", "foo"), getattr(config, "password", "bar"))
+        self.auth = (config.username, config.password)
+        
+        # (getattr(config, "username", "foo"), getattr(config, "password", "bar"))
         
         # LLM Logging setup
         self.llm_logging_enabled = getattr(config, 'llm_logging_enabled', False)
