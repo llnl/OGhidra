@@ -31,6 +31,8 @@ class OllamaConfig(BaseModel):
     # Embedding model for vector operations
     embedding_model: str = Field(default="nomic-embed-text", min_length=1, description="Embedding model name cannot be empty", env="OLLAMA_EMBEDDING_MODEL")
     timeout: int = Field(ge=1, le=600, default=120, description="Timeout for requests in seconds (1-600)", env="OLLAMA_TIMEOUT")
+    username: str = Field(default=None, env="OLLAMA_USERNAME")
+    password: str = Field(default=None, env="OLLAMA_PASSWORD")
     
     # Execution loop settings (INNER LOOP - tools per execution phase)
     max_execution_steps: int = Field(

@@ -169,6 +169,9 @@ class OllamaClient:
         self.timeout = getattr(config, 'timeout', 120)  # Default 120 seconds for LLM requests
         self.logger = logging.getLogger("ollama-client")
         self.model_map = config.model_map
+        self.auth = (config.username, config.password)
+        
+        # (getattr(config, "username", "foo"), getattr(config, "password", "bar"))
         
         # LLM Logging setup
         self.llm_logging_enabled = getattr(config, 'llm_logging_enabled', False)
@@ -341,7 +344,7 @@ class OllamaClient:
             
             # Execute request with retries
             def do_post():
-                resp = requests.post(url, json=payload, timeout=self.timeout)
+                resp = requests.post(url, json=payload, timeout=self.timeout, auth=self.auth)
                 resp.raise_for_status()
                 return resp
                 
@@ -445,7 +448,7 @@ class OllamaClient:
         url = f"{self.base_url}/api/tags"
         
         try:
-            response = requests.get(url, timeout=self.timeout)
+            response = requests.get(url, timeout=self.timeout, auth=self.auth)
             response.raise_for_status()
             return [model['name'] for model in response.json()['models']]
         except requests.exceptions.RequestException as e:
@@ -600,7 +603,7 @@ class OllamaClient:
             
             # Execute request with retries
             def do_post():
-                resp = requests.post(url, json=payload, timeout=self.timeout)
+                resp = requests.post(url, json=payload, timeout=self.timeout, auth=self.auth)
                 resp.raise_for_status()
                 return resp
                 
@@ -655,7 +658,7 @@ class OllamaClient:
             
             # Execute request with retries
             def do_post():
-                resp = requests.post(url, json=payload, timeout=self.timeout)
+                resp = requests.post(url, json=payload, timeout=self.timeout, auth=self.auth)
                 resp.raise_for_status()
                 return resp
                 
@@ -721,7 +724,7 @@ class OllamaClient:
         Returns True if healthy, False otherwise.
         """
         try:
-            response = requests.get(f"{self.base_url}/api/tags", timeout=5)
+            response = requests.get(f"{self.base_url}/api/tags", timeout=5, auth=self.auth)
             return response.status_code == 200
         except Exception as e:
             self.logger.error(f"Ollama health check failed: {e}")
@@ -733,7 +736,7 @@ class OllamaClient:
         Returns list of model names.
         """
         try:
-            response = requests.get(f"{self.base_url}/api/tags", timeout=5)
+            response = requests.get(f"{self.base_url}/api/tags", timeout=5, auth=self.auth)
             if response.status_code == 200:
                 data = response.json()
                 models = data.get('models', [])
