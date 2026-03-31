@@ -15,16 +15,16 @@ apply from: new File(ghidraInstallDir, "support/buildExtension.gradle").absolute
 
 // Extension information
 version = "1.0"
-ext.ghidraVersion = "12.0.2"
+ext.ghidraVersion = "12.0.3"
 
-// Java version matching Ghidra 11.3.2
+// Java version matching Ghidra 12.0.3
 java {
+    sourceCompatibility = JavaVersion.VERSION_21
+    targetCompatibility = JavaVersion.VERSION_21
     toolchain {
-        languageVersion = JavaLanguageVersion.of(25)
+        languageVersion = JavaLanguageVersion.of(21)
     }
 }
-// sourceCompatibility = 21
-// targetCompatibility = 21
 
 repositories {
     mavenCentral()
