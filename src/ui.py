@@ -753,6 +753,190 @@ class WorkflowDiagram:
         """Return the canvas widget."""
         return self.canvas
 
+
+class SubAgentTreePanel:
+    """Live sidebar panel showing orchestrator/worker hierarchy as a tree.
+
+    Polls a thread-safe SubAgentRegistry and renders the state into a
+    ttk.Treeview.  Supports collapsing to save sidebar space.
+    """
+
+    POLL_ACTIVE_MS = 200     # Fast refresh while orchestrator is running
+    POLL_IDLE_MS = 2000      # Slow refresh when idle
+
+    # Unicode status icons
+    _ICONS = {
+        "complete": "\u2713",    # ✓
+        "running":  "\u27F3",    # ⟳
+        "error":    "\u2717",    # ✗
+        "pending":  "\u25CB",    # ○
+    }
+
+    def __init__(self, parent, registry):
+        from src.agents.base import SubAgentRegistry  # noqa: F811
+        self.registry: SubAgentRegistry = registry
+        self._collapsed = False
+
+        colors = _theme_colors
+
+        # Outer frame
+        self.frame = ttk.LabelFrame(parent, text="Sub-Agents", padding=8)
+
+        # Header row: collapse toggle + summary
+        header = ttk.Frame(self.frame)
+        header.pack(fill='x')
+
+        self.toggle_btn = ttk.Button(
+            header, text="\u25BC", width=3,
+            command=self._toggle_collapse,
+        )
+        self.toggle_btn.pack(side='left')
+
+        self.summary_label = ttk.Label(
+            header, text="Idle", font=('Segoe UI', 9),
+        )
+        self.summary_label.pack(side='left', padx=(6, 0))
+
+        # Collapsible content
+        self.content_frame = ttk.Frame(self.frame)
+        self.content_frame.pack(fill='both', expand=True, pady=(4, 0))
+
+        # Treeview (tree-only, no column headers)
+        tree_container = ttk.Frame(self.content_frame)
+        tree_container.pack(fill='both', expand=True)
+        tree_container.grid_rowconfigure(0, weight=1)
+        tree_container.grid_columnconfigure(0, weight=1)
+
+        self.tree = ttk.Treeview(
+            tree_container, show='tree', height=12, selectmode='none',
+        )
+        scrollbar = ttk.Scrollbar(
+            tree_container, orient='vertical', command=self.tree.yview,
+        )
+        self.tree.configure(yscrollcommand=scrollbar.set)
+        self.tree.grid(row=0, column=0, sticky='nsew')
+        scrollbar.grid(row=0, column=1, sticky='ns')
+
+        # Start polling
+        self._poll()
+
+    def get_widget(self):
+        """Return the frame widget."""
+        return self.frame
+
+    # ── Collapse toggle ──
+
+    def _toggle_collapse(self):
+        self._collapsed = not self._collapsed
+        if self._collapsed:
+            self.content_frame.pack_forget()
+            self.toggle_btn.config(text="\u25B6")
+        else:
+            self.content_frame.pack(fill='both', expand=True, pady=(4, 0))
+            self.toggle_btn.config(text="\u25BC")
+
+    # ── Polling loop ──
+
+    def _poll(self):
+        try:
+            if self.registry.is_dirty:
+                state = self.registry.get_state()
+                self._render(state)
+        except Exception as e:
+            logger.error(f"SubAgentTreePanel poll error: {e}")
+
+        interval = (
+            self.POLL_ACTIVE_MS if self.registry.is_active
+            else self.POLL_IDLE_MS
+        )
+        self.frame.after(interval, self._poll)
+
+    # ── Rendering ──
+
+    def _render(self, state):
+        """Rebuild treeview from an OrchestratorState snapshot."""
+        # Clear
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+
+        if not state.active and not state.workers:
+            self.summary_label.config(text="Idle")
+            return
+
+        area_pct = int(state.coverage_ratio * 100)
+
+        # Build function coverage string
+        func_cov_str = self._format_func_coverage(
+            state.functions_analyzed, state.functions_total
+        )
+
+        # Summary label — show area coverage clearly
+        if state.active:
+            self.summary_label.config(
+                text=f"Cycle {state.cycle}/{state.max_cycles}, "
+                     f"areas {area_pct}%",
+            )
+        else:
+            self.summary_label.config(
+                text=f"Done ({state.exit_reason}, "
+                     f"areas {area_pct}%)",
+            )
+
+        # Root: Orchestrator — label the metric clearly as "area coverage"
+        orch_text = (
+            f"Orchestrator [cycle {state.cycle}/{state.max_cycles}, "
+            f"area coverage {area_pct}%]"
+        )
+        orch_item = self.tree.insert("", "end", text=orch_text, open=True)
+
+        # Function coverage row (child of orchestrator) — separate metric
+        if func_cov_str:
+            self.tree.insert(
+                orch_item, "end",
+                text=f"\U0001F4CA Func analysis: {func_cov_str}",
+            )
+
+        # Children: Workers
+        for w in state.workers:
+            icon = self._ICONS.get(w.status, "?")
+            goal_short = w.goal[:50] + ("..." if len(w.goal) > 50 else "")
+
+            # Build recipe prefix (e.g. "[trace_import_callers] ")
+            prefix = f"[{w.recipe}] " if w.recipe else ""
+
+            if w.status == "running":
+                tool_info = f"{w.real_tool_count} tools" if w.real_tool_count else ""
+                if w.recipe and w.phase:
+                    # Recipe worker: show phase name instead of step counter
+                    detail = w.phase
+                else:
+                    # LLM worker: show step counter
+                    detail = f"step {w.current_step}/{w.soft_limit}"
+                if tool_info:
+                    detail += f", {tool_info}"
+                detail += "..."
+            elif w.status in ("complete", "error"):
+                detail = f"{w.exit_reason}, {w.real_tool_count} tools"
+            else:
+                detail = "pending"
+
+            text = f'Worker #{w.worker_number}: {prefix}"{goal_short}" {icon} ({detail})'
+            self.tree.insert(orch_item, "end", text=text)
+
+    @staticmethod
+    def _format_func_coverage(analyzed: int, total: int) -> str:
+        """Format function coverage for display in the tree panel.
+
+        Returns an empty string when no data is available yet.
+        """
+        if analyzed == 0 and total == 0:
+            return ""
+        if total > 0:
+            pct = int(analyzed / total * 100)
+            return f"{analyzed}/{total} ({pct}%)"
+        return f"{analyzed} analyzed"
+
+
 class MemoryInfoPanel:
     """Panel for displaying memory and system information."""
     
@@ -2405,54 +2589,7 @@ class QueryInputPanel:
         )
         self.query_entry.grid(row=1, column=0, columnspan=2, sticky='ew', pady=(0, 10))
 
-        # Task mode controls (simple UI toggle + mode selection)
-        taskmode_frame = ttk.Frame(self.frame)
-        taskmode_frame.grid(row=2, column=0, columnspan=2, sticky='ew', pady=(0, 6))
-        taskmode_frame.grid_columnconfigure(3, weight=1)
-
-        self.task_mode_enabled_var = tk.BooleanVar(value=False)
-        self.task_mode_var = tk.StringVar(value="purpose_id")
-
-        # Initialize from Bridge if available (sticky across restarts)
-        try:
-            if hasattr(self.bridge, 'get_task_mode_state'):
-                st = self.bridge.get_task_mode_state()
-                if isinstance(st, dict):
-                    self.task_mode_enabled_var.set(bool(st.get('enabled', False)))
-                    mode = str(st.get('mode', 'off') or 'off')
-                    if mode in ("purpose_id", "malware", "vuln", "custom"):
-                        self.task_mode_var.set(mode)
-                    else:
-                        self.task_mode_var.set('purpose_id')
-        except Exception:
-            pass
-
-        self.task_mode_check = ttk.Checkbutton(
-            taskmode_frame,
-            text="Task Mode",
-            variable=self.task_mode_enabled_var,
-            command=self._on_task_mode_change
-        )
-        self.task_mode_check.grid(row=0, column=0, sticky='w')
-
-        ttk.Label(taskmode_frame, text="Mode:").grid(row=0, column=1, sticky='w', padx=(10, 4))
-        self.task_mode_combo = ttk.Combobox(
-            taskmode_frame,
-            textvariable=self.task_mode_var,
-            values=["purpose_id", "malware", "vuln", "custom"],
-            state="readonly",
-            width=12
-        )
-        self.task_mode_combo.grid(row=0, column=2, sticky='w')
-        self.task_mode_combo.bind('<<ComboboxSelected>>', lambda e: self._on_task_mode_change())
-
-        self.task_mode_status = ttk.Label(taskmode_frame, text="Off", foreground='gray')
-        self.task_mode_status.grid(row=0, column=3, sticky='e')
-
-        # Apply initial status
-        self._on_task_mode_change()
-        
-        # Grep Layer Frame (NEW) - for hybrid search functionality
+        # Grep Layer Frame - for hybrid search functionality
         # Note: This should be placed in the grid right after taskmode_frame (row 2, after row 2 which is taskmode)
         grep_container = ttk.Frame(self.frame)
         grep_container.grid(row=3, column=0, columnspan=2, sticky='ew', pady=(0, 6))
@@ -2556,16 +2693,7 @@ class QueryInputPanel:
                 monitor_thread = threading.Thread(target=self._monitor_workflow_stage, daemon=True)
                 monitor_thread.start()
                 
-                # Process query with full AI agent workflow
-                # Apply task mode (if enabled) to bridge before processing
-                try:
-                    if hasattr(self.bridge, 'set_task_mode'):
-                        enabled = bool(self.task_mode_enabled_var.get())
-                        mode = str(self.task_mode_var.get())
-                        self.bridge.set_task_mode(enabled=enabled, mode=mode)
-                except Exception:
-                    pass
-
+                # Process query with orchestrator
                 result = self.bridge.process_query(query)
                 
                 # Add result to response panel
@@ -2584,21 +2712,6 @@ class QueryInputPanel:
         
         threading.Thread(target=worker, daemon=True).start()
 
-    def _on_task_mode_change(self):
-        """Update task mode status label and push state to bridge."""
-        enabled = bool(self.task_mode_enabled_var.get())
-        mode = str(self.task_mode_var.get())
-        if enabled:
-            self.task_mode_status.config(text=f"On ({mode})", foreground='green')
-        else:
-            self.task_mode_status.config(text="Off", foreground='gray')
-
-        try:
-            if hasattr(self.bridge, 'set_task_mode'):
-                self.bridge.set_task_mode(enabled=enabled, mode=mode)
-        except Exception:
-            pass
-    
     def _on_grep_layer_change(self):
         """Handle grep layer checkbox changes."""
         enabled = bool(self.grep_enabled_var.get())
@@ -4548,15 +4661,15 @@ Do you want to proceed with renaming all functions?"""
         # Secondary dialog for enumeration option
         enumeration_dialog = tk.Toplevel(self.frame)
         enumeration_dialog.title("Function Enumeration Options")
-        enumeration_dialog.geometry("800x650")
+        enumeration_dialog.geometry("800x780")
         enumeration_dialog.transient(self.frame.winfo_toplevel())
         enumeration_dialog.grab_set()
-        
+
         # Center the dialog
         enumeration_dialog.update_idletasks()
         x = (enumeration_dialog.winfo_screenwidth() // 2) - (800 // 2)
-        y = (enumeration_dialog.winfo_screenheight() // 2) - (650 // 2)
-        enumeration_dialog.geometry(f"800x650+{x}+{y}")
+        y = (enumeration_dialog.winfo_screenheight() // 2) - (780 // 2)
+        enumeration_dialog.geometry(f"800x780+{x}+{y}")
         
         # Dialog content
         main_frame = ttk.Frame(enumeration_dialog, padding=20)
@@ -4604,11 +4717,11 @@ Choose your enumeration strategy:"""
         desc3 = ttk.Label(options_frame, text="• Rename generic functions + analyze key descriptive functions\n• Focus on important functions (main, crypto, network, file ops)\n• Balance between speed and comprehensive coverage\n• Best for most analysis scenarios", 
                          font=('TkDefaultFont', 9), foreground='gray')
         desc3.pack(anchor='w', padx=20)
-        
+
         # Buttons
         button_frame = ttk.Frame(main_frame)
-        button_frame.pack(fill='x')
-        
+        button_frame.pack(fill='x', pady=(20, 0))
+
         selected_mode = None
         
         def confirm_enumeration():
@@ -5089,7 +5202,13 @@ class OGhidraUI:
         
         self.workflow_diagram = WorkflowDiagram(workflow_frame, width=500, height=100)
         self.workflow_diagram.get_widget().pack()
-        
+
+        # Sub-Agent Tree panel
+        from src.agents.base import SubAgentRegistry
+        self.sub_agent_registry = SubAgentRegistry()
+        self.sub_agent_tree = SubAgentTreePanel(parent, self.sub_agent_registry)
+        self.sub_agent_tree.get_widget().pack(fill='both', expand=True, pady=(0, 10))
+
         # Analyzed Functions panel
         self.renamed_functions_panel = RenamedFunctionsPanel(parent, self.bridge)
         self.renamed_functions_panel.get_widget().pack(fill='both', expand=True)
@@ -5113,7 +5232,45 @@ class OGhidraUI:
         
         # Set up chain of thought callback for live AI reasoning updates
         self.bridge._ui_cot_callback = self.response_panel.add_cot_update
-        
+
+        # Set up sub-agent tree event callback
+        def _on_agent_event(event_type: str, data: dict):
+            """Route structured agent events to the SubAgentRegistry."""
+            if event_type == "orchestrator_start":
+                self.sub_agent_registry.on_orchestrator_start(
+                    data["max_cycles"], data["soft_limit"], data["strategy"],
+                )
+            elif event_type == "cycle_start":
+                self.sub_agent_registry.on_cycle_start(
+                    data["cycle"], data["coverage_ratio"],
+                    data.get("functions_analyzed", 0),
+                    data.get("functions_total", 0),
+                )
+            elif event_type == "worker_dispatch":
+                self.sub_agent_registry.on_worker_dispatch(
+                    data["task_id"], data["goal"],
+                    data["max_steps"], data["soft_limit"],
+                    recipe=data.get("recipe", ""),
+                )
+            elif event_type == "worker_step":
+                self.sub_agent_registry.on_worker_step(
+                    data["task_id"], data["step"], data["tool_count"],
+                    data.get("real_tool_count", 0),
+                    phase=data.get("phase", ""),
+                )
+            elif event_type == "worker_complete":
+                self.sub_agent_registry.on_worker_complete(
+                    data["task_id"], data["exit_reason"], data["tool_count"],
+                    data.get("real_tool_count", 0),
+                )
+            elif event_type == "orchestrator_complete":
+                self.sub_agent_registry.on_orchestrator_complete(
+                    data["exit_reason"], data["coverage_ratio"],
+                    data.get("functions_analyzed", 0),
+                    data.get("functions_total", 0),
+                )
+        self.bridge._ui_agent_callback = _on_agent_event
+
         # Tool panel (hidden - accessed via Analysis menu)
         self.tool_panel = ToolButtonsPanel(parent, self.bridge, None, self.workflow_diagram, self.renamed_functions_panel)
         

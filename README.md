@@ -1,13 +1,10 @@
-# OGhidra 3 - AI-Powered Reverse Engineering with Ghidra
+# OGhidra - AI-Powered Reverse Engineering with Ghidra
 
 ![Python Version](https://img.shields.io/badge/python-3.12%2B-blue?logo=python)
 ![License](https://img.shields.io/badge/license-BSD--3--Clause-green)
 ![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)
 
 **OGhidra** bridges Large Language Models with Ghidra's reverse engineering platform, enabling AI-driven binary analysis through natural language. Analyze binaries conversationally, automate complex workflows, and maintain complete privacy with local AI models.
-
-
-**THIS IS A YOUTUBE LINK**
 
 [![OGhidra Introduction](https://img.youtube.com/vi/hBD92FUgR0Y/0.jpg)](https://www.youtube.com/watch?v=hBD92FUgR0Y)
 
@@ -17,31 +14,46 @@
 
 OGhidra enhances Ghidra with AI capabilities, allowing you to:
 
-- **Natural Language Analysis** - Ask questions about functions, strings, imports in plain English
+- **Conversational Analysis** - Ask questions and get answers naturally, with full conversation context
 - **Automated Workflows** - Rename functions, detect patterns, generate comprehensive reports
+- **Multi-Agent Orchestration** - Complex investigations use specialized workers for deep analysis
 - **Local AI Models** - Complete privacy with models running on your hardware (Ollama)
-- **Cloud AI Support** - Connect to external APIs (OpenAI, Google Gemini, Anthropic Claude)
-- **Malware Detection** - Automatic pattern matching for 12+ evasion and injection techniques
+- **Cloud AI Support** - Connect to external APIs (Google Gemini, OpenAI, Anthropic Claude)
+- **Artifact Detection** - Real-time security pattern scanning across 19 vulnerability indicators
 - **Smart Enumeration** - Build queryable knowledge graphs from binary analysis
-- **Multi-Instance Analysis** - Run multiple Ghidra instances for parallel analysis
 
 ### How It Works
 
 ```mermaid
 graph TD
-    A[User Query] --> B[Planning Phase]
-    B --> C{Execution Phase}
-    C -- Tool Calls --> D[Ghidra/LLM]
-    D --> C
-    C --> E[Review Phase]
-    E -- Agentic Loop --> B
-    E --> F[Final Response]
-    
-    style E fill:#f9f,stroke:#333,stroke-width:2px
-    style B fill:#bbf,stroke:#333,stroke-width:2px
+    A[User Query] --> B{Query Router}
+    B -- Simple/Follow-up --> C[Conversational Mode]
+    B -- Binary-wide Analysis --> D[Investigation Mode]
+
+    C --> E[Single Worker Loop]
+    E -- Tool Calls --> F[Ghidra Tools]
+    F --> E
+    E --> G[Direct Response]
+
+    D --> H[Strategy Classification]
+    H --> I[Recon Phase]
+    I --> J[Correlation Hooks]
+    J --> K[Multi-Cycle Orchestrator]
+    K -- Spawn Worker --> L[Worker Agent]
+    L -- Tool Calls --> F
+    L --> M[Notebook Synthesis]
+    M --> K
+    K --> N[Final Report]
+
+    style C fill:#4CAF50,stroke:#333,stroke-width:2px,color:#fff
+    style D fill:#2196F3,stroke:#333,stroke-width:2px,color:#fff
+    style B fill:#FF9800,stroke:#333,stroke-width:2px,color:#fff
 ```
 
-**Agentic Loop**: OGhidra uses an adaptive planning system. After each execution cycle, results are reviewed and the AI can choose to gather more information or refine its analysis before providing the final response.
+**Two execution modes** selected automatically per query:
+
+- **Conversational** (default) - Single worker loop for questions, follow-ups, renames, quick lookups. Like a natural conversation. 2-5 LLM calls per query.
+- **Investigation** - Full orchestrator with recon, correlation hooks, and multi-cycle workers for binary-wide vulnerability hunting, malware analysis, or architecture mapping. Triggered automatically when the query demands deep analysis.
 
 ---
 
@@ -75,7 +87,7 @@ cp .env.example .env
 ### Setup Ghidra Plugin
 
 The OGhidraMCP plugin supports both Ghidra 11.3.2+ and Ghidra 12.0.3 (recommended).
-Theres also a youtube video https://www.youtube.com/watch?v=hBD92FUgR0Y 
+Theres also a youtube video https://www.youtube.com/watch?v=hBD92FUgR0Y
 
 1. **Extract the OGhidraMCP plugin**:
    ```bash
@@ -83,18 +95,16 @@ Theres also a youtube video https://www.youtube.com/watch?v=hBD92FUgR0Y
    ```
 
 2. **Install in Ghidra**:
-   - Open Ghidra → **File** → **Install Extensions**
+   - Open Ghidra -> **File** -> **Install Extensions**
    - Click **Add Extension** (green plus icon)
    - Navigate to extracted `OGhidraMCP` folder
    - Restart Ghidra
 
 3. **Enable the plugin**:
    - Open a Ghidra project
-   - **File** → **Configure** → **Enable Developer**
+   - **File** -> **Configure** -> Search "OGhidraMCP"
    - Check the box to enable
-   - The server will start on `http://localhost:8080/methods`
-     
-   > **YOU NEED TO HAVE CODE BROWSER OPEN**
+   - The server will start on `http://localhost:8080`
 
    > **Note**: The plugin is compatible with Ghidra 11.0.3+ and optimized for Ghidra 12.0.3
 
@@ -107,8 +117,8 @@ ollama pull nomic-embed-text     		# Embedding model for RAG
 
 # Alternative models
 ollama pull gpt-oss:120b         		# High quality (80GB RAM)
-ollama pull devstral-2:123b 			# High quality (80GB RAM) 
-ollama pull devstral-2:123b-cloud       # Cloud Model 
+ollama pull devstral-2:123b 			# High quality (80GB RAM)
+ollama pull devstral-2:123b-cloud       # Cloud Model
 ```
 
 ### Launch OGhidra
@@ -159,98 +169,115 @@ CUSTOM_API_MODEL=your-model-name
 CUSTOM_API_EMBEDDING_MODEL=your-embedding-model
 ```
 
-### Context Management Settings
-
-Adjust based on your model's context window:
+### Orchestrator Settings
 
 ```env
-# Context budget in tokens (adjust to your model's limit)
-CONTEXT_BUDGET=100000              # 100K tokens for mid-size models
-                                   # 200K+ for frontier models
+# Safety ceilings (the LLM decides when to stop; these are hard limits)
+ORCHESTRATOR_MAX_CYCLES=15         # Max investigation cycles
+WORKER_DEFAULT_MAX_STEPS=20        # Max tool calls per worker
 
-# Execution settings
-MAX_EXECUTION_STEPS=5              # Steps per planning cycle
-MAX_AGENTIC_CYCLES=3               # How many plan-execute-review loops
-AGENTIC_LOOP_ENABLED=true          # Enable adaptive replanning
+# Context budget in tokens
+CONTEXT_BUDGET=100000              # 100K for mid-size, 200K+ for frontier models
 ```
 
 ---
 
 ## Key Features
 
-### 1. Smart Tool Buttons (GUI)
+### 1. Conversational Analysis
 
-One-click access to common reverse engineering tasks:
+Ask questions naturally. OGhidra maintains conversation context across queries:
+
+```
+You: "What does this function do?"
+AI:  [decompiles function, analyzes] "FUN_00404650 is a Window Procedure..."
+
+You: "Is there a vulnerability here?"
+AI:  [examines code paths] "Yes, FUN_00401000 has a buffer overflow..."
+
+You: "Can you verify that?"
+AI:  [traces callers, checks bounds] "Confirmed: uninitialized pointer in logging..."
+```
+
+No mode switches needed. Context carries forward automatically.
+
+### 2. Automated Investigation
+
+For binary-wide analysis, the orchestrator activates automatically:
+
+```
+You: "Find all vulnerabilities in this binary"
+AI:  [recon -> correlation hooks -> multi-cycle analysis -> report]
+```
+
+The investigation system includes:
+- **Recon Phase** - Maps imports, exports, strings (cached for follow-ups)
+- **Correlation Hooks** - 5 built-in vulnerability patterns (unquoted paths, DLL hijacking, command injection, privilege escalation, directory traversal)
+- **Recipe System** - Deterministic API tracing without LLM overhead
+- **Coverage Tracking** - Ensures no security area is missed
+- **Diminishing Returns Detection** - Stops when analysis plateaus
+
+### 3. Smart Tool Buttons (GUI)
 
 | Tool | Description |
 |------|-------------|
 | **Analyze Current Function** | Deep dive into selected function's behavior |
 | **Rename Current Function** | AI suggests meaningful names based on analysis |
-| **Rename All Functions** | Bulk rename with Smart Enumeration options |
+| **Rename All Functions** | Bulk rename with Smart/Full/Rename-Only options |
 | **Analyze Imports** | Identify libraries and external dependencies |
 | **Analyze Strings** | Find URLs, credentials, configuration data |
 | **Generate Report** | Comprehensive security assessment |
 
-### 2. Task Modes
+### 4. Artifact Detection
 
-Set specialized analysis goals:
+Real-time scanning of tool results for 19 security patterns:
+- **Privilege Escalation**: SeDebugPrivilege, AdjustTokenPrivileges, token manipulation
+- **Crypto/Credentials**: CryptEncrypt, hardcoded passwords, embedded private keys
+- **C2 Indicators**: Hardcoded IP URLs, network callbacks
+- **Code Injection**: VirtualAlloc+PAGE_EXECUTE, WriteProcessMemory, remote threads
+- **Anti-Analysis**: IsDebuggerPresent, NtQueryInformationProcess
 
-```python
-# In GUI: Use "Task Mode" dropdown
-# In CLI: set task_mode <mode>
+Detected artifacts are automatically promoted to the investigation notebook.
 
-task_mode malware      # Malware analysis with pattern detection
-task_mode vuln         # Vulnerability research focus
-task_mode general      # General reverse engineering
-```
+### 5. Plugin-Style Extensions
 
-### 3. Malware Pattern Detection
-
-Automatic detection of 12+ malware patterns:
-- **Evasion**: PEB Walking, Dynamic API Resolution, Anti-Debug, Anti-VM
-- **Injection**: Process Injection (Local/Remote)
-- **Persistence**: Registry, File System Hooks
-- **Obfuscation**: String Encoding, API Hashing
-- **Privilege Escalation**: Token manipulation, UAC bypass
-
-Patterns trigger automatic alerts in the AI's context with MITRE ATT&CK mappings.
-
-### 4. Smart Enumeration
-
-Build rich, queryable knowledge from binary analysis:
-
-```
-# Enumerate all functions with AI summaries
-# Choose from:
-- Rename Only: Only process generic function names
-- Smart Enumeration: Focus on security-relevant functions
-- Full Enumeration: Analyze every function in the binary
-```
-
-Features:
-- Structured metadata extraction (LOC, complexity, operations)
-- Semantic search optimization
-- Intent-based context assembly
-- Multi-vector support for precise retrieval
-
-### 5. Session Management
-
-Save and restore analysis sessions:
+Extend OGhidra with custom recipes and correlation hooks:
 
 ```python
-# Save progress
-File → Save Session
+# Custom recipe (save as .py in CUSTOM_RECIPES_DIR)
+from src.recipe_registry import BaseRecipe
 
-# Load previous work
-File → Load Session
+class MyRecipe(BaseRecipe):
+    name = "trace_crypto_calls"
+    description = "Trace all cryptographic API callers"
 
-# Auto-save after bulk operations
-# Sessions include:
-- Analyzed functions with summaries
-- RAG vectors for semantic search
-- Performance statistics
-- UI state
+    def execute(self, executor, params):
+        return executor.trace_import_callers(
+            api_names=["CryptEncrypt", "BCryptEncrypt"]
+        )
 ```
+
+```python
+# Custom correlation hook (save as .py in CUSTOM_HOOKS_DIR)
+from src.correlation_hooks import CorrelationHook
+
+class MyHook(CorrelationHook):
+    name = "custom_pattern"
+    description = "Detect my custom vulnerability pattern"
+
+    def check(self, all_apis, coverage, fn_registry, discovery):
+        if "dangerous_api" in all_apis:
+            return WorkerTask(goal="Investigate dangerous_api usage")
+        return None
+```
+
+### 6. Session Persistence
+
+Analysis state carries across queries within a session:
+- **Function Registry** - All analyzed functions accumulate
+- **Discovery Cache** - Imports/exports/strings cached from first recon
+- **Conversation History** - Follow-up questions reference prior answers
+- **Investigation Notebook** - Findings persist for the session
 
 ---
 
@@ -259,37 +286,118 @@ File → Load Session
 ### Analyze a Suspicious Binary
 
 1. **Load binary in Ghidra** and open in CodeBrowser
-2. **Enable OGhidraMCP plugin** (File → Configure)
+2. **Enable OGhidraMCP plugin** (File -> Configure)
 3. **Launch OGhidra**: `uv run main.py --ui`
-4. **Set task mode**: Select "malware" from dropdown
-5. **Run Smart Enumeration**: Click "Rename All Functions" → "Smart Enumeration"
-6. **Ask questions**: "What are the high-risk functions?" or "Show me network communication"
+4. **Ask questions conversationally**:
+   - "What is this binary?"
+   - "Is there anything suspicious in the imports?"
+   - "Find all vulnerabilities" (triggers full investigation)
+
+### Investigate Specific Function
+
+1. **Navigate to function in Ghidra**
+2. **Ask about it**: "What does this function do?"
+3. **Dig deeper**: "Is this vulnerable?" -> "Can you verify that?" -> "Check the callers too"
 
 ### Generate Security Report
 
 ```bash
 # In GUI: Click "Generate Report" button
+# Or ask: "Generate a comprehensive security report"
 # Report includes:
-- Executive Summary
-- Function Inventory (renamed functions with behavior)
-- Security Analysis (high-risk functions, patterns)
-- Import Analysis
-- String Analysis
-- Recommendations
+- Executive Summary with Verdict
+- Confirmed Findings with evidence
+- Areas requiring further investigation
+- Coverage metrics
 ```
 
-### Investigate Specific Function
+---
 
-1. **Navigate to function in Ghidra**
-2. **Click "Analyze Current Function"**
-3. **Ask follow-up questions**:
-   - "What does this function do?"
-   - "Is this vulnerable to buffer overflow?"
-   - "What other functions call this?"
+## Architecture Overview
+
+```
+                          ┌──────────────────────┐
+                          │     User Query        │
+                          └──────────┬───────────┘
+                                     │
+                          ┌──────────▼───────────┐
+                          │    Query Router       │
+                          │  (1 LLM call: route   │
+                          │   + classify strategy) │
+                          └─────┬──────────┬─────┘
+                                │          │
+                    ┌───────────▼──┐  ┌────▼─────────────┐
+                    │Conversational│  │  Investigation    │
+                    │    Mode      │  │     Mode          │
+                    └───────┬──────┘  └────┬─────────────┘
+                            │              │
+               ┌────────────▼──┐   ┌───────▼──────────────────┐
+               │ Single Worker │   │ Orchestrator              │
+               │    Loop       │   │  ├─ Recon Phase           │
+               │               │   │  ├─ Correlation Hooks     │
+               │ LLM sees:     │   │  ├─ Multi-Cycle Loop      │
+               │ • Tools       │   │  │  └─ Worker → Synthesis  │
+               │ • History     │   │  └─ Final Report           │
+               │ • Blackboard  │   └──────────────────────────┘
+               └───────┬───────┘               │
+                       │                       │
+                       ▼                       ▼
+              ┌─────────────────────────────────────────┐
+              │            Shared Blackboard             │
+              │  ┌────────────┐  ┌────────────────────┐ │
+              │  │ Function   │  │ Discovery Cache     │ │
+              │  │ Registry   │  │ (imports/exports)   │ │
+              │  ├────────────┤  ├────────────────────┤ │
+              │  │ Coverage   │  │ Tool Health         │ │
+              │  │ Tracker    │  │ Tracker             │ │
+              │  ├────────────┤  ├────────────────────┤ │
+              │  │ Notebook   │  │ Conversation        │ │
+              │  │ (findings) │  │ History             │ │
+              │  └────────────┘  └────────────────────┘ │
+              └──────────────────┬──────────────────────┘
+                                 │
+                    ┌────────────▼────────────┐
+                    │     Tool Executor       │
+                    │  ┌──────────────────┐   │
+                    │  │ LazyGhidraClient │   │
+                    │  │ (defers connect  │   │
+                    │  │  to first use)   │   │
+                    │  └──────────────────┘   │
+                    │  ┌──────────────────┐   │
+                    │  │ LLM Clients      │   │
+                    │  │ • Ollama (local) │   │
+                    │  │ • Google Gemini  │   │
+                    │  │ • Custom API     │   │
+                    │  └──────────────────┘   │
+                    └─────────────────────────┘
+```
+
+### Key Components
+
+| Component | File | Purpose |
+|-----------|------|---------|
+| **Orchestrator** | `src/orchestrator.py` | Query routing, investigation planning, worker coordination |
+| **Worker Agent** | `src/agents/worker_agent.py` | Tool execution loop (conversational + investigation) |
+| **Blackboard** | `src/blackboard.py` | Shared investigation state across queries |
+| **Recipe Executor** | `src/recipes.py` | Deterministic API tracing (no LLM overhead) |
+| **Recipe Registry** | `src/recipe_registry.py` | Plugin system for custom analysis recipes |
+| **Correlation Hooks** | `src/correlation_hooks.py` | Extensible vulnerability pattern detection |
+| **Tool Health** | `src/tool_health.py` | Cross-worker tool failure tracking |
+| **Artifact Scanner** | `src/artifact_scanner.py` | Real-time security pattern matching |
+| **Config Loader** | `src/config_loader.py` | Multi-level config (user/project/env) |
+| **Lazy Ghidra** | `src/lazy_ghidra.py` | Deferred connection proxy |
 
 ---
 
 ## Advanced Features
+
+### Multi-Level Configuration
+
+OGhidra supports configuration hierarchy (higher priority overrides lower):
+
+1. **User-level**: `~/.oghidra/config.json`
+2. **Project-level**: `.oghidra/config.json`
+3. **Environment variables** (highest priority)
 
 ### RAG (Retrieval-Augmented Generation)
 
@@ -299,22 +407,6 @@ OGhidra uses vector embeddings for semantic search over analyzed functions:
 # Enable in .env
 RESULT_CACHE_ENABLED=true
 TIERED_CONTEXT_ENABLED=true
-```
-
-Benefits:
-- Remember previous analysis across sessions
-- Find similar functions semantically
-- Reduce redundant LLM calls
-
-
-### Context Optimization
-
-Tiered context compression keeps relevant information:
-
-```env
-CURRENT_LOOP_MAX_CHARS=2000   # Recent: full detail
-PREV_LOOP_MAX_CHARS=400       # Previous: summaries
-OLDER_LOOP_MAX_CHARS=100      # Older: references only
 ```
 
 ### LLM Logging
@@ -335,12 +427,11 @@ LLM_LOG_FORMAT=json
 
 ```bash
 # Verify plugin is loaded
-# Open up codebrowser! 
+# Open up codebrowser!
 
 # Check server is running
 curl http://localhost:8080/methods
 ```
-
 
 ### Ollama Connection Issues
 
@@ -355,17 +446,6 @@ curl http://localhost:11434/api/tags
 ollama serve
 ```
 
-### Empty Responses / Context Overflow
-
-```env
-# Reduce context budget
-CONTEXT_BUDGET=50000
-
-# Enable compaction
-COMPACTION_ENABLED=true
-COMPACTION_THRESHOLD=0.75
-```
-
 ### Slow Performance
 
 1. **Use smaller models**: Switch to `gemma3:9b`
@@ -375,53 +455,13 @@ COMPACTION_THRESHOLD=0.75
 
 ---
 
-## Architecture Overview
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                        OGhidra UI                           │
-│                  (GUI / Interactive CLI)                    │
-└────────────────────────┬────────────────────────────────────┘
-                         │
-                         ▼
-┌─────────────────────────────────────────────────────────────┐
-│                   Bridge (src/bridge.py)                    │
-│  ┌────────────────────────────────────────────────────────┐ │
-│  │ • Agentic Loop: Plan → Execute → Review → Replan       │ │
-│  │ • Tool Router: Ghidra client, LLM client, CAG manager  │ │
-│  │ • Context Manager: Budget allocation, compression      │ │
-│  └────────────────────────────────────────────────────────┘ │
-└───────────┬────────────────────────┬────────────────────────┘
-            │                        │
-            ▼                        ▼
-┌───────────────────────┐  ┌─────────────────────────┐
-│   Ghidra Client       │  │   LLM Clients           │
-│ • GhidraMCP Plugin    │  │ • Ollama (local)        │
-│ • Binary operations   │  │ • External APIs         │
-│ • Decompilation       │  │ • Custom endpoints      │
-└───────────────────────┘  └─────────────────────────┘
-            │                        │
-            └────────────┬───────────┘
-                         ▼
-┌─────────────────────────────────────────────────────────────┐
-│               CAG Manager (Knowledge System)                │
-│  ┌────────────────────────────────────────────────────────┐ │
-│  │ • Vector Store: Semantic search over functions         │ │
-│  │ • Pattern Detector: 12+ malware techniques             │ │
-│  │ • Metadata Extractor: Structured function analysis     │ │
-│  │ • Session Store: Persistent analysis state             │ │
-│  └────────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────┘
-```
-
----
-
 ## Contributing
 
 We welcome contributions! Areas of interest:
 
-- **New malware patterns** for detection
-- **LLM provider integrations** 
+- **Custom correlation hooks** for new vulnerability patterns
+- **Custom recipes** for specialized analysis workflows
+- **LLM provider integrations** (AWS Bedrock, Azure OpenAI)
 - **UI/UX improvements**
 - **Performance optimizations**
 - **Documentation** and examples
@@ -437,7 +477,7 @@ If you use OGhidra in your research, please cite:
 ```bibtex
 @software{oghidra2025,
   title = {OGhidra: AI-Powered Reverse Engineering with Ghidra},
-  author = {Enoch Wang},
+  author = {OGhidra Contributors},
   year = {2025},
   url = {https://github.com/LLNL/OGhidra}
 }
@@ -468,6 +508,6 @@ See [LICENSE](LICENSE) and [NOTICE.md](NOTICE.md) for details.
 
 ## Support
 
+- **Documentation**: [docs/](docs/) for detailed technical documentation
 - **Issues**: [GitHub Issues](https://github.com/LLNL/OGhidra/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/LLNL/OGhidra/discussions)
-- **Just Email Me Directly**: enochsurge@gmail.com

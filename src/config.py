@@ -33,7 +33,7 @@ class OllamaConfig(BaseModel):
     timeout: int = Field(ge=1, le=600, default=120, description="Timeout for requests in seconds (1-600)", env="OLLAMA_TIMEOUT")
     username: str = Field(default=None, env="OLLAMA_USERNAME")
     password: str = Field(default=None, env="OLLAMA_PASSWORD")
-    
+
     # Execution loop settings (INNER LOOP - tools per execution phase)
     max_execution_steps: int = Field(
         default=10,
@@ -49,21 +49,87 @@ class OllamaConfig(BaseModel):
         env="EXECUTION_LOOP_ENABLED"
     )
     
-    # Agentic loop settings (OUTER LOOP - full planning→execution→analysis cycles)
-    max_agentic_cycles: int = Field(
-        default=3,
+    # Orchestrator settings (sub-agent architecture)
+    orchestrator_max_cycles: int = Field(
+        default=15,
         ge=1,
-        le=10,
-        description="Maximum Planning→Execution→Analysis cycles per query (1-10)",
-        env="MAX_AGENTIC_CYCLES"
+        le=50,
+        description=(
+            "Safety ceiling for orchestrator cycles. The LLM decides when to stop; "
+            "this is the hard abort to prevent runaway loops (1-50)"
+        ),
+        env="ORCHESTRATOR_MAX_CYCLES",
     )
-    
-    agentic_loop_enabled: bool = Field(
+    worker_default_max_steps: int = Field(
+        default=20,
+        ge=1,
+        le=50,
+        description=(
+            "Safety ceiling for worker steps. A budget warning is injected at "
+            "the soft limit; the hard ceiling only triggers if the LLM ignores it (1-50)"
+        ),
+        env="WORKER_DEFAULT_MAX_STEPS",
+    )
+    orchestrator_system_prompt: str = Field(
+        default="",
+        description=(
+            "Custom system prompt override for the orchestrator's task-creation calls. "
+            "If empty, the built-in prompt from Orchestrator._get_task_creation_system_prompt() is used. "
+            "When set, this replaces the default orchestrator prompt entirely."
+        ),
+    )
+
+    # Plugin-style recipe and hook extension directories
+    custom_recipes_dir: str = Field(
+        default="",
+        description="Directory for custom recipe .py files (empty = disabled)",
+        env="CUSTOM_RECIPES_DIR",
+    )
+    custom_hooks_dir: str = Field(
+        default="",
+        description="Directory for custom correlation hook .py files (empty = disabled)",
+        env="CUSTOM_HOOKS_DIR",
+    )
+    correlation_hooks_enabled: bool = Field(
         default=True,
-        description="Enable multi-cycle agentic loop with goal evaluation and re-planning",
-        env="AGENTIC_LOOP_ENABLED"
+        description="Enable vulnerability correlation hooks",
+        env="CORRELATION_HOOKS_ENABLED",
     )
-    
+
+    # Worker context compaction
+    worker_compaction_threshold: int = Field(
+        default=6,
+        ge=3,
+        le=20,
+        description=(
+            "Step at which older worker tool results are compacted into a "
+            "digest, preserving only the last few full results (3-20)"
+        ),
+        env="WORKER_COMPACTION_THRESHOLD",
+    )
+
+    # Stall and doom-loop detection
+    coverage_stall_threshold: int = Field(
+        default=3,
+        ge=2,
+        le=10,
+        description=(
+            "Number of consecutive cycles with zero coverage gain before "
+            "auto-terminating the investigation (2-10)"
+        ),
+        env="COVERAGE_STALL_THRESHOLD",
+    )
+    orchestrator_doom_loop_threshold: int = Field(
+        default=2,
+        ge=2,
+        le=5,
+        description=(
+            "Number of consecutive cycles where the LLM produces tasks with "
+            "identical goals before auto-terminating (2-5)"
+        ),
+        env="ORCHESTRATOR_DOOM_LOOP_THRESHOLD",
+    )
+
     # LLM Logging Configuration
     llm_logging_enabled: bool = Field(default=True, env="LLM_LOGGING_ENABLED")
     llm_log_file: str = Field(default="logs/llm_interactions.log", env="LLM_LOG_FILE")
@@ -263,7 +329,7 @@ class OllamaConfig(BaseModel):
     @validator('model_map')
     def validate_model_phases(cls, v):
         """Validate that model_map contains valid phase names."""
-        valid_phases = {'planning', 'execution', 'analysis', 'evaluation', 'review'}
+        valid_phases = {'planning', 'execution', 'analysis', 'evaluation', 'review', 'orchestrator'}
         invalid_phases = set(v.keys()) - valid_phases
         if invalid_phases:
             raise ValueError(f'Invalid phases in model_map: {invalid_phases}. Valid phases are: {valid_phases}')
@@ -675,12 +741,15 @@ class OllamaConfig(BaseModel):
        - If YES → Add service security analysis to plan
     
     2. Does it load executables/DLLs?
-       - Search imports for: LoadLibrary, CreateProcess, ShellExecute
-       - If YES → Plan to analyze what/where it loads
-    
+       - Search imports for: LoadLibrary, CreateProcess, ShellExecute, WinExec
+       - If YES → Decompile EACH caller and check:
+         * Is lpApplicationName NULL with an unquoted lpCommandLine containing spaces?
+         * Is the path from an external source (registry, config) without validation?
+         * Is the path relative (no directory) relying on search order?
+
     3. Are there hardcoded paths?
        - Search strings for: "C:\\Program Files", ".exe", ".dll"
-       - If YES → Check for proper validation and quoting
+       - If YES → Check for proper quoting when passed to execution APIs
     
     ## Planning Rules
     1. **Structure**: Break down the goal into logical, sequential steps.
@@ -697,65 +766,13 @@ class OllamaConfig(BaseModel):
     User Goal: {user_task_description}
     """
     
-    # Execution system prompt for TASK MODE ON (vulnerability/malware analysis)
-    execution_system_prompt_task_mode: str = """
+    # Legacy task mode execution prompt — retained as reference but no longer used.
+    # The orchestrator/worker system has its own strategy-specific prompts.
+    _legacy_execution_system_prompt_task_mode: str = """
     You are a Tool Execution Assistant for Ghidra reverse engineering tasks.
     Your primary goal is to solve the user's task through systematic threat hunting.
     
-    🔥 HYBRID SEARCH STRATEGY (When Enabled - CHECK USER PROMPT)
-    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    
-    When hybrid search is available, you MUST use search_function_summaries with 
-    BEHAVIORAL/SEMANTIC queries as your PRIMARY discovery method.
-    
-    ✅ CORRECT Query Construction (Describe behavior, not keywords):
-    
-    **Security File Access Patterns:**
-    • "Find code that resolves system/security file paths dynamically to evade static analysis"
-    • "Locate functions accessing protected resources with obfuscated path construction"
-    • "Identify code reading sensitive data stores using misleading function names"
-    
-    **String Obfuscation Patterns:**
-    • "Find functionality that decodes or deobfuscates strings at runtime"
-    • "Locate code that builds strings character-by-character or via XOR/encoding"
-    • "Identify stack-based string construction to hide literal values"
-    
-    **Network/C2 Patterns:**
-    • "Find code establishing network connections with dynamically resolved endpoints"
-    • "Locate functions performing data exfiltration disguised as legitimate traffic"
-    • "Identify callback mechanisms using encoded URLs or IP addresses"
-    
-    **Persistence/Execution Patterns:**
-    • "Find code that modifies system configuration for persistence"
-    • "Locate functions injecting into processes or loading code dynamically"
-    • "Identify privilege escalation attempts through token manipulation or API abuse"
-    
-    **Evasion Patterns:**
-    • "Find anti-analysis techniques: debugger detection, VM detection, timing checks"
-    • "Locate code that patches or hooks security APIs"
-    • "Identify sandbox evasion through environment fingerprinting"
-    
-    ❌ WRONG Query Construction (Keyword lists without context):
-    • "string concatenate build construct path"
-    • "shadow password authentication credential"
-    • "decode decrypt xor encode"
-    • "file open fopen access check"
-    
-    🎯 Query Construction Rules:
-    1. **Describe BEHAVIOR** - What does the code do? (not just keywords)
-    2. **Include intent/context** - Why would it do this? (obfuscation, theft, evasion, persistence)
-    3. **Add concrete examples** - "such as credential files", "e.g., C2 communication"
-    4. **Mention evasion techniques** - "misleading names", "obfuscated", "dynamic construction"
-    5. **Stay general enough** - Don't match exact strings, describe patterns
-    
-    📊 Usage Strategy:
-    • Run 2-3 related behavioral queries with different framings
-    • Use top_k=15-20 for comprehensive discovery
-    • Focus on top-5 results, scan remaining for relevant patterns
-    • Always decompile top candidates to verify behavior
-    • Cross-validate with get_xrefs_to, list_strings for confirmation
-    
-    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{{HYBRID_SEARCH_TASK_MODE_SECTION}}
     
     🔍 MANDATORY INVESTIGATION METHODOLOGY
     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -825,6 +842,18 @@ class OllamaConfig(BaseModel):
        - Process creation: fork/exec, CreateProcess, system(), popen()
        - Code loading: dlopen, LoadLibrary, mmap+exec, VirtualAlloc patterns
        - Persistence: startup folders, scheduled tasks, cron, service registration
+
+       **PROCESS CREATION AUDIT (when CreateProcess/ShellExecute/WinExec found):**
+       For EACH call site, check these specific patterns:
+       a) Is lpApplicationName NULL? → Windows parses lpCommandLine by spaces,
+          meaning "C:\\Program Files\\app.exe" resolves "C:\\Program.exe" first.
+          This is an unquoted service path vulnerability.
+       b) Is the executable path from an external source (registry, config file,
+          env var)? → Attacker-writable source = arbitrary code execution.
+       c) Is the path relative (e.g. just "app.exe") with no full path?
+          → EXE search order hijacking via PATH or CWD manipulation.
+       d) Is lpCommandLine built from string concatenation without quoting?
+          → Command injection or path confusion.
     
     4. **Privilege & Access**
        - Elevation: sudo, UAC bypass, token manipulation, setuid patterns
@@ -865,6 +894,7 @@ class OllamaConfig(BaseModel):
     
     Completion signals:
     - When goal is achieved: "INVESTIGATION COMPLETE"
+    - When user input needed: "ASK_USER: [question]\\nOPTIONS: A | B | C"
     
     ⚠️  CRITICAL: NEVER output "INVESTIGATION COMPLETE" or "GOAL ACHIEVED" 
         in the SAME response as EXECUTE commands. Wait for results first.
@@ -885,6 +915,7 @@ class OllamaConfig(BaseModel):
 """
     
     # Execution system prompt for TASK MODE OFF (simple queries, direct answers)
+    # Note: The HYBRID_SEARCH_SECTION will be conditionally inserted by get_execution_system_prompt()
     execution_system_prompt: str = """
     You are a Tool Execution Assistant for Ghidra reverse engineering tasks.
     Your goal is to answer the user's question clearly and efficiently.
@@ -903,36 +934,7 @@ class OllamaConfig(BaseModel):
     • Keep limits reasonable (10-20 for discovery, more if needed for specific analysis)
     • Batch related tools together (list_imports + list_exports + list_strings)
 
-    🔍 FUNCTION SUMMARY SEARCH - PRIMARY DISCOVERY TOOL
-    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    
-    When Hybrid Search is enabled (vectors loaded), use search_function_summaries 
-    as your PRIMARY tool for function discovery BEFORE list_functions, decompile, etc.
-    
-    USAGE STRATEGY:
-    
-    1. USE MULTIPLE RELATED QUERIES - Cast a wide net with different keyword combinations:
-       EXECUTE: search_function_summaries(query="primary concept keywords", search_type="hybrid", top_k=20)
-       EXECUTE: search_function_summaries(query="related concept keywords", search_type="hybrid", top_k=20)
-       EXECUTE: search_function_summaries(query="alternative terminology", search_type="hybrid", top_k=20)
-    
-    2. CHOOSE APPROPRIATE top_k:
-       • Focused searches: top_k=5-10
-       • Comprehensive discovery: top_k=15-20 (to get broader coverage)
-    
-    3. SELECT SEARCH TYPE:
-       • hybrid (default): Keyword + semantic - best for most cases
-       • keyword: Exact term matching - use when you know specific strings
-       • semantic: Behavior-based - use for conceptual searches
-       • name: Function name matching
-    
-    INTERPRETING RESULTS:
-    • Focus on top-5 results for detailed investigation
-    • Scan remaining results for relevant keywords related to your goal
-    • Decompile promising candidates for verification
-    • Cross-validate with get_xrefs_to, list_strings, and other tools
-    
-    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{{HYBRID_SEARCH_SECTION}}
     
     EXAMPLES:
     
@@ -977,6 +979,113 @@ class OllamaConfig(BaseModel):
 # - DO NOT use the "0x" prefix for numerical addresses.
 # - DUPLICATE TOOL CALLS: Use get_cached_result(result_id=...) if a result is already available.
 """
+    
+    # Hybrid search section - conditionally included when grep layer is enabled
+    HYBRID_SEARCH_SECTION: ClassVar[str] = """
+    🔍 FUNCTION SUMMARY SEARCH - PRIMARY DISCOVERY TOOL
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    
+    When Hybrid Search is enabled (vectors loaded), use search_function_summaries 
+    as your PRIMARY tool for function discovery BEFORE list_functions, decompile, etc.
+    
+    USAGE STRATEGY:
+    
+    1. USE MULTIPLE RELATED QUERIES - Cast a wide net with different keyword combinations:
+       EXECUTE: search_function_summaries(query="primary concept keywords", search_type="hybrid", top_k=20)
+       EXECUTE: search_function_summaries(query="related concept keywords", search_type="hybrid", top_k=20)
+       EXECUTE: search_function_summaries(query="alternative terminology", search_type="hybrid", top_k=20)
+    
+    2. CHOOSE APPROPRIATE top_k:
+       • Focused searches: top_k=5-10
+       • Comprehensive discovery: top_k=15-20 (to get broader coverage)
+    
+    3. SELECT SEARCH TYPE:
+       • hybrid (default): Keyword + semantic - best for most cases
+       • keyword: Exact term matching - use when you know specific strings
+       • semantic: Behavior-based - use for conceptual searches
+       • name: Function name matching
+    
+    INTERPRETING RESULTS:
+    • Focus on top-5 results for detailed investigation
+    • Scan remaining results for relevant keywords related to your goal
+    • Decompile promising candidates for verification
+    • Cross-validate with get_xrefs_to, list_strings, and other tools
+    
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+"""
+    
+    # Hybrid search section for task mode - includes behavioral query examples
+    HYBRID_SEARCH_TASK_MODE_SECTION: ClassVar[str] = """
+    🔥 HYBRID SEARCH STRATEGY (When Enabled)
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    
+    When hybrid search is available, you MUST use search_function_summaries with 
+    BEHAVIORAL/SEMANTIC queries as your PRIMARY discovery method.
+    
+    ✅ CORRECT Query Construction (Describe behavior, not keywords):
+    
+    **Security File Access Patterns:**
+    • "Find code that resolves system/security file paths dynamically to evade static analysis"
+    • "Locate functions accessing protected resources with obfuscated path construction"
+    • "Identify code reading sensitive data stores using misleading function names"
+    
+    **String Obfuscation Patterns:**
+    • "Find functionality that decodes or deobfuscates strings at runtime"
+    • "Locate code that builds strings character-by-character or via XOR/encoding"
+    • "Identify stack-based string construction to hide literal values"
+    
+    **Network/C2 Patterns:**
+    • "Find code establishing network connections with dynamically resolved endpoints"
+    • "Locate functions performing data exfiltration disguised as legitimate traffic"
+    • "Identify callback mechanisms using encoded URLs or IP addresses"
+    
+    **Persistence/Execution Patterns:**
+    • "Find code that modifies system configuration for persistence"
+    • "Locate functions injecting into processes or loading code dynamically"
+    • "Identify privilege escalation attempts through token manipulation or API abuse"
+    
+    **Evasion Patterns:**
+    • "Find anti-analysis techniques: debugger detection, VM detection, timing checks"
+    • "Locate code that patches or hooks security APIs"
+    • "Identify sandbox evasion through environment fingerprinting"
+    
+    ❌ WRONG Query Construction (Keyword lists without context):
+    • "string concatenate build construct path"
+    • "shadow password authentication credential"
+    • "decode decrypt xor encode"
+    • "file open fopen access check"
+    
+    🎯 Query Construction Rules:
+    1. **Describe BEHAVIOR** - What does the code do? (not just keywords)
+    2. **Include intent/context** - Why would it do this? (obfuscation, theft, evasion, persistence)
+    3. **Add concrete examples** - "such as credential files", "e.g., C2 communication"
+    4. **Mention evasion techniques** - "misleading names", "obfuscated", "dynamic construction"
+    5. **Stay general enough** - Don't match exact strings, describe patterns
+    
+    📊 Usage Strategy:
+    • Run 2-3 related behavioral queries with different framings
+    • Use top_k=15-20 for comprehensive discovery
+    • Focus on top-5 results, scan remaining for relevant patterns
+    • Always decompile top candidates to verify behavior
+    • Cross-validate with get_xrefs_to, list_strings for confirmation
+    
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+"""
+    
+    def get_execution_system_prompt(self, hybrid_search_enabled: bool = False) -> str:
+        """
+        Get the execution system prompt with conditional hybrid search section.
+        
+        Args:
+            hybrid_search_enabled: Whether hybrid search is enabled (grep layer)
+            
+        Returns:
+            System prompt with or without hybrid search guidance
+        """
+        hybrid_section = self.HYBRID_SEARCH_SECTION if hybrid_search_enabled else ""
+        return self.execution_system_prompt.replace("{{HYBRID_SEARCH_SECTION}}", hybrid_section).replace(
+            "{{FUNCTION_CALL_BEST_PRACTICES}}", self.FUNCTION_CALL_BEST_PRACTICES
+        )
     
     evaluation_system_prompt: str = """
     You are a Goal Evaluation Assistant for Ghidra reverse engineering tasks.
@@ -1249,9 +1358,13 @@ class ExternalConfig(BaseModel):
     # Execution/Agentic loop settings (reused)
     max_execution_steps: int = Field(default=10, ge=1, le=50, env="MAX_EXECUTION_STEPS")
     execution_loop_enabled: bool = Field(default=True, env="EXECUTION_LOOP_ENABLED")
-    max_agentic_cycles: int = Field(default=3, ge=1, le=10, env="MAX_AGENTIC_CYCLES")
-    agentic_loop_enabled: bool = Field(default=True, env="AGENTIC_LOOP_ENABLED")
-    
+
+    # Orchestrator settings (sub-agent architecture)
+    orchestrator_max_cycles: int = Field(default=15, ge=1, le=50, env="ORCHESTRATOR_MAX_CYCLES")
+    worker_default_max_steps: int = Field(default=20, ge=1, le=50, env="WORKER_DEFAULT_MAX_STEPS")
+    coverage_stall_threshold: int = Field(default=3, ge=2, le=10, env="COVERAGE_STALL_THRESHOLD")
+    orchestrator_doom_loop_threshold: int = Field(default=2, ge=2, le=5, env="ORCHESTRATOR_DOOM_LOOP_THRESHOLD")
+
     # System prompts (reused from OllamaConfig default factories usually, but we need to define them here)
     # We can copy them from OllamaConfig to ensure consistency
     planning_system_prompt: str = OllamaConfig().planning_system_prompt
@@ -1345,12 +1458,16 @@ class CustomAPIConfig(BaseModel):
     prev_loop_max_chars: int = Field(default=800, ge=50, le=10000, env="PREV_LOOP_MAX_CHARS")
     older_loop_max_chars: int = Field(default=200, ge=20, le=2000, env="OLDER_LOOP_MAX_CHARS")
     
-    # Execution/Agentic loop settings (reused)
+    # Execution loop settings (reused)
     max_execution_steps: int = Field(default=10, ge=1, le=50, env="MAX_EXECUTION_STEPS")
     execution_loop_enabled: bool = Field(default=True, env="EXECUTION_LOOP_ENABLED")
-    max_agentic_cycles: int = Field(default=3, ge=1, le=10, env="MAX_AGENTIC_CYCLES")
-    agentic_loop_enabled: bool = Field(default=True, env="AGENTIC_LOOP_ENABLED")
-    
+
+    # Orchestrator settings (sub-agent architecture)
+    orchestrator_max_cycles: int = Field(default=15, ge=1, le=50, env="ORCHESTRATOR_MAX_CYCLES")
+    worker_default_max_steps: int = Field(default=20, ge=1, le=50, env="WORKER_DEFAULT_MAX_STEPS")
+    coverage_stall_threshold: int = Field(default=3, ge=2, le=10, env="COVERAGE_STALL_THRESHOLD")
+    orchestrator_doom_loop_threshold: int = Field(default=2, ge=2, le=5, env="ORCHESTRATOR_DOOM_LOOP_THRESHOLD")
+
     # Reuse tools and system prompts from OllamaConfig
     tools: List[Tool] = Field(default_factory=lambda: OllamaConfig().tools)
     planning_system_prompt: str = OllamaConfig().planning_system_prompt
@@ -1560,32 +1677,24 @@ def get_config() -> BridgeConfig:
                 config_data['ollama'] = {}
             config_data['ollama']['execution_loop_enabled'] = os.getenv('EXECUTION_LOOP_ENABLED').lower() == 'true'
         
-        # Load agentic loop settings
-        if os.getenv('MAX_AGENTIC_CYCLES'):
-            if 'ollama' not in config_data:
-                config_data['ollama'] = {}
-            try:
-                config_data['ollama']['max_agentic_cycles'] = int(os.getenv('MAX_AGENTIC_CYCLES'))
-            except ValueError:
-                pass  # Use default if invalid value
-        
-        if os.getenv('AGENTIC_LOOP_ENABLED'):
-            if 'ollama' not in config_data:
-                config_data['ollama'] = {}
-            config_data['ollama']['agentic_loop_enabled'] = os.getenv('AGENTIC_LOOP_ENABLED').lower() == 'true'
-            # Also apply to external config
-            if 'external' not in config_data:
-                config_data['external'] = {}
-            config_data['external']['agentic_loop_enabled'] = os.getenv('AGENTIC_LOOP_ENABLED').lower() == 'true'
-        
-        # Apply MAX_AGENTIC_CYCLES to external config as well
-        if os.getenv('MAX_AGENTIC_CYCLES'):
-            if 'external' not in config_data:
-                config_data['external'] = {}
-            try:
-                config_data['external']['max_agentic_cycles'] = int(os.getenv('MAX_AGENTIC_CYCLES'))
-            except ValueError:
-                pass
+        # ── Orchestrator settings (applied to ALL provider configs) ──
+        _orch_env_map = {
+            'ORCHESTRATOR_MAX_CYCLES':          ('orchestrator_max_cycles', int),
+            'WORKER_DEFAULT_MAX_STEPS':         ('worker_default_max_steps', int),
+            'COVERAGE_STALL_THRESHOLD':         ('coverage_stall_threshold', int),
+            'ORCHESTRATOR_DOOM_LOOP_THRESHOLD': ('orchestrator_doom_loop_threshold', int),
+        }
+        for env_key, (field_name, converter) in _orch_env_map.items():
+            raw = os.getenv(env_key)
+            if raw is not None:
+                try:
+                    value = converter(raw)
+                except (ValueError, TypeError):
+                    continue
+                for section in ('ollama', 'external', 'custom_api'):
+                    if section not in config_data:
+                        config_data[section] = {}
+                    config_data[section][field_name] = value
         
         # Apply MAX_EXECUTION_STEPS to external config
         if os.getenv('MAX_EXECUTION_STEPS'):
@@ -1902,14 +2011,6 @@ def get_config() -> BridgeConfig:
                 config_data['custom_api']['max_execution_steps'] = int(os.getenv('MAX_EXECUTION_STEPS'))
             except ValueError:
                 pass
-        if os.getenv('MAX_AGENTIC_CYCLES'):
-            try:
-                config_data['custom_api']['max_agentic_cycles'] = int(os.getenv('MAX_AGENTIC_CYCLES'))
-            except ValueError:
-                pass
-        if os.getenv('AGENTIC_LOOP_ENABLED'):
-            config_data['custom_api']['agentic_loop_enabled'] = os.getenv('AGENTIC_LOOP_ENABLED').lower() == 'true'
-        
         # Logging settings
         if os.getenv('LLM_LOGGING_ENABLED'):
             config_data['custom_api']['llm_logging_enabled'] = os.getenv('LLM_LOGGING_ENABLED').lower() == 'true'
@@ -1918,6 +2019,19 @@ def get_config() -> BridgeConfig:
         
         # Ensure model_map is explicitly empty to prevent pollution
         config_data['custom_api']['model_map'] = {}
+
+        # Layer in config-file overrides (user → project) before env-var
+        # overrides that are already in config_data.  Env vars win because
+        # they are applied AFTER the file-based defaults.
+        try:
+            from src.config_loader import ConfigLoader
+            file_overrides = ConfigLoader().load_merged_overrides()
+            if file_overrides:
+                # Deep-merge: file overrides first, then env-var overrides on top
+                from src.config_loader import _deep_merge
+                config_data = _deep_merge(file_overrides, config_data)
+        except Exception:
+            pass  # Config files are optional — never block startup
 
         _config_instance = BridgeConfig(**config_data)
     return _config_instance 
