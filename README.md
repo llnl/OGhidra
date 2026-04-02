@@ -91,7 +91,7 @@ cp .env.example .env
 The OGhidraMCP plugin supports both Ghidra 11.3.2+ and Ghidra 12.0.3 (recommended).
 Theres also a youtube video https://www.youtube.com/watch?v=hBD92FUgR0Y
 
-1. **Extract the OGhidraMCP plugin**:
+1. **Identify the OGhidraMCP plugin**:
    ```bash
    # The plugin is: OGhidraMCP_1-9.zip or OGhidra_1-9_11.zip for the Ghidra 11.3.2
    ```
@@ -99,7 +99,7 @@ Theres also a youtube video https://www.youtube.com/watch?v=hBD92FUgR0Y
 2. **Install in Ghidra**:
    - Open Ghidra -> **File** -> **Install Extensions**
    - Click **Add Extension** (green plus icon)
-   - Navigate to extracted `OGhidraMCP` folder
+   - Select the correct `OGhidraMCP.zip` for your Ghidra version
    - Restart Ghidra
 
 3. **Enable the plugin**:
