@@ -1,4 +1,5 @@
 # OGhidra - AI-Powered Reverse Engineering with Ghidra
+### Try with gemini-3.1-flash-lite-preview for insanely fast Zero-Day Hunting
 
 ![Python Version](https://img.shields.io/badge/python-3.12%2B-blue?logo=python)
 ![License](https://img.shields.io/badge/license-BSD--3--Clause-green)
@@ -6,6 +7,7 @@
 
 **OGhidra** bridges Large Language Models with Ghidra's reverse engineering platform, enabling AI-driven binary analysis through natural language. Analyze binaries conversationally, automate complex workflows, and maintain complete privacy with local AI models.
 
+YouTube Setup Tutorial
 [![OGhidra Introduction](https://img.youtube.com/vi/hBD92FUgR0Y/0.jpg)](https://www.youtube.com/watch?v=hBD92FUgR0Y)
 
 ---
