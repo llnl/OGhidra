@@ -60,6 +60,78 @@ class ThemeColors:
         self.ui_font = ('Segoe UI', 10)        # UI font
 
 
+class StatusPanel:
+    """Panel for displaying system health status."""
+
+    def __init__(self, parent):
+        self.frame = ttk.LabelFrame(parent, text="System Health", padding=8)
+
+        # Status indicators
+        self.ollama_status = ttk.Label(self.frame, text="Ollama API: Checking...", font=('Arial', 9))
+        self.ollama_status.pack(fill='x', pady=2, anchor='w')
+
+        self.ghidra_status = ttk.Label(self.frame, text="GhidraMCP API: Checking...", font=('Arial', 9))
+        self.ghidra_status.pack(fill='x', pady=2, anchor='w')
+
+        self.cag_status = ttk.Label(self.frame, text="CAG System: Checking...", font=('Arial', 9))
+        self.cag_status.pack(fill='x', pady=2, anchor='w')
+
+        # Last updated timestamp
+        self.last_updated = ttk.Label(self.frame, text="Last checked: Never", font=('Arial', 8), foreground='gray')
+        self.last_updated.pack(fill='x', pady=(5,2), anchor='e')
+
+        # Refresh button
+        self.refresh_button = ttk.Button(self.frame, text="Refresh", command=self._on_refresh_click)
+        self.refresh_button.pack(fill='x', pady=(5,0))
+
+        # Store callback for refresh
+        self.refresh_callback = None
+
+    def set_refresh_callback(self, callback):
+        """Set the callback function to be called when refresh is clicked."""
+        self.refresh_callback = callback
+
+    def _on_refresh_click(self):
+        """Handle refresh button click."""
+        if self.refresh_callback:
+            self.refresh_callback()
+
+    def update_status(self, ollama_status, ghidra_status, cag_status):
+        """Update the status indicators."""
+        # Update Ollama status
+        if isinstance(ollama_status, Exception):
+            self.ollama_status.config(text=f"Ollama API: ERROR", foreground='red')
+        else:
+            color = 'green' if ollama_status else 'red'
+            text = 'OK ✓' if ollama_status else 'NOT OK ✗'
+            self.ollama_status.config(text=f"Ollama API: {text}", foreground=color)
+
+        # Update Ghidra status
+        if isinstance(ghidra_status, Exception):
+            self.ghidra_status.config(text=f"GhidraMCP API: ERROR", foreground='red')
+        else:
+            color = 'green' if ghidra_status else 'red'
+            text = 'OK ✓' if ghidra_status else 'NOT OK ✗'
+            self.ghidra_status.config(text=f"GhidraMCP API: {text}", foreground=color)
+
+        # Update CAG status
+        if isinstance(cag_status, Exception):
+            self.cag_status.config(text=f"CAG System: ERROR", foreground='red')
+        else:
+            color = 'green' if cag_status else 'orange'
+            text = 'Enabled ✓' if cag_status else 'Disabled'
+            self.cag_status.config(text=f"CAG System: {text}", foreground=color)
+
+        # Update timestamp
+        from datetime import datetime
+        now = datetime.now().strftime("%H:%M:%S")
+        self.last_updated.config(text=f"Last checked: {now}")
+
+    def get_widget(self):
+        """Return the main widget."""
+        return self.frame
+
+
 class ServerConfigDialog:
     """Dialog for configuring server URLs."""
     
@@ -5086,15 +5158,24 @@ class OGhidraUI:
         # Workflow status tracker (above analyzed functions)
         workflow_frame = ttk.LabelFrame(parent, text="Workflow Status", padding=8)
         workflow_frame.pack(fill='x', pady=(0, 10))
-        
+
         self.workflow_diagram = WorkflowDiagram(workflow_frame, width=500, height=100)
         self.workflow_diagram.get_widget().pack()
-        
+
+        # System Health Status panel
+        self.status_panel = StatusPanel(parent)
+        self.status_panel.set_refresh_callback(self._update_health_status)
+        self.status_panel.get_widget().pack(fill='x', pady=(0, 10))
+
         # Analyzed Functions panel
         self.renamed_functions_panel = RenamedFunctionsPanel(parent, self.bridge)
         self.renamed_functions_panel.get_widget().pack(fill='both', expand=True)
         # Start auto-refresh for renamed functions
         self.renamed_functions_panel._start_auto_refresh()
+
+        # Initial health check and setup periodic updates
+        self._update_health_status()
+        self._start_health_check_timer()
 
         # Wire analyzed-functions panel into the query panel so Hybrid Search status can
         # accurately reflect whether summaries are available.
@@ -5891,35 +5972,52 @@ class OGhidraUI:
             logger.error(f"Streaming setup error: {e}\n{traceback.format_exc()}")
     
     def _health_check(self):
-        """Perform a health check."""
+        """Perform a health check and trigger status panel update."""
+        self._update_health_status()
+
+    def _update_health_status(self):
+        """Update the health status in the status panel."""
         def check():
-            results = []
-            
             # Check Ollama
+            ollama_result = None
             try:
-                ollama_health = self.bridge.ollama.check_health()
-                results.append(f"Ollama API: {'OK ✅' if ollama_health else 'NOT OK ❌'}")
+                ollama_result = self.bridge.ollama.check_health()
             except Exception as e:
-                results.append(f"Ollama API: ERROR - {e}")
-            
+                ollama_result = e
+
             # Check Ghidra
+            ghidra_result = None
             try:
-                ghidra_health = self.bridge.ghidra.check_health()
-                results.append(f"GhidraMCP API: {'OK ✅' if ghidra_health else 'NOT OK ❌'}")
+                ghidra_result = self.bridge.ghidra.check_health()
             except Exception as e:
-                results.append(f"GhidraMCP API: ERROR - {e}")
-            
+                ghidra_result = e
+
             # Check CAG
+            cag_result = None
             try:
-                cag_enabled = getattr(self.bridge, 'enable_cag', False)
-                results.append(f"CAG System: {'Enabled ✅' if cag_enabled else 'Disabled ❌'}")
+                cag_result = getattr(self.bridge, 'enable_cag', False)
             except Exception as e:
-                results.append(f"CAG System: ERROR - {e}")
-            
-            # Show results
-            messagebox.showinfo("Health Check", "\n".join(results))
-        
+                cag_result = e
+
+            # Update status panel on main thread
+            def update_ui():
+                if hasattr(self, 'status_panel'):
+                    self.status_panel.update_status(ollama_result, ghidra_result, cag_result)
+
+            self.root.after(10, update_ui)
+
         threading.Thread(target=check, daemon=True).start()
+
+    def _start_health_check_timer(self):
+        """Start a timer to periodically update the health status."""
+        # Update every 60 seconds
+        def timer_callback():
+            self._update_health_status()
+            # Reschedule the timer
+            self.root.after(60000, timer_callback)
+
+        # Schedule the first timer
+        self.root.after(60000, timer_callback)
     
     def _show_system_info(self):
         """Show system information dialog with CAG/RAG controls and memory stats."""
