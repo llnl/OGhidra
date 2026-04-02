@@ -157,7 +157,7 @@ OLLAMA_EMBEDDING_MODEL=nomic-embed-text
 LLM_PROVIDER=external
 EXTERNAL_PROVIDER=google
 EXTERNAL_API_KEY=your-api-key-here
-EXTERNAL_MODEL=gemini-3-flash-preview
+EXTERNAL_MODEL=gemini-3.1-flash-lite-preview
 EXTERNAL_EMBEDDING_MODEL=gemini-embedding-001
 ```
 
