@@ -12,6 +12,7 @@ from ttkbootstrap.constants import *
 import threading
 import json
 import time
+import queue
 from datetime import datetime
 from typing import Dict, Any, Optional, List
 import logging
@@ -76,26 +77,6 @@ class StatusPanel:
         self.cag_status = ttk.Label(self.frame, text="CAG System: Checking...", font=('Arial', 9))
         self.cag_status.pack(fill='x', pady=2, anchor='w')
 
-        # Last updated timestamp
-        self.last_updated = ttk.Label(self.frame, text="Last checked: Never", font=('Arial', 8), foreground='gray')
-        self.last_updated.pack(fill='x', pady=(5,2), anchor='e')
-
-        # Refresh button
-        self.refresh_button = ttk.Button(self.frame, text="Refresh", command=self._on_refresh_click)
-        self.refresh_button.pack(fill='x', pady=(5,0))
-
-        # Store callback for refresh
-        self.refresh_callback = None
-
-    def set_refresh_callback(self, callback):
-        """Set the callback function to be called when refresh is clicked."""
-        self.refresh_callback = callback
-
-    def _on_refresh_click(self):
-        """Handle refresh button click."""
-        if self.refresh_callback:
-            self.refresh_callback()
-
     def update_status(self, ollama_status, ghidra_status, cag_status):
         """Update the status indicators."""
         # Update Ollama status
@@ -121,11 +102,6 @@ class StatusPanel:
             color = 'green' if cag_status else 'orange'
             text = 'Enabled ✓' if cag_status else 'Disabled'
             self.cag_status.config(text=f"CAG System: {text}", foreground=color)
-
-        # Update timestamp
-        from datetime import datetime
-        now = datetime.now().strftime("%H:%M:%S")
-        self.last_updated.config(text=f"Last checked: {now}")
 
     def get_widget(self):
         """Return the main widget."""
@@ -5054,6 +5030,9 @@ class OGhidraUI:
         self.bridge = bridge
         self.config = config
 
+        # Create a thread-safe queue for UI updates
+        self.update_queue = queue.Queue()
+
         # Allow Bridge to access UI state (e.g., analyzed functions tree) for prompt enrichment.
         try:
             setattr(self.bridge, '_ui_instance', self)
@@ -5164,7 +5143,6 @@ class OGhidraUI:
 
         # System Health Status panel
         self.status_panel = StatusPanel(parent)
-        self.status_panel.set_refresh_callback(self._update_health_status)
         self.status_panel.get_widget().pack(fill='x', pady=(0, 10))
 
         # Analyzed Functions panel
@@ -5220,7 +5198,6 @@ class OGhidraUI:
         # Tools menu
         tools_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Tools", menu=tools_menu)
-        tools_menu.add_command(label="Health Check", command=self._health_check)
         tools_menu.add_command(label="System Info", command=self._show_system_info)
         tools_menu.add_command(label="Server Configuration", command=self._configure_servers)
         tools_menu.add_separator()
@@ -5970,10 +5947,6 @@ class OGhidraUI:
             messagebox.showerror("Error", f"Failed to setup streaming load: {e}")
             import traceback
             logger.error(f"Streaming setup error: {e}\n{traceback.format_exc()}")
-    
-    def _health_check(self):
-        """Perform a health check and trigger status panel update."""
-        self._update_health_status()
 
     def _update_health_status(self):
         """Update the health status in the status panel."""
@@ -5999,12 +5972,9 @@ class OGhidraUI:
             except Exception as e:
                 cag_result = e
 
-            # Update status panel on main thread
-            def update_ui():
-                if hasattr(self, 'status_panel'):
-                    self.status_panel.update_status(ollama_result, ghidra_result, cag_result)
-
-            self.root.after(10, update_ui)
+            # Instead of directly calling after, put the results in the queue
+            # for the main thread to process
+            self.update_queue.put((ollama_result, ghidra_result, cag_result))
 
         threading.Thread(target=check, daemon=True).start()
 
@@ -6013,10 +5983,10 @@ class OGhidraUI:
         # Update every 60 seconds
         def timer_callback():
             self._update_health_status()
-            # Reschedule the timer
+            # Reschedule the timer - this runs in the main thread so it's safe
             self.root.after(60000, timer_callback)
 
-        # Schedule the first timer
+        # Schedule the first timer from the main thread
         self.root.after(60000, timer_callback)
     
     def _show_system_info(self):
@@ -6307,9 +6277,33 @@ Features:
             self.root.quit()
             self.root.destroy()
     
+    def _process_update_queue(self):
+        """Process any pending UI updates from the queue."""
+        try:
+            # Check if there are any updates in the queue
+            while not self.update_queue.empty():
+                # Get update data from the queue
+                ollama_result, ghidra_result, cag_result = self.update_queue.get_nowait()
+
+                # Update the status panel if it exists
+                if hasattr(self, 'status_panel'):
+                    self.status_panel.update_status(ollama_result, ghidra_result, cag_result)
+
+                # Mark the task as done
+                self.update_queue.task_done()
+        except Exception as e:
+            logger.error(f"Error processing update queue: {e}")
+
+        # Schedule this method to run again after 10ms if the UI is still active
+        if hasattr(self, 'root') and self.root:
+            self.root.after(10, self._process_update_queue)
+
     def run(self):
         """Run the UI main loop."""
         try:
+            # Start the queue processor before entering the main loop
+            self._process_update_queue()
+
             self.root.mainloop()
         except KeyboardInterrupt:
             self._quit_application()
