@@ -323,38 +323,38 @@ Analysis state carries across queries within a session:
                           └──────────┬───────────┘
                                      │
                           ┌──────────▼───────────┐
-                          │    Query Router       │
-                          │  (1 LLM call: route   │
-                          │   + classify strategy) │
+                          │    Query Router      │
+                          │  (1 LLM call: route  │
+                          │  + classify strategy)│
                           └─────┬──────────┬─────┘
                                 │          │
-                    ┌───────────▼──┐  ┌────▼─────────────┐
-                    │Conversational│  │  Investigation    │
-                    │    Mode      │  │     Mode          │
-                    └───────┬──────┘  └────┬─────────────┘
+                    ┌───────────▼──┐  ┌────▼────────────┐
+                    │Conversational│  │  Investigation  │
+                    │    Mode      │  │     Mode        │
+                    └───────┬──────┘  └────┬────────────┘
                             │              │
-               ┌────────────▼──┐   ┌───────▼──────────────────┐
+               ┌────────────▼──┐   ┌───────▼───────────────────┐
                │ Single Worker │   │ Orchestrator              │
                │    Loop       │   │  ├─ Recon Phase           │
                │               │   │  ├─ Correlation Hooks     │
                │ LLM sees:     │   │  ├─ Multi-Cycle Loop      │
-               │ • Tools       │   │  │  └─ Worker → Synthesis  │
-               │ • History     │   │  └─ Final Report           │
-               │ • Blackboard  │   └──────────────────────────┘
+               │ • Tools       │   │  │  └─ Worker → Synthesis │
+               │ • History     │   │  └─ Final Report          │
+               │ • Blackboard  │   └───────────────────────────┘
                └───────┬───────┘               │
                        │                       │
                        ▼                       ▼
               ┌─────────────────────────────────────────┐
-              │            Shared Blackboard             │
+              │            Shared Blackboard            │
               │  ┌────────────┐  ┌────────────────────┐ │
-              │  │ Function   │  │ Discovery Cache     │ │
-              │  │ Registry   │  │ (imports/exports)   │ │
+              │  │ Function   │  │ Discovery Cache    │ │
+              │  │ Registry   │  │ (imports/exports)  │ │
               │  ├────────────┤  ├────────────────────┤ │
-              │  │ Coverage   │  │ Tool Health         │ │
-              │  │ Tracker    │  │ Tracker             │ │
+              │  │ Coverage   │  │ Tool Health        │ │
+              │  │ Tracker    │  │ Tracker            │ │
               │  ├────────────┤  ├────────────────────┤ │
-              │  │ Notebook   │  │ Conversation        │ │
-              │  │ (findings) │  │ History             │ │
+              │  │ Notebook   │  │ Conversation       │ │
+              │  │ (findings) │  │ History            │ │
               │  └────────────┘  └────────────────────┘ │
               └──────────────────┬──────────────────────┘
                                  │
