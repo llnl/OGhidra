@@ -319,7 +319,7 @@ Analysis state carries across queries within a session:
 
 ```
                           ┌──────────────────────┐
-                          │     User Query        │
+                          │     User Query       │
                           └──────────┬───────────┘
                                      │
                           ┌──────────▼───────────┐
