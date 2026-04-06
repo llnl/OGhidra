@@ -81,25 +81,25 @@ class StatusPanel:
         """Update the status indicators."""
         # Update Ollama status
         if isinstance(ollama_status, Exception):
-            self.ollama_status.config(text=f"Ollama API: ERROR", foreground='red')
+            self.ollama_status.config(text=f"Ollama API: ERROR", foreground='#FF0000')
         else:
-            color = 'green' if ollama_status else 'red'
+            color = "#2BC72B" if ollama_status else '#FF0000'
             text = 'OK ✓' if ollama_status else 'NOT OK ✗'
             self.ollama_status.config(text=f"Ollama API: {text}", foreground=color)
 
         # Update Ghidra status
         if isinstance(ghidra_status, Exception):
-            self.ghidra_status.config(text=f"GhidraMCP API: ERROR", foreground='red')
+            self.ghidra_status.config(text=f"GhidraMCP API: ERROR", foreground='#FF0000')
         else:
-            color = 'green' if ghidra_status else 'red'
+            color = '#2BC72B' if ghidra_status else '#FF0000'
             text = 'OK ✓' if ghidra_status else 'NOT OK ✗'
             self.ghidra_status.config(text=f"GhidraMCP API: {text}", foreground=color)
 
         # Update CAG status
         if isinstance(cag_status, Exception):
-            self.cag_status.config(text=f"CAG System: ERROR", foreground='red')
+            self.cag_status.config(text=f"CAG System: ERROR", foreground='#FF0000')
         else:
-            color = 'green' if cag_status else 'orange'
+            color = '#2BC72B' if cag_status else '#FFA500'
             text = 'Enabled ✓' if cag_status else 'Disabled'
             self.cag_status.config(text=f"CAG System: {text}", foreground=color)
 
@@ -1509,10 +1509,10 @@ class RenamedFunctionsPanel:
                     results_text += f"❌ Failed to load: {vectors_failed} vectors\n"
                 results_text += f"📊 Total processed: {total_functions} functions"
                 
-                results_label.config(text=results_text, foreground='green')
+                results_label.config(text=results_text, foreground='#2BC72B')
                 
                 # Update vector status label
-                self.vector_status_label.config(text=f"Vectors: {vectors_loaded} loaded", foreground='green')
+                self.vector_status_label.config(text=f"Vectors: {vectors_loaded} loaded", foreground='#2BC72B')
                 
                 # Update memory panel if available
                 if hasattr(self.bridge, 'cag_manager') and self.bridge.cag_manager:
@@ -1545,7 +1545,7 @@ class RenamedFunctionsPanel:
                 
             except Exception as e:
                 progress_status.config(text="Error occurred during vector loading!")
-                results_label.config(text=f"❌ Error: {str(e)}", foreground='red')
+                results_label.config(text=f"❌ Error: {str(e)}", foreground='#FF0000')
                 logger.error(f"Vector loading error: {e}")
                 
                 # Add close button
@@ -2298,6 +2298,8 @@ class AIResponsePanel:
         }
         self.response_history.append(response_entry)
         
+        logger.log(level=0, msg=content)
+        
         # Display in text widget
         formatted_response = f"\n{'='*60}\n"
         formatted_response += f"[{timestamp.strftime('%H:%M:%S')}] {response_type.upper()}\n"
@@ -2563,7 +2565,7 @@ class QueryInputPanel:
         self.rename_button.pack(side='left')
         
         # Status and progress
-        self.status_label = ttk.Label(self.frame, text="Ready", foreground='green')
+        self.status_label = ttk.Label(self.frame, text="Ready", foreground='#2BC72B')
         self.status_label.grid(row=5, column=0, columnspan=2, pady=(10, 0))
         
         # Progress bar and stop button frame
@@ -2637,7 +2639,7 @@ class QueryInputPanel:
         enabled = bool(self.task_mode_enabled_var.get())
         mode = str(self.task_mode_var.get())
         if enabled:
-            self.task_mode_status.config(text=f"On ({mode})", foreground='green')
+            self.task_mode_status.config(text=f"On ({mode})", foreground='#2BC72B')
         else:
             self.task_mode_status.config(text="Off", foreground='gray')
 
@@ -2672,12 +2674,12 @@ class QueryInputPanel:
             if has_summaries:
                 self.grep_status.config(
                     text=f"On - {summary_count} function(s) indexed", 
-                    foreground='green'
+                    foreground='#2BC72B'
                 )
             else:
                 self.grep_status.config(
-                    text="On - Waiting for summaries", 
-                    foreground='orange'
+                    text="On - Waiting for summaries",
+                    foreground='#FFA500'  # Using hex color instead of named color for better compatibility
                 )
         else:
             if has_summaries:
@@ -2742,10 +2744,10 @@ class QueryInputPanel:
         # Update status and progress
         if running:
             self.should_stop = False  # Reset stop flag for new query
-            self.status_label.config(text="Processing query...", foreground='orange')
+            self.status_label.config(text="Processing query...", foreground='#FFA500')  # Using hex color instead of named color
             self.progress.start()
         else:
-            self.status_label.config(text="Ready", foreground='green')
+            self.status_label.config(text="Ready", foreground='#2BC72B')
             self.progress.stop()
     
     def _monitor_workflow_stage(self):
@@ -2818,7 +2820,7 @@ class ToolButtonsPanel:
         next_row = (len(smart_tools) + 1) // 2
         
         # Status indicator
-        self.status_label = ttk.Label(self.frame, text="Ready", foreground='green')
+        self.status_label = ttk.Label(self.frame, text="Ready", foreground='#2BC72B')
         self.status_label.grid(row=next_row, column=0, columnspan=2, pady=(10, 0))
         
         # Progress bar and stop button frame
@@ -2852,10 +2854,11 @@ class ToolButtonsPanel:
         # Update status and progress
         if running:
             self.should_stop = False  # Reset stop flag for new tool
-            self.status_label.config(text=f"Running {tool_name}...", foreground='orange')
+            # Using hex color instead of named color for better cross-platform compatibility
+            self.status_label.config(text=f"Running {tool_name}...", foreground='#FFA500')
             self.progress.start()
         else:
-            self.status_label.config(text="Ready", foreground='green')
+            self.status_label.config(text="Ready", foreground='#2BC72B')
             self.progress.stop()
     
     def _run_ai_agent_query(self, query: str, tool_name: str):
@@ -4912,10 +4915,11 @@ Please provide a comprehensive analysis of this information.
         # Update status and progress
         if running:
             self.should_stop = False  # Reset stop flag for new tool
-            self.status_label.config(text=f"Running {tool_name}...", foreground='orange')
+            # Using hex color instead of named color for better cross-platform compatibility
+            self.status_label.config(text=f"Running {tool_name}...", foreground='#FFA500')
             self.progress.start()
         else:
-            self.status_label.config(text="Ready", foreground='green')
+            self.status_label.config(text="Ready", foreground='#2BC72B')
             self.progress.stop()
 
     def _search_strings(self):
@@ -6012,14 +6016,14 @@ class OGhidraUI:
         
         cag_enabled = getattr(self.bridge, 'enable_cag', False)
         cag_status = ttk.Label(cag_frame, text=f"Status: {'Enabled' if cag_enabled else 'Disabled'}", 
-                              foreground='green' if cag_enabled else 'gray')
+                              foreground='#2BC72B' if cag_enabled else 'gray')
         cag_status.pack(anchor='w')
         
         cag_var = tk.BooleanVar(value=cag_enabled)
         def toggle_cag():
             self.bridge.enable_cag = cag_var.get()
             cag_status.config(text=f"Status: {'Enabled' if cag_var.get() else 'Disabled'}",
-                            foreground='green' if cag_var.get() else 'gray')
+                            foreground='#2BC72B' if cag_var.get() else 'gray')
         cag_check = ttk.Checkbutton(cag_frame, text="Enable CAG", variable=cag_var, command=toggle_cag)
         cag_check.pack(anchor='w', pady=(5, 0))
         
@@ -6045,7 +6049,7 @@ class OGhidraUI:
             rag_enabled = getattr(self.bridge.cag_manager, 'use_vector_store_for_prompts', True)
         
         rag_status = ttk.Label(rag_frame, text=f"Status: {'Enabled' if rag_enabled else 'Disabled'} ({get_vector_count()} vectors)",
-                              foreground='green' if rag_enabled else 'gray')
+                              foreground='#2BC72B' if rag_enabled else 'gray')
         rag_status.pack(anchor='w')
         
         rag_var = tk.BooleanVar(value=rag_enabled)
@@ -6055,7 +6059,7 @@ class OGhidraUI:
             # Refresh vector count when toggling
             current_count = get_vector_count()
             rag_status.config(text=f"Status: {'Enabled' if rag_var.get() else 'Disabled'} ({current_count} vectors)",
-                            foreground='green' if rag_var.get() else 'gray')
+                            foreground='#2BC72B' if rag_var.get() else 'gray')
         rag_check = ttk.Checkbutton(rag_frame, text="Enable RAG", variable=rag_var, command=toggle_rag)
         rag_check.pack(anchor='w', pady=(5, 0))
         
@@ -6064,7 +6068,7 @@ class OGhidraUI:
             current_count = get_vector_count()
             is_enabled = rag_var.get()
             rag_status.config(text=f"Status: {'Enabled' if is_enabled else 'Disabled'} ({current_count} vectors)",
-                            foreground='green' if is_enabled else 'gray')
+                            foreground='#2BC72B' if is_enabled else 'gray')
         ttk.Button(rag_frame, text="Refresh Count", command=refresh_rag_status).pack(anchor='w', pady=(5, 0))
         
         # Memory Stats
