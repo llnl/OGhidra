@@ -90,7 +90,7 @@ class StatusPanel:
         if isinstance(ollama_status, Exception):
             self.ollama_status.after(
                 0,
-                self.ollama_status.config(
+                lambda: self.ollama_status.config(
                     text=f"Ollama API: ERROR", foreground="#FF0000"
                 ),
             )
@@ -99,14 +99,16 @@ class StatusPanel:
             text = "OK ✓" if ollama_status else "NOT OK ✗"
             self.ollama_status.after(
                 0,
-                self.ollama_status.config(text=f"Ollama API: {text}", foreground=color),
+                lambda: self.ollama_status.config(
+                    text=f"Ollama API: {text}", foreground=color
+                ),
             )
 
         # Update Ghidra status
         if isinstance(ghidra_status, Exception):
             self.ghidra_status.after(
                 0,
-                self.ghidra_status.config(
+                lambda: self.ghidra_status.config(
                     text=f"GhidraMCP API: ERROR", foreground="#FF0000"
                 ),
             )
@@ -115,7 +117,7 @@ class StatusPanel:
             text = "OK ✓" if ghidra_status else "NOT OK ✗"
             self.ghidra_status.after(
                 0,
-                self.ghidra_status.config(
+                lambda: self.ghidra_status.config(
                     text=f"GhidraMCP API: {text}", foreground=color
                 ),
             )
@@ -124,13 +126,18 @@ class StatusPanel:
         if isinstance(cag_status, Exception):
             self.cag_status.after(
                 0,
-                self.cag_status.config(text=f"CAG System: ERROR", foreground="#FF0000"),
+                lambda: self.cag_status.config(
+                    text=f"CAG System: ERROR", foreground="#FF0000"
+                ),
             )
         else:
             color = "#2BC72B" if cag_status else "#FFA500"
             text = "Enabled ✓" if cag_status else "Disabled"
             self.cag_status.after(
-                0, self.cag_status.config(text=f"CAG System: {text}", foreground=color)
+                0,
+                lambda: self.cag_status.config(
+                    text=f"CAG System: {text}", foreground=color
+                ),
             )
 
     def get_widget(self):
@@ -818,8 +825,10 @@ class SessionLoadDialog:
             borderwidth=1,
             highlightthickness=0,
         )
-        self.session_listbox.pack(side="left", fill="both", expand=True)
-        scrollbar.after(0, scrollbar.config(command=self.session_listbox.yview))
+        self.session_listbox.after(
+            0, lambda: self.session_listbox.pack(side="left", fill="both", expand=True)
+        )
+        scrollbar.after(0, lambda: scrollbar.config(command=self.session_listbox.yview))
 
         # Populate sessions
         for session in self.sessions:
@@ -914,7 +923,7 @@ class WorkflowDiagram:
 
     def _draw_workflow(self):
         """Draw the workflow diagram."""
-        self.canvas.delete("all")
+        self.canvas.after(0, lambda: self.canvas.delete("all"))
 
         # Calculate positions
         stage_width = (self.width - 40) // len(self.stages)
@@ -934,37 +943,37 @@ class WorkflowDiagram:
                 text_color = self.text_idle_color
                 outline_color = "#5a5a5a"
 
-            # Draw stage box with rounded appearance (using softer outline)
-            self.canvas.after(
-                0,
-                self.canvas.create_rectangle(
-                    x_start,
-                    y_center - 15,
-                    x_start + stage_width - 10,
-                    y_center + 15,
-                    fill=color,
-                    outline=outline_color,
-                    width=1,
-                ),
-            )
+                # Draw stage box with rounded appearance (using softer outline)
+                self.canvas.after(
+                    0,
+                    lambda: self.canvas.create_rectangle(
+                        x_start,
+                        y_center - 15,
+                        x_start + stage_width - 10,
+                        y_center + 15,
+                        fill=color,
+                        outline=outline_color,
+                        width=1,
+                    ),
+                )
 
-            # Draw stage text
-            self.canvas.after(
-                0,
-                self.canvas.create_text(
-                    x_center - 5,
-                    y_center,
-                    text=stage,
-                    fill=text_color,
-                    font=("Segoe UI", 9, "bold"),
-                ),
-            )
+                # Draw stage text
+                self.canvas.after(
+                    0,
+                    lambda: self.canvas.create_text(
+                        x_center - 5,
+                        y_center,
+                        text=stage,
+                        fill=text_color,
+                        font=("Segoe UI", 9, "bold"),
+                    ),
+                )
             # Draw arrow to next stage (light color for dark theme)
             if i < len(self.stages) - 1:
                 arrow_x = x_start + stage_width - 5
                 self.canvas.after(
                     0,
-                    self.canvas.create_line(
+                    lambda: self.canvas.create_line(
                         arrow_x,
                         y_center,
                         arrow_x + 10,
@@ -979,7 +988,7 @@ class WorkflowDiagram:
         if self.rag_active and self.rag_status_text:
             self.canvas.after(
                 0,
-                self.canvas.create_text(
+                lambda: self.canvas.create_text(
                     self.width // 2,
                     self.height - 15,
                     text=self.rag_status_text,
@@ -1133,7 +1142,7 @@ class MemoryInfoPanel:
             cag_enabled = getattr(self.bridge, "enable_cag", False)
             self.cag_status.after(
                 0,
-                self.cag_status.config(
+                lambda: self.cag_status.config(
                     text="Enabled ✅" if cag_enabled else "Disabled ❌"
                 ),
             )
@@ -1196,7 +1205,7 @@ class MemoryInfoPanel:
 
             self.vector_status.after(
                 0,
-                self.vector_status.config(
+                lambda: self.vector_status.config(
                     text=f"{'Enabled' if rag_enabled else 'Disabled'} ({vector_count} vectors)"
                 ),
             )
@@ -1204,13 +1213,18 @@ class MemoryInfoPanel:
 
             # Memory Stats
             stats_text = self._get_memory_stats()
-            self.memory_text.delete(1.0, tk.END)
-            self.memory_text.insert(1.0, stats_text)
+            self.memory_text.after(0, lambda: self.memory_text.delete(1.0, tk.END))
+            self.memory_text.after(0, lambda: self.memory_text.insert(1.0, stats_text))
 
         except Exception as e:
             logger.error(f"Error updating memory info: {e}")
-            self.memory_text.delete(1.0, tk.END)
-            self.memory_text.insert(1.0, f"Error updating memory info: {e}")
+            self.memory_text.after(0, lambda: self.memory_text.delete(1.0, tk.END))
+            self.memory_text.after(
+                0,
+                lambda: self.memory_text.insert(
+                    1.0, f"Error updating memory info: {e}"
+                ),
+            )
 
     def _toggle_cag(self):
         """Toggle CAG system on/off."""
@@ -1719,14 +1733,15 @@ class RenamedFunctionsPanel:
                 # Disable the button during loading
                 self.load_vectors_button.after(
                     0,
-                    self.load_vectors_button.config(
+                    lambda: self.load_vectors_button.config(
                         state="disabled", text="Loading..."
                     ),
                 )
 
                 # Get all function data
                 progress_status.after(
-                    0, progress_status.config(text="Collecting function data...")
+                    0,
+                    lambda: progress_status.config(text="Collecting function data..."),
                 )
                 progress_dialog.update()
 
@@ -1813,11 +1828,13 @@ class RenamedFunctionsPanel:
                             )
 
                 total_functions = len(functions_to_process)
-                progress_bar.after(0, progress_bar.config(maximum=total_functions))
+                progress_bar.after(
+                    0, lambda: progress_bar.config(maximum=total_functions)
+                )
 
                 progress_status.after(
                     0,
-                    progress_bar.config(
+                    lambda: progress_bar.config(
                         text=f"Loading {total_functions} functions into vectors..."
                     ),
                 )
@@ -1825,7 +1842,10 @@ class RenamedFunctionsPanel:
 
                 # **OPTIMIZED: Batch processing approach with embeddings**
                 progress_status.after(
-                    0, progress_status.config(text="Initializing embedding service...")
+                    0,
+                    lambda: progress_status.config(
+                        text="Initializing embedding service..."
+                    ),
                 )
                 progress_dialog.update()
 
@@ -1868,7 +1888,7 @@ class RenamedFunctionsPanel:
 
                     progress_status.after(
                         0,
-                        progress_status.config(
+                        lambda: progress_status.config(
                             text=f"Processing batch {batch_num + 1} of {num_batches}"
                         ),
                     )
@@ -1921,11 +1941,11 @@ class RenamedFunctionsPanel:
                             # Update progress
                             overall_progress = batch_start + i + 1
                             progress_bar.after(
-                                0, progress_bar.config(value=overall_progress)
+                                0, lambda: progress_bar.config(value=overall_progress)
                             )
                             progress_detail.after(
                                 0,
-                                progress_detail.config(
+                                lambda: progress_detail.config(
                                     text=f"Added: {func_data['new_name']}"
                                 ),
                             )
@@ -1946,7 +1966,7 @@ class RenamedFunctionsPanel:
 
                 # Update results
                 progress_status.after(
-                    0, progress_status.config(text="Vector loading completed!")
+                    0, lambda: progress_status.config(text="Vector loading completed!")
                 )
                 results_text = f"✅ Successfully loaded: {vectors_loaded} vectors\n"
                 if vectors_failed > 0:
@@ -1954,13 +1974,16 @@ class RenamedFunctionsPanel:
                 results_text += f"📊 Total processed: {total_functions} functions"
 
                 results_label.after(
-                    0, results_label.config(text=results_text, foreground="#2BC72B")
+                    0,
+                    lambda: results_label.config(
+                        text=results_text, foreground="#2BC72B"
+                    ),
                 )
 
                 # Update vector status label
                 self.vector_status_label.after(
                     0,
-                    self.vector_status_label.config(
+                    lambda: self.vector_status_label.config(
                         text=f"Vectors: {vectors_loaded} loaded", foreground="#2BC72B"
                     ),
                 )
@@ -1989,7 +2012,7 @@ class RenamedFunctionsPanel:
                     progress_dialog.destroy()
                     self.load_vectors_button.after(
                         0,
-                        self.load_vectors_button.config(
+                        lambda: self.load_vectors_button.config(
                             state="normal", text="Load Vectors"
                         ),
                     )
@@ -2006,13 +2029,13 @@ class RenamedFunctionsPanel:
             except Exception as e:
                 progress_status.after(
                     0,
-                    progress_status.config(
+                    lambda: progress_status.config(
                         text="Error occurred during vector loading!"
                     ),
                 )
                 results_label.after(
                     0,
-                    results_label.config(
+                    lambda: results_label.config(
                         text=f"❌ Error: {str(e)}", foreground="#FF0000"
                     ),
                 )
@@ -2023,7 +2046,7 @@ class RenamedFunctionsPanel:
                     progress_dialog.destroy()
                     self.load_vectors_button.after(
                         0,
-                        self.load_vectors_button.config(
+                        lambda: self.load_vectors_button.config(
                             state="normal", text="Load Vectors"
                         ),
                     )
@@ -2101,7 +2124,7 @@ class RenamedFunctionsPanel:
 
                 if not hasattr(self.bridge, "analysis_state"):
                     self.count_label.after(
-                        0, self.count_label.config(text="Functions: 0")
+                        0, lambda: self.count_label.config(text="Functions: 0")
                     )
                     return
 
@@ -2176,7 +2199,10 @@ class RenamedFunctionsPanel:
 
                 total_functions = len(unique_functions)
                 self.count_label.after(
-                    0, self.count_label.config(text=f"Functions: {total_functions}")
+                    0,
+                    lambda: self.count_label.config(
+                        text=f"Functions: {total_functions}"
+                    ),
                 )
 
                 # Use the function address mapping as the primary source to avoid duplicates
@@ -2960,8 +2986,6 @@ class AIResponsePanel:
         }
         self.response_history.append(response_entry)
 
-        logger.log(level=0, msg=content)
-
         # Display in text widget
         formatted_response = f"\n{'='*60}\n"
         formatted_response += (
@@ -2971,9 +2995,9 @@ class AIResponsePanel:
         formatted_response += f"{content}\n"
 
         self.response_text.after(
-            0, self.response_text.insert(tk.END, formatted_response)
+            0, lambda: self.response_text.insert(tk.END, formatted_response)
         )
-        self.response_text.after(0, self.response_text.see(tk.END))
+        self.response_text.after(0, lambda: self.response_text.see(tk.END))
 
     def add_cot_update(
         self, update_type: str, content: str, timestamp: Optional[datetime] = None
@@ -3352,11 +3376,13 @@ class QueryInputPanel:
         if enabled:
             self.task_mode_status.after(
                 0,
-                self.task_mode_status.config(text=f"On ({mode})", foreground="#2BC72B"),
+                lambda: self.task_mode_status.config(
+                    text=f"On ({mode})", foreground="#2BC72B"
+                ),
             )
         else:
             self.task_mode_status.after(
-                0, self.task_mode_status.config(text="Off", foreground="gray")
+                0, lambda: self.task_mode_status.config(text="Off", foreground="gray")
             )
 
         try:
@@ -3395,7 +3421,7 @@ class QueryInputPanel:
             if has_summaries:
                 self.grep_status.after(
                     0,
-                    self.grep_status.config(
+                    lambda: self.grep_status.config(
                         text=f"On - {summary_count} function(s) indexed",
                         foreground="#2BC72B",
                     ),
@@ -3403,7 +3429,7 @@ class QueryInputPanel:
             else:
                 self.grep_status.after(
                     0,
-                    self.grep_status.config(
+                    lambda: self.grep_status.config(
                         text="On - Waiting for summaries",
                         foreground="#FFA500",  # Using hex color instead of named color for better compatibility
                     ),
@@ -3412,7 +3438,7 @@ class QueryInputPanel:
             if has_summaries:
                 self.grep_status.after(
                     0,
-                    self.grep_status.config(
+                    lambda: self.grep_status.config(
                         text=f"Off - {summary_count} function(s) available",
                         foreground="gray",
                     ),
@@ -3420,7 +3446,7 @@ class QueryInputPanel:
             else:
                 self.grep_status.after(
                     0,
-                    self.grep_status.config(
+                    lambda: self.grep_status.config(
                         text="Off - No summaries loaded", foreground="gray"
                     ),
                 )
@@ -3472,11 +3498,12 @@ class QueryInputPanel:
 
         # Update button states
         state = "disabled" if running else "normal"
-        self.send_button.after(0, self.send_button.config(state=state))
-        self.analyze_button.after(0, self.analyze_button.config(state=state))
-        self.rename_button.after(0, self.rename_button.config(state=state))
+        self.send_button.after(0, lambda: self.send_button.config(state=state))
+        self.analyze_button.after(0, lambda: self.analyze_button.config(state=state))
+        self.rename_button.after(0, lambda: self.rename_button.config(state=state))
         self.stop_button.after(
-            0, self.stop_button.config(state="normal" if running else "disabled")
+            0,
+            lambda: self.stop_button.config(state="normal" if running else "disabled"),
         )
 
         # Update status and progress
@@ -3488,12 +3515,12 @@ class QueryInputPanel:
                     text="Processing query...", foreground="#FFA500"
                 ),
             )
-            self.progress.after(0, self.progress.start())
+            self.progress.after(0, self.progress.start)
         else:
             self.status_label.after(
-                0, self.status_label.config(text="Ready", foreground="#2BC72B")
+                0, lambda: self.status_label.config(text="Ready", foreground="#2BC72B")
             )
-            self.progress.after(0, self.progress.stop())
+            self.progress.after(0, self.progress.stop)
 
     def _monitor_workflow_stage(self):
         """Monitor the bridge's workflow stage and update the diagram."""
@@ -3551,38 +3578,102 @@ class ToolButtonsPanel:
     def _setup_widgets(self):
         """Setup the tool button widgets."""
         # Smart tool buttons (use AI agent workflow)
-        smart_tools = [
-            (
-                "analyze-current",
-                "Analyze Current Function",
-                self._analyze_current_function,
-            ),
-            (
-                "rename-current",
-                "Rename Current Function",
-                self._rename_current_function,
-            ),
-            ("rename-all", "Rename All Functions", self._rename_all_functions),
-            (
-                "generate-report",
-                "Generate Software Report",
-                self._generate_software_report,
-            ),
-            ("analyze-imports", "Analyze Imports", self._analyze_imports),
-            ("analyze-strings", "Analyze Strings", self._analyze_strings),
-            ("analyze-exports", "Analyze Exports", self._analyze_exports),
-            ("search-strings", "Search Strings", self._search_strings),
-            ("scan-tables", "Scan Function Tables", self._scan_function_tables),
-        ]
+        # Store all tool buttons in a list for easy management
+        self.tool_buttons = []
 
-        for i, (tool_id, label, command) in enumerate(smart_tools):
-            btn = ttk.Button(
-                self.frame, text=label, command=command, width=25, state="normal"
-            )
-            btn.grid(row=i // 2, column=i % 2, padx=5, pady=5, sticky="ew")
+        # Create individual buttons as class attributes
+        self.analyze_current_btn = ttk.Button(
+            self.frame,
+            text="Analyze Current Function",
+            command=self._analyze_current_function,
+            width=25,
+            state="normal",
+        )
+        self.analyze_current_btn.grid(row=0, column=0, padx=5, pady=5, sticky="ew")
+        self.tool_buttons.append(self.analyze_current_btn)
 
-        # Calculate the next row after buttons (buttons use rows 0 to (len-1)//2)
-        next_row = (len(smart_tools) + 1) // 2
+        self.rename_current_btn = ttk.Button(
+            self.frame,
+            text="Rename Current Function",
+            command=self._rename_current_function,
+            width=25,
+            state="normal",
+        )
+        self.rename_current_btn.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
+        self.tool_buttons.append(self.rename_current_btn)
+
+        self.rename_all_btn = ttk.Button(
+            self.frame,
+            text="Rename All Functions",
+            command=self._rename_all_functions,
+            width=25,
+            state="normal",
+        )
+        self.rename_all_btn.grid(row=1, column=0, padx=5, pady=5, sticky="ew")
+        self.tool_buttons.append(self.rename_all_btn)
+
+        self.generate_report_btn = ttk.Button(
+            self.frame,
+            text="Generate Software Report",
+            command=self._generate_software_report,
+            width=25,
+            state="normal",
+        )
+        self.generate_report_btn.grid(row=1, column=1, padx=5, pady=5, sticky="ew")
+        self.tool_buttons.append(self.generate_report_btn)
+
+        self.analyze_imports_btn = ttk.Button(
+            self.frame,
+            text="Analyze Imports",
+            command=self._analyze_imports,
+            width=25,
+            state="normal",
+        )
+        self.analyze_imports_btn.grid(row=2, column=0, padx=5, pady=5, sticky="ew")
+        self.tool_buttons.append(self.analyze_imports_btn)
+
+        self.analyze_strings_btn = ttk.Button(
+            self.frame,
+            text="Analyze Strings",
+            command=self._analyze_strings,
+            width=25,
+            state="normal",
+        )
+        self.analyze_strings_btn.grid(row=2, column=1, padx=5, pady=5, sticky="ew")
+        self.tool_buttons.append(self.analyze_strings_btn)
+
+        self.analyze_exports_btn = ttk.Button(
+            self.frame,
+            text="Analyze Exports",
+            command=self._analyze_exports,
+            width=25,
+            state="normal",
+        )
+        self.analyze_exports_btn.grid(row=3, column=0, padx=5, pady=5, sticky="ew")
+        self.tool_buttons.append(self.analyze_exports_btn)
+
+        self.search_strings_btn = ttk.Button(
+            self.frame,
+            text="Search Strings",
+            command=self._search_strings,
+            width=25,
+            state="normal",
+        )
+        self.search_strings_btn.grid(row=3, column=1, padx=5, pady=5, sticky="ew")
+        self.tool_buttons.append(self.search_strings_btn)
+
+        self.scan_tables_btn = ttk.Button(
+            self.frame,
+            text="Scan Function Tables",
+            command=self._scan_function_tables,
+            width=25,
+            state="normal",
+        )
+        self.scan_tables_btn.grid(row=4, column=0, padx=5, pady=5, sticky="ew")
+        self.tool_buttons.append(self.scan_tables_btn)
+
+        # Next row after the buttons
+        next_row = 5  # We manually positioned buttons in rows 0-4
 
         # Status indicator
         self.status_label = ttk.Label(self.frame, text="Ready", foreground="#2BC72B")
@@ -3619,11 +3710,12 @@ class ToolButtonsPanel:
         state = "disabled" if running else "normal"
         for widget in self.frame.winfo_children():
             if isinstance(widget, ttk.Button) and widget not in [self.stop_button]:
-                widget.after(0, widget.config(state=state))
+                widget.after(0, lambda: widget.config(state=state))
 
         # Update stop button state
         self.stop_button.after(
-            0, self.stop_button.config(state="normal" if running else "disabled")
+            0,
+            lambda: self.stop_button.config(state="normal" if running else "disabled"),
         )
 
         # Update status and progress
@@ -3632,16 +3724,16 @@ class ToolButtonsPanel:
             # Using hex color instead of named color for better cross-platform compatibility
             self.status_label.after(
                 0,
-                self.status_label.config(
+                lambda: self.status_label.config(
                     text=f"Running {tool_name}...", foreground="#FFA500"
                 ),
             )
-            self.progress.after(0, self.progress.start())
+            self.progress.after(0, self.progress.start)
         else:
             self.status_label.after(
-                0, self.status_label.config(text="Ready", foreground="#2BC72B")
+                0, lambda: self.status_label.config(text="Ready", foreground="#2BC72B")
             )
-            self.progress.after(0, self.progress.stop())
+            self.progress.after(0, self.progress.stop)
 
     def _run_ai_agent_query(self, query: str, tool_name: str):
         """Run a query through the AI agent workflow."""
@@ -6041,7 +6133,7 @@ Do you want to proceed with renaming all functions?"""
 
         # Dialog content
         main_frame = ttk.Frame(enumeration_dialog, padding=20)
-        main_frame.pack(fill="both", expand=True)
+        main_frame.after(0, lambda: main_frame.pack(fill="both", expand=True))
 
         # Title
         title_label = ttk.Label(
@@ -6049,7 +6141,7 @@ Do you want to proceed with renaming all functions?"""
             text="🔍 Function Enumeration Options",
             font=("TkDefaultFont", 14, "bold"),
         )
-        title_label.pack(pady=(0, 15))
+        title_label.after(0, lambda: title_label.pack(pady=(0, 15)))
 
         # Description
         desc_text = """Enhanced Enumeration Mode
@@ -6063,80 +6155,95 @@ Choose your enumeration strategy:"""
         desc_label = ttk.Label(
             main_frame, text=desc_text, font=("TkDefaultFont", 10), wraplength=750
         )
-        desc_label.pack(pady=(0, 20))
+        desc_label.after(0, lambda: desc_label.pack(pady=(0, 20)))
 
         # Options frame
         options_frame = ttk.LabelFrame(
             main_frame, text="Enumeration Strategy", padding=15
         )
-        options_frame.pack(fill="x", pady=(0, 20))
+        options_frame.after(0, lambda: options_frame.pack(fill="x", pady=(0, 20)))
 
         enumeration_var = tk.StringVar(value="rename_only")
 
         # Option 1: Rename only (current behavior)
-        ttk.Radiobutton(
+        radio_button_rename = ttk.Radiobutton(
             options_frame,
             text="Rename Only (Standard)",
             variable=enumeration_var,
             value="rename_only",
-        ).pack(anchor="w", pady=5)
+        )
+        radio_button_rename.after(
+            0, lambda: radio_button_rename.pack(anchor="w", pady=5)
+        )
         desc1 = ttk.Label(
             options_frame,
             text="• Only rename functions with generic names (FUN_*, sub_*, etc.)\n• Skip functions that already have descriptive names\n• Faster execution, focused on renaming",
             font=("TkDefaultFont", 9),
             foreground="gray",
         )
-        desc1.pack(anchor="w", padx=20, pady=(0, 10))
+        desc1.after(0, lambda: desc1.pack(anchor="w", padx=20, pady=(0, 10)))
 
         # Option 2: Full enumeration (enhanced)
-        ttk.Radiobutton(
+        radio_button_full_enum = ttk.Radiobutton(
             options_frame,
             text="Full Enumeration (Enhanced)",
             variable=enumeration_var,
             value="full_enumeration",
-        ).pack(anchor="w", pady=5)
+        )
+        radio_button_full_enum.after(
+            0, lambda: radio_button_full_enum.pack(anchor="w", pady=5)
+        )
         desc2 = ttk.Label(
             options_frame,
             text="• Process ALL functions in the binary (renamed + existing)\n• Generate behavior summaries for every function\n• Add all functions to Renamed Functions list for complete coverage\n• Ideal for comprehensive binary analysis and documentation",
             font=("TkDefaultFont", 9),
             foreground="gray",
         )
-        desc2.pack(anchor="w", padx=20, pady=(0, 10))
+        desc2.after(0, lambda: desc2.pack(anchor="w", padx=20, pady=(0, 10)))
 
         # Option 3: Smart enumeration
-        ttk.Radiobutton(
+        radio_button_smart_enum = ttk.Radiobutton(
             options_frame,
             text="Smart Enumeration (Recommended)",
             variable=enumeration_var,
             value="smart_enumeration",
-        ).pack(anchor="w", pady=5)
+        )
+        radio_button_smart_enum.after(
+            0, lambda: radio_button_smart_enum.pack(anchor="w", pady=5)
+        )
         desc3 = ttk.Label(
             options_frame,
             text="• Rename generic functions + analyze key descriptive functions\n• Focus on important functions (main, crypto, network, file ops)\n• Balance between speed and comprehensive coverage\n• Best for most analysis scenarios",
             font=("TkDefaultFont", 9),
             foreground="gray",
         )
-        desc3.pack(anchor="w", padx=20)
+        desc3.after(0, lambda: desc3.pack(anchor="w", padx=20))
 
         # Buttons
         button_frame = ttk.Frame(main_frame)
-        button_frame.pack(fill="x")
+        button_frame.after(0, lambda: button_frame.pack(fill="x"))
 
         selected_mode = None
 
         def confirm_enumeration():
             nonlocal selected_mode
             selected_mode = enumeration_var.get()
-            enumeration_dialog.destroy()
+            enumeration_dialog.after(0, enumeration_dialog.destroy)
 
         def cancel_enumeration():
-            enumeration_dialog.destroy()
+            enumeration_dialog.after(0, enumeration_dialog.destroy)
 
-        ttk.Button(
+        button_start_processing = ttk.Button(
             button_frame, text="Start Processing", command=confirm_enumeration
-        ).pack(side="right", padx=(10, 0))
-        ttk.Button(button_frame, text="Cancel", command=cancel_enumeration).pack(
-            side="right"
+        )
+        button_start_processing.after(
+            0, lambda: button_start_processing.pack(side="right", padx=(10, 0))
+        )
+        button_cancel_processing = ttk.Button(
+            button_frame, text="Cancel", command=cancel_enumeration
+        )
+        button_cancel_processing.after(
+            0, lambda: button_cancel_processing.pack(side="right")
         )
 
         # Wait for dialog to close
@@ -6406,15 +6513,22 @@ Please provide a comprehensive analysis of this information.
         """Set the tool running state."""
         self.tool_running = running
 
-        # Update all buttons
+        # Update all buttons according to whether the app is processing or ready for new commands
         state = "disabled" if running else "normal"
+
         for widget in self.frame.winfo_children():
             if isinstance(widget, ttk.Button) and widget not in [self.stop_button]:
-                widget.after(0, widget.config(state=state))
+                widget.after(0, lambda: widget.config(state=str(state)))
+
+                # TRICKY: It's a little sloppy, but we want to ensure that the button gets updated
+                # before moving on to the next after() call so the widget object doesn't get set
+                # by the loop before the button is updated.
+                widget.update()
 
         # Update stop button state
         self.stop_button.after(
-            0, self.stop_button.config(state="normal" if running else "disabled")
+            0,
+            lambda: self.stop_button.config(state="normal" if running else "disabled"),
         )
 
         # Update status and progress
@@ -6423,14 +6537,14 @@ Please provide a comprehensive analysis of this information.
             # Using hex color instead of named color for better cross-platform compatibility
             self.status_label.after(
                 0,
-                self.status_label.config(
+                lambda: self.status_label.config(
                     text=f"Running {tool_name}...", foreground="#FFA500"
                 ),
             )
             self.progress.start()
         else:
             self.status_label.after(
-                0, self.status_label.config(text="Ready", foreground="#2BC72B")
+                0, lambda: self.status_label.config(text="Ready", foreground="#2BC72B")
             )
             self.progress.stop()
 
@@ -6636,7 +6750,9 @@ class OGhidraUI:
         """Setup the main UI layout."""
         # Main paned window
         main_paned = ttk.PanedWindow(self.root, orient="horizontal")
-        main_paned.pack(fill="both", expand=True, padx=5, pady=5)
+        main_paned.after(
+            0, lambda: main_paned.pack(fill="both", expand=True, padx=5, pady=5)
+        )
 
         # Left panel - Main focus: Query and AI Response (larger)
         main_frame = ttk.Frame(main_paned)
@@ -6658,31 +6774,44 @@ class OGhidraUI:
         self.query_panel = QueryInputPanel(
             parent, self.bridge, None, None
         )  # workflow_diagram set later
-        self.query_panel.get_widget().pack(fill="x", pady=(0, 10))
+        self.query_panel.get_widget().after(
+            0, lambda: self.query_panel.get_widget().pack(fill="x", pady=(0, 10))
+        )
 
         # AI Response panel (main content area)
         # Pass the generate report callback from main UI
         self.response_panel = AIResponsePanel(
             parent, generate_callback=self._menu_generate_report
         )
-        self.response_panel.get_widget().pack(fill="both", expand=True)
+        self.response_panel.get_widget().after(
+            0, lambda: self.response_panel.get_widget().pack(fill="both", expand=True)
+        )
 
     def _setup_sidebar_panel(self, parent):
         """Setup the sidebar with analyzed functions (secondary, slimmer)."""
         # Workflow status tracker (above analyzed functions)
         workflow_frame = ttk.LabelFrame(parent, text="Workflow Status", padding=8)
-        workflow_frame.pack(fill="x", pady=(0, 10))
+        workflow_frame.after(0, lambda: workflow_frame.pack(fill="x", pady=(0, 10)))
 
         self.workflow_diagram = WorkflowDiagram(workflow_frame, width=500, height=100)
-        self.workflow_diagram.get_widget().pack()
+        self.workflow_diagram.get_widget().after(
+            0, lambda: self.workflow_diagram.get_widget().pack()
+        )
 
         # System Health Status panel
         self.status_panel = StatusPanel(parent)
-        self.status_panel.get_widget().pack(fill="x", pady=(0, 10))
+        self.status_panel.get_widget().after(
+            0, lambda: self.status_panel.get_widget().pack(fill="x", pady=(0, 10))
+        )
 
         # Analyzed Functions panel
         self.renamed_functions_panel = RenamedFunctionsPanel(parent, self.bridge)
-        self.renamed_functions_panel.get_widget().pack(fill="both", expand=True)
+        self.renamed_functions_panel.get_widget().after(
+            0,
+            lambda: self.renamed_functions_panel.get_widget().pack(
+                fill="both", expand=True
+            ),
+        )
         # Start auto-refresh for renamed functions
         self.renamed_functions_panel._start_auto_refresh()
 
@@ -6730,7 +6859,7 @@ class OGhidraUI:
     def _setup_menu(self):
         """Setup the application menu."""
         menubar = tk.Menu(self.root)
-        self.root.after(0, self.root.config(menu=menubar))
+        self.root.after(0, lambda: self.root.config(menu=menubar))
 
         # File menu
         file_menu = tk.Menu(menubar, tearoff=0)
@@ -6857,17 +6986,19 @@ class OGhidraUI:
                 logger.warning(f"Could not center dialog: {e}")
 
             main_frame = ttk.Frame(session_dialog, padding=20)
-            main_frame.pack(fill="both", expand=True)
+            main_frame.after(0, lambda: main_frame.pack(fill="both", expand=True))
 
             # Title
-            ttk.Label(
+            title_label = ttk.Label(
                 main_frame,
                 text="💾 Save Analysis Session",
                 font=("TkDefaultFont", 14, "bold"),
-            ).pack(pady=(0, 15))
+            )
+            title_label.after(0, lambda: title_label.pack(pady=(0, 15)))
 
             # Session name
-            ttk.Label(main_frame, text="Session Name:").pack(anchor="w")
+            session_name_label = ttk.Label(main_frame, text="Session Name:")
+            session_name_label.after(0, lambda: session_name_label.pack(anchor="w"))
             session_name_var = tk.StringVar(value=f"Analysis_{int(time.time())}")
             session_name_entry = ttk.Entry(
                 main_frame, textvariable=session_name_var, width=50
@@ -7808,7 +7939,7 @@ class OGhidraUI:
             self.bridge.enable_cag = cag_var.get()
             cag_status.after(
                 0,
-                cag_status.config(
+                lambda: cag_status.config(
                     text=f"Status: {'Enabled' if cag_var.get() else 'Disabled'}",
                     foreground="#2BC72B" if cag_var.get() else "gray",
                 ),
@@ -7864,7 +7995,7 @@ class OGhidraUI:
             current_count = get_vector_count()
             rag_status.after(
                 0,
-                rag_status.config(
+                lambda: rag_status.config(
                     text=f"Status: {'Enabled' if rag_var.get() else 'Disabled'} ({current_count} vectors)",
                     foreground="#2BC72B" if rag_var.get() else "gray",
                 ),
@@ -7881,7 +8012,7 @@ class OGhidraUI:
             is_enabled = rag_var.get()
             rag_status.after(
                 0,
-                rag_status.config(
+                lambda: rag_status.config(
                     text=f"Status: {'Enabled' if is_enabled else 'Disabled'} ({current_count} vectors)",
                     foreground="#2BC72B" if is_enabled else "gray",
                 ),
