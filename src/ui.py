@@ -68,25 +68,33 @@ class StatusPanel:
     def __init__(self, parent):
         self.frame = ttk.LabelFrame(parent, text="System Health", padding=8)
 
-        # Status indicators
+        # Status indicators - initialize with "Down" status
         self.ollama_status = ttk.Label(
-            self.frame, text="Ollama API: Checking...", font=("Arial", 9)
+            self.frame,
+            text="Ollama API: NOT OK ✗",
+            foreground="#FF0000",
+            font=("Arial", 9),
         )
         self.ollama_status.pack(fill="x", pady=2, anchor="w")
 
         self.ghidra_status = ttk.Label(
-            self.frame, text="GhidraMCP API: Checking...", font=("Arial", 9)
+            self.frame,
+            text="GhidraMCP API: NOT OK ✗",
+            foreground="#FF0000",
+            font=("Arial", 9),
         )
         self.ghidra_status.pack(fill="x", pady=2, anchor="w")
 
         self.cag_status = ttk.Label(
-            self.frame, text="CAG System: Checking...", font=("Arial", 9)
+            self.frame,
+            text="CAG System: Disabled",
+            foreground="#FFA500",
+            font=("Arial", 9),
         )
         self.cag_status.pack(fill="x", pady=2, anchor="w")
 
-    def update_status(self, ollama_status, ghidra_status, cag_status):
-        """Update the status indicators."""
-        # Update Ollama status
+    def update_ollama_status(self, ollama_status):
+        """Update just the Ollama status indicator."""
         if isinstance(ollama_status, Exception):
             self.ollama_status.after(
                 0,
@@ -104,7 +112,8 @@ class StatusPanel:
                 ),
             )
 
-        # Update Ghidra status
+    def update_ghidra_status(self, ghidra_status):
+        """Update just the Ghidra status indicator."""
         if isinstance(ghidra_status, Exception):
             self.ghidra_status.after(
                 0,
@@ -122,7 +131,8 @@ class StatusPanel:
                 ),
             )
 
-        # Update CAG status
+    def update_cag_status(self, cag_status):
+        """Update just the CAG status indicator."""
         if isinstance(cag_status, Exception):
             self.cag_status.after(
                 0,
@@ -1743,7 +1753,6 @@ class RenamedFunctionsPanel:
                     0,
                     lambda: progress_status.config(text="Collecting function data..."),
                 )
-                progress_dialog.update()
 
                 functions_to_process = []
 
@@ -1838,7 +1847,6 @@ class RenamedFunctionsPanel:
                         text=f"Loading {total_functions} functions into vectors..."
                     ),
                 )
-                progress_dialog.update()
 
                 # **OPTIMIZED: Batch processing approach with embeddings**
                 progress_status.after(
@@ -1847,7 +1855,6 @@ class RenamedFunctionsPanel:
                         text="Initializing embedding service..."
                     ),
                 )
-                progress_dialog.update()
 
                 # ✅ FIXED: Use generic embeddings from Bridge
                 try:
@@ -1892,7 +1899,6 @@ class RenamedFunctionsPanel:
                             text=f"Processing batch {batch_num + 1} of {num_batches}"
                         ),
                     )
-                    progress_dialog.update()
 
                     # ✅ FIXED: Use generic batch embeddings
                     # Filter out empty summaries which cause 400 errors
@@ -1949,9 +1955,6 @@ class RenamedFunctionsPanel:
                                     text=f"Added: {func_data['new_name']}"
                                 ),
                             )
-
-                            if overall_progress % 10 == 0:
-                                progress_dialog.update()
 
                         except Exception as e:
                             logger.warning(
@@ -6516,14 +6519,29 @@ Please provide a comprehensive analysis of this information.
         # Update all buttons according to whether the app is processing or ready for new commands
         state = "disabled" if running else "normal"
 
-        for widget in self.frame.winfo_children():
-            if isinstance(widget, ttk.Button) and widget not in [self.stop_button]:
-                widget.after(0, lambda: widget.config(state=str(state)))
-
-                # TRICKY: It's a little sloppy, but we want to ensure that the button gets updated
-                # before moving on to the next after() call so the widget object doesn't get set
-                # by the loop before the button is updated.
-                widget.update()
+        self.analyze_current_btn.after(
+            0, lambda: self.analyze_current_btn.config(state=state)
+        )
+        self.rename_current_btn.after(
+            0, lambda: self.rename_current_btn.config(state=state)
+        )
+        self.rename_all_btn.after(0, lambda: self.rename_all_btn.config(state=state))
+        self.generate_report_btn.after(
+            0, lambda: self.generate_report_btn.config(state=state)
+        )
+        self.analyze_imports_btn.after(
+            0, lambda: self.analyze_imports_btn.config(state=state)
+        )
+        self.analyze_strings_btn.after(
+            0, lambda: self.analyze_strings_btn.config(state=state)
+        )
+        self.analyze_exports_btn.after(
+            0, lambda: self.analyze_exports_btn.config(state=state)
+        )
+        self.search_strings_btn.after(
+            0, lambda: self.search_strings_btn.config(state=state)
+        )
+        self.scan_tables_btn.after(0, lambda: self.scan_tables_btn.config(state=state))
 
         # Update stop button state
         self.stop_button.after(
@@ -6541,12 +6559,12 @@ Please provide a comprehensive analysis of this information.
                     text=f"Running {tool_name}...", foreground="#FFA500"
                 ),
             )
-            self.progress.start()
+            self.progress.after(0, self.progress.start)
         else:
             self.status_label.after(
                 0, lambda: self.status_label.config(text="Ready", foreground="#2BC72B")
             )
-            self.progress.stop()
+            self.progress.after(0, self.progress.stop)
 
     def _search_strings(self):
         """Prompt the user for a substring and search defined strings."""
@@ -6669,9 +6687,6 @@ class OGhidraUI:
         self.bridge = bridge
         self.config = config
 
-        # Create a thread-safe queue for UI updates
-        self.update_queue = queue.Queue()
-
         # Allow Bridge to access UI state (e.g., analyzed functions tree) for prompt enrichment.
         try:
             setattr(self.bridge, "_ui_instance", self)
@@ -6700,12 +6715,6 @@ class OGhidraUI:
 
         # Display startup configuration info
         self._show_startup_info()
-
-    def _post_ui_event(self, event_type, **payload):
-        """Thread-safe posting of UI events to the main thread.
-        This is intended for all UI element updating from asynchronous processes.
-        """
-        self.update_queue.put({"type": event_type, "payload": payload})
 
     def _show_startup_info(self):
         """Display configuration info on startup."""
@@ -7860,35 +7869,45 @@ class OGhidraUI:
             logger.error(f"Streaming setup error: {e}\n{traceback.format_exc()}")
 
     def _update_health_status(self):
-        """Update the health status in the status panel."""
+        """Update the health status in the status panel independently for each service."""
 
-        def check():
-            # Check Ollama
+        def check_ollama():
+            # Check Ollama independently
             ollama_result = None
             try:
                 ollama_result = self.bridge.ollama.check_health()
             except Exception as e:
                 ollama_result = e
 
-            # Check Ghidra
+            # Update just the Ollama status
+            self.status_panel.update_ollama_status(ollama_result)
+
+        def check_ghidra():
+            # Check Ghidra independently
             ghidra_result = None
             try:
                 ghidra_result = self.bridge.ghidra.check_health()
             except Exception as e:
                 ghidra_result = e
 
-            # Check CAG
+            # Update just the Ghidra status
+            self.status_panel.update_ghidra_status(ghidra_result)
+
+        def check_cag():
+            # Check CAG independently
             cag_result = None
             try:
                 cag_result = getattr(self.bridge, "enable_cag", False)
             except Exception as e:
                 cag_result = e
 
-            # Instead of directly calling after, put the results in the queue
-            # for the main thread to process
-            self.update_queue.put((ollama_result, ghidra_result, cag_result))
+            # Update just the CAG status
+            self.status_panel.update_cag_status(cag_result)
 
-        threading.Thread(target=check, daemon=True).start()
+        # Start independent threads for each check
+        threading.Thread(target=check_ollama, daemon=True).start()
+        threading.Thread(target=check_ghidra, daemon=True).start()
+        threading.Thread(target=check_cag, daemon=True).start()
 
     def _start_health_check_timer(self):
         """Start a timer to periodically update the health status."""
@@ -7896,10 +7915,12 @@ class OGhidraUI:
         # Update every 60 seconds
         def timer_callback():
             self._update_health_status()
-            # Reschedule the timer - this runs in the main thread so it's safe
             self.root.after(60000, timer_callback)
 
-        # Schedule the first timer from the main thread
+        # Start an immediate check when the application starts
+        self._update_health_status()
+
+        # Schedule recurring checks every 60 seconds
         self.root.after(60000, timer_callback)
 
     def _show_system_info(self):
@@ -8269,37 +8290,9 @@ Features:
             self.root.quit()
             self.root.destroy()
 
-    def _process_update_queue(self):
-        """Process any pending UI updates from the queue."""
-        try:
-            # Check if there are any updates in the queue
-            while not self.update_queue.empty():
-                # Get update data from the queue
-                ollama_result, ghidra_result, cag_result = (
-                    self.update_queue.get_nowait()
-                )
-
-                # Update the status panel if it exists
-                if hasattr(self, "status_panel"):
-                    self.status_panel.update_status(
-                        ollama_result, ghidra_result, cag_result
-                    )
-
-                # Mark the task as done
-                self.update_queue.task_done()
-        except Exception as e:
-            logger.error(f"Error processing update queue: {e}")
-
-        # Schedule this method to run again after 10ms if the UI is still active
-        if hasattr(self, "root") and self.root:
-            self.root.after(10, self._process_update_queue)
-
     def run(self):
         """Run the UI main loop."""
         try:
-            # Start the queue processor before entering the main loop
-            self._process_update_queue()
-
             self.root.mainloop()
         except KeyboardInterrupt:
             self._quit_application()
