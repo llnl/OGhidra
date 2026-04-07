@@ -3704,40 +3704,7 @@ class ToolButtonsPanel:
         # Configure grid weights
         self.frame.grid_columnconfigure(0, weight=1)
         self.frame.grid_columnconfigure(1, weight=1)
-
-    def _set_tool_running(self, running: bool, tool_name: str = ""):
-        """Set the tool running state."""
-        self.tool_running = running
-
-        # Update all buttons
-        state = "disabled" if running else "normal"
-        for widget in self.frame.winfo_children():
-            if isinstance(widget, ttk.Button) and widget not in [self.stop_button]:
-                widget.after(0, lambda: widget.config(state=state))
-
-        # Update stop button state
-        self.stop_button.after(
-            0,
-            lambda: self.stop_button.config(state="normal" if running else "disabled"),
-        )
-
-        # Update status and progress
-        if running:
-            self.should_stop = False  # Reset stop flag for new tool
-            # Using hex color instead of named color for better cross-platform compatibility
-            self.status_label.after(
-                0,
-                lambda: self.status_label.config(
-                    text=f"Running {tool_name}...", foreground="#FFA500"
-                ),
-            )
-            self.progress.after(0, self.progress.start)
-        else:
-            self.status_label.after(
-                0, lambda: self.status_label.config(text="Ready", foreground="#2BC72B")
-            )
-            self.progress.after(0, self.progress.stop)
-
+        
     def _run_ai_agent_query(self, query: str, tool_name: str):
         """Run a query through the AI agent workflow."""
 
@@ -3766,7 +3733,7 @@ class ToolButtonsPanel:
                 self.workflow_diagram.set_current_stage(None)
 
             except Exception as e:
-                error_msg = f"Error running {display_name}: {e}"
+                error_msg = f"Error running {tool_name}: {e}"
                 logger.error(error_msg)
                 self.response_panel.add_response("Error", error_msg)
                 self.workflow_diagram.set_current_stage(None)
