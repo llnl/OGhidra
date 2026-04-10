@@ -15,8 +15,6 @@ load_dotenv(override=True)
 # Import after loading environment variables
 from src.config import get_config, BridgeConfig
 from src.bridge import Bridge
-from src.ollama_client import OllamaClient
-from src.ghidra_client import GhidraMCPClient
 
 def print_header():
     """Print the application header."""
@@ -1111,7 +1109,7 @@ def main():
         
         # Launch GUI mode
         try:
-            from src.ui import launch_ui
+            from OGhidra.src.gui.ui import launch_ui
             launch_ui(bridge, config)
         except ImportError as e:
             print(f"Error: Unable to launch UI. {e}")
