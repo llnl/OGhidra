@@ -12,19 +12,17 @@ from tkinter import messagebox, scrolledtext, ttk
 from typing import Any, Dict
 
 import ttkbootstrap as tb
-from memory_info_panel import MemoryInfoPanel
-from query_input_panel import AIResponsePanel, QueryInputPanel
-from renamed_functions_panel import RenamedFunctionsPanel
-from server_config_dialog import ServerConfigDialog
-from status_panel import StatusPanel
-from theme_colors import ThemeColors
-from tool_buttons_panel import ToolButtonsPanel
-from workflow_diagram import WorkflowDiagram
 
 from ..bridge import Bridge
 from ..config import BridgeConfig
-
-logger = logging.getLogger("ollama-ghidra-bridge.ui")
+from .memory_info_panel import MemoryInfoPanel
+from .query_input_panel import AIResponsePanel, QueryInputPanel
+from .renamed_functions_panel import RenamedFunctionsPanel
+from .server_config_dialog import ServerConfigDialog
+from .status_panel import StatusPanel
+from .theme_colors import ThemeColors
+from .tool_buttons_panel import ToolButtonsPanel
+from .workflow_diagram import WorkflowDiagram
 
 
 class OGhidraUI:
@@ -46,6 +44,8 @@ class OGhidraUI:
             themename="darkly",  # Dark gray theme with soft corners
             size=(1400, 900),
         )
+
+        self._logger = logging.getLogger("ollama-ghidra-bridge.ui")
 
         # Store style reference for theme-aware color access
         self.style = self.root.style
@@ -124,12 +124,12 @@ class OGhidraUI:
     def _setup_main_panel(self, parent):
         """Setup the main panel with query input and AI responses (primary focus)."""
         # Query input panel
-        self.query_panel = QueryInputPanel(parent, self.bridge, None, None)  # workflow_diagram set later
+        self.query_panel = QueryInputPanel(parent, self.bridge, None, None, theme_colors=self._theme_colors)  # workflow_diagram set later
         self.query_panel.get_widget().after(0, lambda: self.query_panel.get_widget().pack(fill="x", pady=(0, 10)))
 
         # AI Response panel (main content area)
         # Pass the generate report callback from main UI
-        self.response_panel = AIResponsePanel(parent, generate_callback=self._menu_generate_report)
+        self.response_panel = AIResponsePanel(parent, generate_callback=self._menu_generate_report, theme_colors=self._theme_colors)
         self.response_panel.get_widget().after(0, lambda: self.response_panel.get_widget().pack(fill="both", expand=True))
 
     def _setup_sidebar_panel(self, parent):
@@ -138,7 +138,7 @@ class OGhidraUI:
         workflow_frame = ttk.LabelFrame(parent, text="Workflow Status", padding=8)
         workflow_frame.after(0, lambda: workflow_frame.pack(fill="x", pady=(0, 10)))
 
-        self.workflow_diagram = WorkflowDiagram(workflow_frame, width=500, height=100)
+        self.workflow_diagram = WorkflowDiagram(workflow_frame, width=500, height=100, theme_colors=self._theme_colors)
         self.workflow_diagram.get_widget().after(0, lambda: self.workflow_diagram.get_widget().pack())
 
         # System Health Status panel
@@ -146,7 +146,7 @@ class OGhidraUI:
         self.status_panel.get_widget().after(0, lambda: self.status_panel.get_widget().pack(fill="x", pady=(0, 10)))
 
         # Analyzed Functions panel
-        self.renamed_functions_panel = RenamedFunctionsPanel(parent, self.bridge)
+        self.renamed_functions_panel = RenamedFunctionsPanel(parent, self.bridge, theme_colors=self._theme_colors)
         self.renamed_functions_panel.get_widget().after(
             0,
             lambda: self.renamed_functions_panel.get_widget().pack(fill="both", expand=True),
@@ -174,7 +174,7 @@ class OGhidraUI:
 
         # Hidden components (memory panel - accessed via Tools > System Info menu)
         hidden_frame = ttk.Frame(parent)  # Don't pack this
-        self.memory_panel = MemoryInfoPanel(hidden_frame, self.bridge)
+        self.memory_panel = MemoryInfoPanel(hidden_frame, self.bridge, theme_colors=self._theme_colors)
         self.bridge._ui_memory_panel_refresh = self.memory_panel._update_memory_info
 
         # Set up chain of thought callback for live AI reasoning updates
@@ -186,7 +186,7 @@ class OGhidraUI:
             self.bridge,
             None,
             self.workflow_diagram,
-            self.renamed_functions_panel,
+            self.renamed_functions_panel
         )
 
         # Connect panels to response panel and each other
@@ -253,7 +253,7 @@ class OGhidraUI:
                 # Update memory info every 30 seconds
                 self.memory_panel._update_memory_info()
             except Exception as e:
-                logger.error(f"Error in health monitoring: {e}")
+                self._logger.error(f"Error in health monitoring: {e}")
 
             # Schedule next update
             self.root.after(30000, monitor)  # 30 seconds
@@ -300,7 +300,7 @@ class OGhidraUI:
                 y = (session_dialog.winfo_screenheight() // 2) - (300)
                 session_dialog.geometry(f"700x600+{x}+{y}")
             except Exception as e:
-                logger.warning(f"Could not center dialog: {e}")
+                self._logger.warning(f"Could not center dialog: {e}")
 
             main_frame = ttk.Frame(session_dialog, padding=20)
             main_frame.after(0, lambda: main_frame.pack(fill="both", expand=True))
@@ -365,7 +365,7 @@ class OGhidraUI:
                     elif hasattr(self.bridge, "function_summaries"):
                         functions_count = len(self.bridge.function_summaries)
             except Exception as e:
-                logger.warning(f"Could not get functions count: {e}")
+                self._logger.warning(f"Could not get functions count: {e}")
 
             ttk.Label(info_frame, text=f"• Analyzed Functions: {functions_count}").pack(anchor="w")
 
@@ -387,7 +387,7 @@ class OGhidraUI:
                 else:
                     rag_count = 0
             except Exception as e:
-                logger.warning(f"Could not get RAG count: {e}")
+                self._logger.warning(f"Could not get RAG count: {e}")
                 rag_count = 0
 
             ttk.Label(info_frame, text=f"• RAG Vectors: {rag_count}").pack(anchor="w")
@@ -453,7 +453,7 @@ class OGhidraUI:
                                             "timestamp": time.time(),
                                         }
                     except Exception as e:
-                        logger.warning(f"Could not collect analyzed functions: {e}")
+                        self._logger.warning(f"Could not collect analyzed functions: {e}")
 
                     # Refinement: rebuild analyzed_functions entries with accurate address/old/new names and standard key 'behavior_summary'
                     try:
@@ -486,7 +486,7 @@ class OGhidraUI:
                             if "summary" in rec and "behavior_summary" not in rec:
                                 rec["behavior_summary"] = rec.pop("summary")
                     except Exception as refine_err:
-                        logger.warning(f"Analyzed functions refinement failed: {refine_err}")
+                        self._logger.warning(f"Analyzed functions refinement failed: {refine_err}")
 
                     # FINAL DEDUPLICATION: remove non-address keys when a canonical address entry exists for the same new_name
                     try:
@@ -513,7 +513,7 @@ class OGhidraUI:
                             if rec.get("new_name") in canonical_new_names:
                                 analyzed_functions.pop(key, None)
                     except Exception as dedup_err:
-                        logger.debug(f"Final deduplication step failed: {dedup_err}")
+                        self._logger.debug(f"Final deduplication step failed: {dedup_err}")
 
                     # SAFETY FILTER: remove incomplete function records
                     try:
@@ -525,7 +525,7 @@ class OGhidraUI:
                             if (old_unknown and new_unknown) or summary_empty:
                                 analyzed_functions.pop(addr, None)
                     except Exception as filter_err:
-                        logger.debug(f"Safety filter failed: {filter_err}")
+                        self._logger.debug(f"Safety filter failed: {filter_err}")
 
                     # Collect RAG vectors
                     rag_vectors = []
@@ -535,7 +535,7 @@ class OGhidraUI:
                                 if hasattr(self.bridge.cag_manager.vector_store, "documents"):
                                     rag_vectors = self.bridge.cag_manager.vector_store.documents or []
                     except Exception as e:
-                        logger.warning(f"Could not collect RAG vectors: {e}")
+                        self._logger.warning(f"Could not collect RAG vectors: {e}")
 
                     # Save session data
                     try:
@@ -568,7 +568,7 @@ class OGhidraUI:
                     messagebox.showerror("Error", f"Failed to save session: {e}")
                     import traceback
 
-                    logger.error(f"Save session error: {e}\n{traceback.format_exc()}")
+                    self._logger.error(f"Save session error: {e}\n{traceback.format_exc()}")
 
             def cancel_save():
                 session_dialog.destroy()
@@ -583,7 +583,7 @@ class OGhidraUI:
             messagebox.showerror("Error", f"Failed to open save dialog: {e}")
             import traceback
 
-            logger.error(f"Save session dialog error: {e}\n{traceback.format_exc()}")
+            self._logger.error(f"Save session dialog error: {e}\n{traceback.format_exc()}")
 
     def _load_session(self):
         """Load a session with enhanced session management."""
@@ -674,7 +674,7 @@ class OGhidraUI:
                     )
                     session_items[item_id] = session
                 except Exception as e:
-                    logger.warning(f"Error displaying session {session.get('name', 'Unknown')}: {e}")
+                    self._logger.warning(f"Error displaying session {session.get('name', 'Unknown')}: {e}")
                     # Try with fallback values
                     try:
                         item_id = session_tree.insert(
@@ -689,7 +689,7 @@ class OGhidraUI:
                         )
                         session_items[item_id] = session
                     except Exception as e2:
-                        logger.error(f"Failed to display session even with fallbacks: {e2}")
+                        self._logger.error(f"Failed to display session even with fallbacks: {e2}")
 
             # Show message if no sessions loaded
             if not session_items:
@@ -812,7 +812,7 @@ class OGhidraUI:
                                 )
                                 functions_loaded += 1
                             except Exception as e:
-                                logger.warning(f"Could not restore function {addr}: {e}")
+                                self._logger.warning(f"Could not restore function {addr}: {e}")
 
                         # Skip RAG vector restoration during session loading to prevent HuggingFace API calls
                         # Vectors will be loaded on-demand via the "Load Vectors" button
@@ -852,7 +852,7 @@ class OGhidraUI:
                     messagebox.showerror("Error", f"Failed to load session: {e}")
                     import traceback
 
-                    logger.error(f"Load session error: {e}\n{traceback.format_exc()}")
+                    self._logger.error(f"Load session error: {e}\n{traceback.format_exc()}")
 
             def cancel_load():
                 load_dialog.destroy()
@@ -867,7 +867,7 @@ class OGhidraUI:
             messagebox.showerror("Error", f"Failed to open load dialog: {e}")
             import traceback
 
-            logger.error(f"Load session error: {e}\n{traceback.format_exc()}")
+            self._logger.error(f"Load session error: {e}\n{traceback.format_exc()}")
 
     def _load_session_streaming(self, session_data: Dict[str, Any], session_info: Dict[str, Any]):
         """Load a large session using streaming to prevent UI freezing."""
@@ -996,7 +996,7 @@ class OGhidraUI:
                                         progress_dialog.update_idletasks()
 
                                 except Exception as e:
-                                    logger.debug(f"Could not restore function {address}: {e}")
+                                    self._logger.debug(f"Could not restore function {address}: {e}")
 
                         # Disable streaming mode and do final UI update
                         self.renamed_functions_panel.set_streaming_mode(False)
@@ -1031,7 +1031,7 @@ class OGhidraUI:
                     messagebox.showerror("Error", f"Failed to load session: {e}")
                     import traceback
 
-                    logger.error(f"Streaming load error: {e}\n{traceback.format_exc()}")
+                    self._logger.error(f"Streaming load error: {e}\n{traceback.format_exc()}")
 
             # Start loading in background thread
             threading.Thread(target=load_worker, daemon=True).start()
@@ -1043,7 +1043,7 @@ class OGhidraUI:
             messagebox.showerror("Error", f"Failed to setup streaming load: {e}")
             import traceback
 
-            logger.error(f"Streaming setup error: {e}\n{traceback.format_exc()}")
+            self._logger.error(f"Streaming setup error: {e}\n{traceback.format_exc()}")
 
     def _update_health_status(self):
         """Update the health status in the status panel independently for each service."""
@@ -1422,7 +1422,7 @@ Features:
                 if hasattr(self.bridge, "cag_manager") and self.bridge.cag_manager:
                     self.bridge.cag_manager.save_session()
             except Exception as e:
-                logger.error(f"Error saving session on quit: {e}")
+                self._logger.error(f"Error saving session on quit: {e}")
 
             self.root.quit()
             self.root.destroy()
@@ -1437,6 +1437,7 @@ Features:
 
 def launch_ui(bridge: Bridge, config: BridgeConfig):
     """Launch the OGhidra UI."""
+    logger = logging.getLogger("ollama-ghidra-bridge.ui")
     try:
         ui = OGhidraUI(bridge, config)
         logger.info("Launching OGhidra UI...")

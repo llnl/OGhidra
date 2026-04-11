@@ -1,6 +1,6 @@
 import tkinter as tk
 
-from theme_colors import ThemeColors
+from .theme_colors import ThemeColors
 
 
 # Enhanced WorkflowDiagram class with RAG vector creation stage

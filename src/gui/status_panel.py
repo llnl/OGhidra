@@ -1,3 +1,5 @@
+from tkinter import ttk
+
 
 class StatusPanel:
     """Panel for displaying system health status."""
@@ -35,18 +37,14 @@ class StatusPanel:
         if isinstance(ollama_status, Exception):
             self.ollama_status.after(
                 0,
-                lambda: self.ollama_status.config(
-                    text=f"Ollama API: ERROR", foreground="#FF0000"
-                ),
+                lambda: self.ollama_status.config(text=f"Ollama API: ERROR", foreground="#FF0000"),
             )
         else:
             color = "#2BC72B" if ollama_status else "#FF0000"
             text = "OK ✓" if ollama_status else "NOT OK ✗"
             self.ollama_status.after(
                 0,
-                lambda: self.ollama_status.config(
-                    text=f"Ollama API: {text}", foreground=color
-                ),
+                lambda: self.ollama_status.config(text=f"Ollama API: {text}", foreground=color),
             )
 
     def update_ghidra_status(self, ghidra_status):
@@ -54,18 +52,14 @@ class StatusPanel:
         if isinstance(ghidra_status, Exception):
             self.ghidra_status.after(
                 0,
-                lambda: self.ghidra_status.config(
-                    text=f"GhidraMCP API: ERROR", foreground="#FF0000"
-                ),
+                lambda: self.ghidra_status.config(text=f"GhidraMCP API: ERROR", foreground="#FF0000"),
             )
         else:
             color = "#2BC72B" if ghidra_status else "#FF0000"
             text = "OK ✓" if ghidra_status else "NOT OK ✗"
             self.ghidra_status.after(
                 0,
-                lambda: self.ghidra_status.config(
-                    text=f"GhidraMCP API: {text}", foreground=color
-                ),
+                lambda: self.ghidra_status.config(text=f"GhidraMCP API: {text}", foreground=color),
             )
 
     def update_cag_status(self, cag_status):
@@ -73,21 +67,16 @@ class StatusPanel:
         if isinstance(cag_status, Exception):
             self.cag_status.after(
                 0,
-                lambda: self.cag_status.config(
-                    text=f"CAG System: ERROR", foreground="#FF0000"
-                ),
+                lambda: self.cag_status.config(text=f"CAG System: ERROR", foreground="#FF0000"),
             )
         else:
             color = "#2BC72B" if cag_status else "#FFA500"
             text = "Enabled ✓" if cag_status else "Disabled"
             self.cag_status.after(
                 0,
-                lambda: self.cag_status.config(
-                    text=f"CAG System: {text}", foreground=color
-                ),
+                lambda: self.cag_status.config(text=f"CAG System: {text}", foreground=color),
             )
 
     def get_widget(self):
         """Return the main widget."""
         return self.frame
-

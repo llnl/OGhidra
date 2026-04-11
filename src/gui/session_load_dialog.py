@@ -1,7 +1,7 @@
 import tkinter as tk
 from tkinter import ttk
 
-from theme_colors import ThemeColors
+from .theme_colors import ThemeColors
 
 
 class SessionLoadDialog:

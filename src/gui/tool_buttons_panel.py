@@ -1,3 +1,16 @@
+import json
+import threading
+import time
+import tkinter as tk
+import logging 
+from tkinter import filedialog, messagebox, ttk
+from typing import Any, Dict
+
+from ..bridge import Bridge
+from .ai_response_panel import AIResponsePanel
+from .workflow_diagram import WorkflowDiagram
+
+
 class ToolButtonsPanel:
     """Panel with buttons for commonly used tools."""
 
@@ -14,6 +27,7 @@ class ToolButtonsPanel:
         self.response_panel = response_panel
         self.workflow_diagram = workflow_diagram
         self.renamed_functions_panel = renamed_functions_panel
+        self._logger = logging.getLogger("ollama-ghidra-bridge.ui")
         self.tool_running = False
         self.should_stop = False  # Flag to control stopping
 
@@ -177,7 +191,7 @@ class ToolButtonsPanel:
 
             except Exception as e:
                 error_msg = f"Error running {tool_name}: {e}"
-                logger.error(error_msg)
+                self._logger.error(error_msg)
                 self.response_panel.add_response("Error", error_msg)
                 self.workflow_diagram.set_current_stage(None)
             finally:
@@ -188,7 +202,7 @@ class ToolButtonsPanel:
                     try:
                         self.renamed_functions_panel._update_function_list()
                     except Exception as refresh_error:
-                        logger.warning(f"Error refreshing function list after batch operation: {refresh_error}")
+                        self._logger.warning(f"Error refreshing function list after batch operation: {refresh_error}")
 
                 self._set_tool_running(False)
 
@@ -210,7 +224,7 @@ class ToolButtonsPanel:
 
                 time.sleep(0.1)  # Check every 100ms
             except Exception as e:
-                logger.error(f"Error monitoring workflow stage: {e}")
+                self._logger.error(f"Error monitoring workflow stage: {e}")
                 break
 
     def _run_hardcoded_workflow(self, tool_name: str, display_name: str, params: dict | None = None):
@@ -384,7 +398,7 @@ class ToolButtonsPanel:
 
                         except Exception as e:
                             error_msg = f"Error during AI analysis: {e}"
-                            logger.error(error_msg)
+                            self._logger.error(error_msg)
                             self.response_panel.add_response("Error", error_msg)
                     else:
                         # Tool returned an error
@@ -399,7 +413,7 @@ class ToolButtonsPanel:
 
             except Exception as e:
                 error_msg = f"Error running {display_name}: {e}"
-                logger.error(error_msg)
+                self._logger.error(error_msg)
                 self.response_panel.add_response("Error", error_msg)
                 self.workflow_diagram.set_current_stage(None)
             finally:
@@ -740,7 +754,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
 
             except Exception as e:
                 error_msg = f"Error running {display_name}: {e}"
-                logger.error(error_msg)
+                self._logger.error(error_msg)
                 self.response_panel.add_response("Error", error_msg)
                 self.workflow_diagram.set_current_stage(None)
             finally:
@@ -1143,7 +1157,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                         structured_summary = self._parse_ai_response_sections(ai_response)
 
                     except Exception as meta_error:
-                        logger.warning(f"Metadata extraction failed: {meta_error}")
+                        self._logger.warning(f"Metadata extraction failed: {meta_error}")
                         # Fallback to minimal metadata
                         metadata = {
                             "metrics": {},
@@ -1201,7 +1215,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                     # Empty response - retry if attempts remaining
                     retry_count += 1
                     if retry_count <= max_retries:
-                        logger.warning(f"Empty AI response for {function_name}, retry {retry_count}/{max_retries}")
+                        self._logger.warning(f"Empty AI response for {function_name}, retry {retry_count}/{max_retries}")
                         import time
 
                         time.sleep(1)  # Brief delay before retry
@@ -1267,7 +1281,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                     time.sleep(0.01)  # 10ms delay for visual feedback
 
                 except Exception as e:
-                    logger.warning(f"Could not add function {func_data['old_name']} to RAG: {e}")
+                    self._logger.warning(f"Could not add function {func_data['old_name']} to RAG: {e}")
 
             # Check for stop signal during RAG processing
             if hasattr(self, "should_stop") and self.should_stop:
@@ -1293,7 +1307,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                 if hasattr(self.renamed_functions_panel.bridge, "_ui_memory_panel_refresh"):
                     self.renamed_functions_panel.bridge._ui_memory_panel_refresh()
             except Exception as e:
-                logger.debug(f"Could not refresh memory panel: {e}")
+                self._logger.debug(f"Could not refresh memory panel: {e}")
 
         return rag_success_count
 
@@ -1573,7 +1587,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                 sections[current_section] = "\n".join(current_content).strip()
 
         except Exception as e:
-            logger.warning(f"Error parsing AI response sections: {e}")
+            self._logger.warning(f"Error parsing AI response sections: {e}")
 
         return sections
 
@@ -1789,7 +1803,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                                                 summary=result["summary"],
                                             )
                                         except Exception as e:
-                                            logger.warning(f"Could not update UI panel: {e}")
+                                            self._logger.warning(f"Could not update UI panel: {e}")
 
                                 elif result["result_type"] == "enumerated":
                                     enumerated_functions += 1
@@ -1812,7 +1826,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                                                 summary=result["summary"],
                                             )
                                         except Exception as e:
-                                            logger.warning(f"Could not update UI panel: {e}")
+                                            self._logger.warning(f"Could not update UI panel: {e}")
 
                                 # Periodic progress updates (every 10 functions)
                                 if completed_count % 10 == 0:
@@ -1958,10 +1972,10 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                             f"Could not automatically save session: {save_error}\n"
                             + "You can manually save via File > Save Session",
                         )
-                        logger.error(f"Auto-save error: {save_error}")
+                        self._logger.error(f"Auto-save error: {save_error}")
                         import traceback
 
-                        logger.error(traceback.format_exc())
+                        self._logger.error(traceback.format_exc())
 
                     # Get cache statistics
                     cache_stats = self._get_cache_stats()
@@ -2012,7 +2026,7 @@ Check the tab to see detailed analysis results and manage function information.
 
             except Exception as e:
                 error_msg = f"Error running {display_name}: {e}"
-                logger.error(error_msg)
+                self._logger.error(error_msg)
                 self.response_panel.add_response("Error", error_msg)
                 self.workflow_diagram.set_current_stage(None)
             finally:
@@ -2127,7 +2141,7 @@ Check the tab to see detailed analysis results and manage function information.
                             xref_to_text = "\n".join(map(str, xrefs_to)) or "(none)"
                             xref_from_text = "\n".join(map(str, xrefs_from)) or "(none)"
                     except Exception as _xe:
-                        logger.debug(f"Could not fetch xrefs for {function_name}: {_xe}")
+                        self._logger.debug(f"Could not fetch xrefs for {function_name}: {_xe}")
 
                     # Append cross-reference context (callers/callees)
                     analysis_prompt += (
@@ -2173,7 +2187,7 @@ Check the tab to see detailed analysis results and manage function information.
 
                 except Exception as e:
                     error_msg = f"Error during AI analysis: {e}"
-                    logger.error(error_msg)
+                    self._logger.error(error_msg)
                     self.response_panel.add_response("Error", error_msg)
 
                 # Final stage update
@@ -2181,7 +2195,7 @@ Check the tab to see detailed analysis results and manage function information.
 
             except Exception as e:
                 error_msg = f"Error running {display_name}: {e}"
-                logger.error(error_msg)
+                self._logger.error(error_msg)
                 self.response_panel.add_response("Error", error_msg)
                 self.workflow_diagram.set_current_stage(None)
             finally:
@@ -2488,7 +2502,7 @@ Do you want to proceed with generating the vulnerability report?"""
 
             except Exception as e:
                 error_msg = f"Error running {display_name}: {e}"
-                logger.error(error_msg)
+                self._logger.error(error_msg)
                 self.response_panel.add_response("Error", error_msg)
                 self.workflow_diagram.set_current_stage(None)
             finally:
@@ -2712,4 +2726,7 @@ Please provide:
 
         import threading
 
+        threading.Thread(target=worker, daemon=True).start()
+
+        threading.Thread(target=worker, daemon=True).start()
         threading.Thread(target=worker, daemon=True).start()

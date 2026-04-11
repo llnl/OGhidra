@@ -5,7 +5,6 @@ Main entry point for the Ollama-GhidraMCP Bridge application.
 
 import argparse
 import json
-import os
 import sys
 
 from dotenv import load_dotenv
@@ -183,7 +182,9 @@ def run_interactive_mode(bridge: Bridge, config: BridgeConfig):
                     tools = [
                         name
                         for name in dir(bridge.ghidra_client)
-                        if not name.startswith("_") and callable(getattr(bridge.ghidra_client, name)) and name not in non_tool_methods
+                        if not name.startswith("_")
+                        and callable(getattr(bridge.ghidra_client, name))
+                        and name not in non_tool_methods
                     ]
 
                     print(f"Found {len(tools)} available tools (via run-tool command):\n")
@@ -1353,4 +1354,4 @@ def check_and_initialize_vector_db():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()

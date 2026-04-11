@@ -1,19 +1,19 @@
 import threading
 import tkinter as tk
-from logging import Logger
+import logging
 from pathlib import Path
 from tkinter import messagebox, ttk
 
-from bridge import BridgeConfig
+from ..bridge import BridgeConfig
 
 
 class ServerConfigDialog:
     """Dialog for configuring server URLs."""
 
-    def __init__(self, parent, config: BridgeConfig, logger: Logger):
+    def __init__(self, parent, config: BridgeConfig):
         self.config = config
         self.result = None
-        self._logger = logger
+        self._logger = logging.getLogger("ollama-ghidra-bridge.ui")
 
         # Create the dialog window
         self.dialog = tk.Toplevel(parent)

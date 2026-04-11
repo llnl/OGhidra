@@ -1,14 +1,13 @@
 import threading
 import time
 import tkinter as tk
-from logging import Logger
+import logging 
 from tkinter import messagebox, ttk
 
-from query_input_panel import AIResponsePanel
-from theme_colors import ThemeColors
-from workflow_diagram import WorkflowDiagram
-
 from ..bridge import Bridge
+from .ai_response_panel import AIResponsePanel
+from .theme_colors import ThemeColors
+from .workflow_diagram import WorkflowDiagram
 
 
 class QueryInputPanel:
@@ -21,7 +20,6 @@ class QueryInputPanel:
         response_panel: AIResponsePanel,
         workflow_diagram: WorkflowDiagram,
         theme_colors: ThemeColors,
-        logger: Logger,
     ):
         self.frame = ttk.LabelFrame(parent, text="AI Query", padding=10)
         self.bridge = bridge
@@ -30,7 +28,7 @@ class QueryInputPanel:
         self.query_running = False
         self.should_stop = False  # Flag to control stopping
         self._theme_colors = theme_colors
-        self._logger = logger
+        self._logger = logging.getLogger("ollama-ghidra-bridge.ui")
         self._setup_widgets()
 
     def _setup_widgets(self):

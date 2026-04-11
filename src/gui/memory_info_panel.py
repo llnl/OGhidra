@@ -2,20 +2,21 @@ import logging
 import tkinter as tk
 from tkinter import messagebox, scrolledtext, ttk
 
-from bridge import Bridge
-from theme_colors import ThemeColors
+from ..bridge import Bridge
+from .theme_colors import ThemeColors
 
 
 class MemoryInfoPanel:
     """Panel for displaying memory and system information."""
 
-    def __init__(self, parent, bridge: Bridge, theme_colors: ThemeColors, logger: logging.Logger):
+    def __init__(self, parent, bridge: Bridge, theme_colors: ThemeColors):
         self.bridge = bridge
         self.frame = ttk.LabelFrame(parent, text="Memory & System Info", padding="10")
+        self._theme_colors = theme_colors
+        self._logger = logging.getLogger("ollama-ghidra-bridge.ui")
         self._setup_widgets()
         self._start_auto_refresh()
-        self._theme_colors = theme_colors
-        self._logger = logger
+
 
         # Flag to prevent initialization during session loading
         self._session_loading = False
@@ -430,4 +431,5 @@ class MemoryInfoPanel:
 
     def get_widget(self):
         """Get the main widget."""
+        return self.frame
         return self.frame

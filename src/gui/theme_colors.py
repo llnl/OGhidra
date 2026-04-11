@@ -1,8 +1,10 @@
+from ttkbootstrap import Style
+
 
 class ThemeColors:
     """Theme-aware colors for raw tk widgets (Canvas, Text, Listbox, etc.)."""
 
-    def __init__(self, style):
+    def __init__(self, style: Style):
         """Initialize with a ttkbootstrap style object."""
         colors = style.colors
 
@@ -30,4 +32,5 @@ class ThemeColors:
         # Computed colors for specific use cases
         self.canvas_bg = colors.bg  # Canvas background
         self.text_font = ("Consolas", 11)  # Softer monospace font
+        self.ui_font = ("Segoe UI", 10)  # UI font
         self.ui_font = ("Segoe UI", 10)  # UI font

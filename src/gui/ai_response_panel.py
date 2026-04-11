@@ -1,10 +1,11 @@
 import json
 import tkinter as tk
 from datetime import datetime
-from tkinter import messagebox, scrolledtext, ttk, filedialog
+from tkinter import filedialog, messagebox, scrolledtext, ttk
 from typing import Optional
 
-from theme_colors import ThemeColors
+from .theme_colors import ThemeColors
+
 
 class AIResponsePanel:
     """Panel for displaying AI agent responses."""
@@ -12,10 +13,10 @@ class AIResponsePanel:
     def __init__(self, parent, theme_colors: ThemeColors, generate_callback=None):
         self.frame = ttk.LabelFrame(parent, text="AI Agent Responses", padding=10)
         self.generate_callback = generate_callback
+        self._theme_colors = theme_colors
+        self.response_history = []
         self._setup_widgets()
         self._setup_text_tags()
-        self.response_history = []
-        self._theme_colors = theme_colors
 
     def _setup_widgets(self):
         """Setup the AI response widgets."""
@@ -219,4 +220,5 @@ class AIResponsePanel:
 
     def get_widget(self):
         """Return the frame widget."""
+        return self.frame
         return self.frame

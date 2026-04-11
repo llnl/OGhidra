@@ -1,24 +1,23 @@
 import datetime
 import json
+import logging
 import tkinter as tk
-from logging import Logger
 from tkinter import filedialog, messagebox, scrolledtext, ttk
 
-from theme_colors import ThemeColors
-
 from ..bridge import Bridge
+from .theme_colors import ThemeColors
 
 
 class RenamedFunctionsPanel:
     """Panel displaying renamed functions with their addresses and behavior summaries."""
 
-    def __init__(self, parent, bridge: Bridge, theme_colors: ThemeColors, logger: Logger):
+    def __init__(self, parent, bridge: Bridge, theme_colors: ThemeColors):
         import threading
 
         self.frame = ttk.LabelFrame(parent, text="Analyzed Functions", padding=10)
         self.bridge = bridge
         self._theme_colors = theme_colors
-        self._logger = logger
+        self._logger = logger = logging.getLogger("ollama-ghidra-bridge.ui")
         self.function_summaries = {}  # Store behavior summaries for functions
         self._streaming_load_active = False  # Flag to prevent updates during streaming
         self.batch_operation_in_progress = False  # Flag to prevent auto-refresh during batch operations
@@ -1147,7 +1146,6 @@ class RenamedFunctionsPanel:
                 # Debug logging to verify data storage
                 import logging
 
-                logger = logging.getLogger("ollama-ghidra-bridge.ui")
                 self._logger.info(f"Added function to session: {address} | {old_name} -> {new_name}")
                 self._logger.info(
                     f"Bridge function_address_mapping now has {len(self.bridge.function_address_mapping)} entries"
