@@ -7,10 +7,10 @@ This is the "candidate" generator for benchmark evaluation.
 """
 
 import logging
-import time
 import re
-from typing import Dict, List, Optional, Any
+import time
 from dataclasses import dataclass
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("oghidra.benchmark.runners.oghidra")
 
@@ -78,9 +78,9 @@ class OGhidraRunner:
 
         # Decompile the function
         if function_name:
-            decompiled = self.bridge.ghidra.decompile_function(name=function_name)
+            decompiled = self.bridge.ghidra_client.decompile_function(name=function_name)
         else:
-            decompiled = self.bridge.ghidra.decompile_function_by_address(address=address)
+            decompiled = self.bridge.ghidra_client.decompile_function_by_address(address=address)
 
         if not decompiled or decompiled.lower().startswith("error"):
             raise ValueError(f"Failed to decompile function at {address}: {decompiled}")
@@ -128,14 +128,14 @@ class OGhidraRunner:
 
         try:
             # Get callers
-            callers = self.bridge.ghidra.get_xrefs_to(address=address)
+            callers = self.bridge.ghidra_client.get_xrefs_to(address=address)
             if isinstance(callers, list) and callers:
                 caller_addrs = self._extract_addresses(callers[:3])
                 for caller_addr in caller_addrs:
                     if total_chars >= self.max_context_chars:
                         break
                     try:
-                        caller_code = self.bridge.ghidra.decompile_function_by_address(address=caller_addr)
+                        caller_code = self.bridge.ghidra_client.decompile_function_by_address(address=caller_addr)
                         if caller_code and not caller_code.lower().startswith("error"):
                             truncated = caller_code[:1000] if len(caller_code) > 1000 else caller_code
                             context_parts.append(f"### Caller at {caller_addr}:\n```c\n{truncated}\n```")
@@ -144,14 +144,14 @@ class OGhidraRunner:
                         pass
 
             # Get callees
-            callees = self.bridge.ghidra.get_xrefs_from(address=address)
+            callees = self.bridge.ghidra_client.get_xrefs_from(address=address)
             if isinstance(callees, list) and callees:
                 callee_addrs = self._extract_addresses(callees[:3])
                 for callee_addr in callee_addrs:
                     if total_chars >= self.max_context_chars:
                         break
                     try:
-                        callee_code = self.bridge.ghidra.decompile_function_by_address(address=callee_addr)
+                        callee_code = self.bridge.ghidra_client.decompile_function_by_address(address=callee_addr)
                         if callee_code and not callee_code.lower().startswith("error"):
                             truncated = callee_code[:1000] if len(callee_code) > 1000 else callee_code
                             context_parts.append(f"### Callee at {callee_addr}:\n```c\n{truncated}\n```")

@@ -1052,7 +1052,7 @@ class OGhidraUI:
             # Check Ollama independently
             ollama_result = None
             try:
-                ollama_result = self.bridge.ollama.check_health()
+                ollama_result = self.bridge.llm_client.check_health()
             except Exception as e:
                 ollama_result = e
 
@@ -1063,7 +1063,7 @@ class OGhidraUI:
             # Check Ghidra independently
             ghidra_result = None
             try:
-                ghidra_result = self.bridge.ghidra.check_health()
+                ghidra_result = self.bridge.ghidra_client.check_health()
             except Exception as e:
                 ghidra_result = e
 
@@ -1290,8 +1290,8 @@ class OGhidraUI:
                     self.bridge.reload_llm_client()
                 else:
                     # Fallback for manual updates if method missing
-                    self.bridge.ollama.base_url = str(self.config.ollama.base_url).rstrip("/")
-                    self.bridge.ollama.default_model = self.config.ollama.model
+                    self.bridge.llm_client.base_url = str(self.config.ollama.base_url).rstrip("/")
+                    self.bridge.llm_client.default_model = self.config.ollama.model
 
                 # Update Ghidra client configuration (always manual update as it's less complex)
                 if hasattr(self.bridge, "ghidra_client") and self.bridge.ghidra_client:

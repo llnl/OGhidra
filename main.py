@@ -64,9 +64,8 @@ def run_interactive_mode(bridge: Bridge, config: BridgeConfig):
                 break
             elif user_input.lower() == "health":
                 # Check Ollama and GhidraMCP health
-                # Corrected: Use bridge.ollama and bridge.ghidra
                 ollama_health = bridge.ollama.check_health() if hasattr(bridge, "ollama") else False
-                ghidra_health = bridge.ghidra.check_health() if hasattr(bridge, "ghidra") else False
+                ghidra_health = bridge.ghidra_client.check_health() if hasattr(bridge, "ghidra") else False
 
                 print("\n=== Health Check ===")
                 print(f"Ollama API: {'OK' if ollama_health else 'NOT OK'}")
@@ -159,8 +158,7 @@ def run_interactive_mode(bridge: Bridge, config: BridgeConfig):
                 continue
             elif user_input.lower() == "models":
                 # List available models
-                # Corrected: Use bridge.ollama
-                models = bridge.ollama.list_models() if hasattr(bridge, "ollama") else []
+                models = bridge.ollama_client.list_models()
 
                 print("\n=== Available Models ===")
                 for model in models:
@@ -172,11 +170,6 @@ def run_interactive_mode(bridge: Bridge, config: BridgeConfig):
                 print("\n=== Available Ghidra Tools ===")
 
                 try:
-                    # Corrected: Use bridge.ghidra
-                    client = (
-                        bridge.ghidra if hasattr(bridge, "ghidra") else GhidraMCPClient(config.ghidra)
-                    )  # Fallback if bridge.ghidra not init
-
                     # Get all public methods (excluding those starting with _ and known non-tools)
                     non_tool_methods = [
                         "check_health",
@@ -189,14 +182,14 @@ def run_interactive_mode(bridge: Bridge, config: BridgeConfig):
                     ]
                     tools = [
                         name
-                        for name in dir(client)
-                        if not name.startswith("_") and callable(getattr(client, name)) and name not in non_tool_methods
+                        for name in dir(bridge.ghidra_client)
+                        if not name.startswith("_") and callable(getattr(bridge.ghidra_client, name)) and name not in non_tool_methods
                     ]
 
                     print(f"Found {len(tools)} available tools (via run-tool command):\n")
 
                     for tool_name in sorted(tools):
-                        tool_func = getattr(client, tool_name)
+                        tool_func = getattr(bridge.ghidra_client, tool_name)
                         import inspect
 
                         signature = inspect.signature(tool_func)
@@ -368,9 +361,9 @@ def run_interactive_mode(bridge: Bridge, config: BridgeConfig):
                                             final_value_for_param = value_str_from_pair  # Fallback to string
                                 params[key] = final_value_for_param
 
-                    # Corrected: Use bridge.ghidra
-                    if hasattr(bridge.ghidra, tool_name):
-                        tool_method = getattr(bridge.ghidra, tool_name)
+                    # Corrected: Use bridge.ghidra_client
+                    if hasattr(bridge.ghidra_client, tool_name):
+                        tool_method = getattr(bridge.ghidra_client, tool_name)
 
                         params_for_log = ", ".join([f"{k}={repr(v)}" for k, v in params.items()])
                         bridge.logger.info(f"Executing direct tool call via 'run-tool': {tool_name} with params: {params}")
@@ -551,7 +544,7 @@ Tool Output:
                     print(f"\nExecuting: analyze_function({f'address=\\"{address}\\"' if address else ''})")
 
                     raw_tool_result = (
-                        bridge.ghidra.analyze_function(address=address)
+                        bridge.ghidra_client.analyze_function(address=address)
                         if hasattr(bridge, "ghidra")
                         else "Ghidra client not available."
                     )
@@ -655,7 +648,7 @@ Tool Output:
 
                     # Step 1: Get all functions
                     print("\n[Step 1] Getting function list...")
-                    functions_result = bridge.ghidra.list_functions() if hasattr(bridge, "ghidra") else []
+                    functions_result = bridge.ghidra_client.list_functions() if hasattr(bridge, "ghidra") else []
 
                     if isinstance(functions_result, str) and functions_result.lower().startswith("error:"):
                         print(f"Error getting functions: {functions_result}")
@@ -705,7 +698,9 @@ Tool Output:
 
                             # Decompile the function
                             function_decompile_result = (
-                                bridge.ghidra.decompile_function(name=function_name) if hasattr(bridge, "ghidra") else None
+                                bridge.ghidra_client.decompile_function(name=function_name)
+                                if hasattr(bridge, "ghidra")
+                                else None
                             )
                             if not function_decompile_result or (
                                 isinstance(function_decompile_result, str)
@@ -725,8 +720,8 @@ Tool Output:
                                 # Get callers (who calls this function?)
                                 try:
                                     callers_result = (
-                                        bridge.ghidra.get_xrefs_to(address=address)
-                                        if hasattr(bridge.ghidra, "get_xrefs_to")
+                                        bridge.ghidra_client.get_xrefs_to(address=address)
+                                        if hasattr(bridge.ghidra_client, "get_xrefs_to")
                                         else []
                                     )
                                     if isinstance(callers_result, list) and callers_result:
@@ -746,7 +741,7 @@ Tool Output:
                                         # Decompile top 3 callers
                                         for caller_addr in caller_addresses[:3]:
                                             try:
-                                                caller_code = bridge.ghidra.decompile_function_by_address(
+                                                caller_code = bridge.ghidra_client.decompile_function_by_address(
                                                     address=str(caller_addr)
                                                 )
                                                 if caller_code and not caller_code.lower().startswith("error"):
@@ -763,8 +758,8 @@ Tool Output:
                                 # Get callees (what does this function call?)
                                 try:
                                     callees_result = (
-                                        bridge.ghidra.get_xrefs_from(address=address)
-                                        if hasattr(bridge.ghidra, "get_xrefs_from")
+                                        bridge.ghidra_client.get_xrefs_from(address=address)
+                                        if hasattr(bridge.ghidra_client, "get_xrefs_from")
                                         else []
                                     )
                                     if isinstance(callees_result, list) and callees_result:
@@ -784,7 +779,7 @@ Tool Output:
                                         # Decompile top 3 callees
                                         for callee_addr in callee_addresses[:3]:
                                             try:
-                                                callee_code = bridge.ghidra.decompile_function_by_address(
+                                                callee_code = bridge.ghidra_client.decompile_function_by_address(
                                                     address=str(callee_addr)
                                                 )
                                                 if callee_code and not callee_code.lower().startswith("error"):
@@ -967,7 +962,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                                             )
                                         else:
                                             # Fallback to direct ghidra call
-                                            rename_result = bridge.ghidra.rename_function(
+                                            rename_result = bridge.ghidra_client.rename_function(
                                                 old_name=function_name, new_name=suggested_name
                                             )
 
@@ -1270,7 +1265,7 @@ def main():
 
     # Create the bridge
     bridge = Bridge(
-        config=config,
+        bridge_config=config,
         include_capabilities=include_capabilities,
         max_agent_steps=config.max_steps,
         enable_cag=config.cag_enabled,

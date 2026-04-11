@@ -1,13 +1,15 @@
-import tkinter as tk
-from tkinter import ttk, scrolledtext, messagebox
 import logging
+import tkinter as tk
+from tkinter import messagebox, scrolledtext, ttk
+
 from bridge import Bridge
 from theme_colors import ThemeColors
+
 
 class MemoryInfoPanel:
     """Panel for displaying memory and system information."""
 
-    def __init__(self, parent, bridge: Bridge, theme_colors: ThemeColors, logger:logging.Logger):
+    def __init__(self, parent, bridge: Bridge, theme_colors: ThemeColors, logger: logging.Logger):
         self.bridge = bridge
         self.frame = ttk.LabelFrame(parent, text="Memory & System Info", padding="10")
         self._setup_widgets()
@@ -122,8 +124,8 @@ class MemoryInfoPanel:
             vector_count = 0
 
             # Check if session history has vector embeddings enabled
-            if hasattr(self.bridge, "config") and hasattr(self.bridge.config, "session_history"):
-                rag_enabled = getattr(self.bridge.config.session_history, "use_vector_embeddings", False)
+            if hasattr(self.bridge, "config") and hasattr(self.bridge.bridge_config, "session_history"):
+                rag_enabled = getattr(self.bridge.bridge_config.session_history, "use_vector_embeddings", False)
 
             # Check for actual vector store data (only if not session loading)
             if hasattr(self.bridge, "memory_manager") and self.bridge.memory_manager:
@@ -187,8 +189,8 @@ class MemoryInfoPanel:
 
             # Update bridge configuration
             if hasattr(self.bridge, "config"):
-                self.bridge.config.cag_enabled = new_state
-                self.bridge.config.enable_cag = new_state
+                self.bridge.bridge_config.cag_enabled = new_state
+                self.bridge.bridge_config.enable_cag = new_state
 
             self.bridge.enable_cag = new_state
 
@@ -197,7 +199,7 @@ class MemoryInfoPanel:
                 try:
                     from src.cag import CAGManager
 
-                    self.bridge.cag_manager = CAGManager(self.bridge.config)
+                    self.bridge.cag_manager = CAGManager(self.bridge.bridge_config)
                     self.bridge.memory_manager = getattr(self.bridge.cag_manager, "memory_manager", None)
                     self._logger.info("CAG Manager reinitialized")
                 except Exception as e:
@@ -238,8 +240,8 @@ class MemoryInfoPanel:
             new_state = self.rag_var.get()
 
             # Update session history configuration
-            if hasattr(self.bridge, "config") and hasattr(self.bridge.config, "session_history"):
-                self.bridge.config.session_history.use_vector_embeddings = new_state
+            if hasattr(self.bridge, "config") and hasattr(self.bridge.bridge_config, "session_history"):
+                self.bridge.bridge_config.session_history.use_vector_embeddings = new_state
 
             if new_state:
                 # Enabling RAG - check if CAG is enabled (but don't force it)
