@@ -1,8 +1,9 @@
 import json
 import tkinter as tk
 from datetime import datetime
+from queue import Queue
 from tkinter import filedialog, messagebox, scrolledtext, ttk
-from typing import Optional
+from typing import Optional, Tuple
 
 from .theme_colors import ThemeColors
 
@@ -15,8 +16,11 @@ class AIResponsePanel:
         self.generate_callback = generate_callback
         self._theme_colors = theme_colors
         self.response_history = []
+        self.response_queue = Queue()
         self._setup_widgets()
         self._setup_text_tags()
+        # Start periodic queue processing (check every 100ms)
+        self._check_queue()
 
     def _setup_widgets(self):
         """Setup the AI response widgets."""
@@ -93,7 +97,7 @@ class AIResponsePanel:
             self.response_text.tag_config("reasoning", foreground="#a0a0a0")
 
     def add_response(self, response_type: str, content: str, timestamp: Optional[datetime] = None):
-        """Add a new AI response to the display."""
+        """Add a new AI response to the display via queue for thread safety."""
         if timestamp is None:
             timestamp = datetime.now()
 
@@ -105,14 +109,14 @@ class AIResponsePanel:
         }
         self.response_history.append(response_entry)
 
-        # Display in text widget
+        # Format the response
         formatted_response = f"\n{'='*60}\n"
         formatted_response += f"[{timestamp.strftime('%H:%M:%S')}] {response_type.upper()}\n"
         formatted_response += f"{'='*60}\n"
         formatted_response += f"{content}\n"
 
-        self.response_text.after(0, lambda: self.response_text.insert(tk.END, formatted_response))
-        self.response_text.after(0, lambda: self.response_text.see(tk.END))
+        # Add to queue instead of updating UI directly
+        self.response_queue.put(("regular", formatted_response))
 
     def add_cot_update(self, update_type: str, content: str, timestamp: Optional[datetime] = None):
         """Add a chain of thought update to the display (streaming during agentic loop).
@@ -160,8 +164,8 @@ class AIResponsePanel:
             # Default format
             formatted = f"[{time_str}] [{update_type}] {content}\n"
 
-        self.response_text.insert(tk.END, formatted)
-        self.response_text.see(tk.END)
+        # Add to queue with update type for potential tag application
+        self.response_queue.put(("cot", formatted, update_type.upper()))
 
     def _clear_responses(self):
         """Clear all responses."""
@@ -218,7 +222,43 @@ class AIResponsePanel:
         else:
             messagebox.showinfo("Info", "Report generation callback not linked.")
 
+    def _check_queue(self):
+        """Process items from the response queue on the main thread."""
+        try:
+            # Process all current items in the queue
+            while not self.response_queue.empty():
+                item = self.response_queue.get_nowait()
+
+                # Handle regular responses
+                if item[0] == "regular":
+                    self.response_text.insert(tk.END, item[1])
+                    self.response_text.see(tk.END)
+
+                # Handle chain of thought updates
+                elif item[0] == "cot":
+                    formatted, update_type = item[1], item[2]
+                    self.response_text.insert(tk.END, formatted)
+
+                    # Apply appropriate tag based on update type
+                    if update_type == "REASONING":
+                        last_line_start = self.response_text.index(f"{tk.END} linestart-1c")
+                        self.response_text.tag_add("reasoning", last_line_start, tk.END)
+                    elif update_type == "TOOL":
+                        last_line_start = self.response_text.index(f"{tk.END} linestart-1c")
+                        self.response_text.tag_add("tool", last_line_start, tk.END)
+
+                    self.response_text.see(tk.END)
+
+                # Mark as done
+                self.response_queue.task_done()
+
+        except Exception as e:
+            print(f"Error processing response queue: {e}")
+
+        finally:
+            # Schedule next check after 100ms
+            self.response_text.after(100, self._check_queue)
+
     def get_widget(self):
         """Return the frame widget."""
-        return self.frame
         return self.frame
