@@ -7,38 +7,19 @@ and GhidraMCP, enabling AI-assisted reverse engineering tasks within Ghidra.
 """
 
 import argparse
-import base64
-import functools
-import hashlib
-import inspect
-import itertools
 import json
 import logging
-import math
 import os
-import random
-import re  # Added for pattern matching in enhanced error feedback
-import shutil
-import subprocess
+import re
 import sys
-import tempfile
-import textwrap
 import threading
-import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from src.analysis_dump import AnalysisDumper
 from src.cag.manager import CAGManager
 from src.command_parser import CommandParser
-from src.config import (
-    BridgeConfig,
-    ExternalConfig,
-    GhidraMCPConfig,
-    OllamaConfig,
-    ToolParameters,
-    CustomAPIConfig
-)
+from src.config import BridgeConfig, CustomAPIConfig, ExternalConfig, OllamaConfig
 from src.context_manager import ContextManager
 from src.coverage_tracker import CoverageTracker
 from src.custom_api_client import CustomAPIClient
@@ -47,7 +28,6 @@ from src.external_client import ExternalClient
 from src.ghidra_client import GhidraMCPClient
 from src.lead_tracker import LeadTracker
 from src.models.memory import (
-    AnalysisState,
     CAGContext,
     ExecutionGate,
     ExecutionPhaseResults,
@@ -88,7 +68,7 @@ class Bridge:
     # Class-level singleton for SentenceTransformer model
     _sentence_transformer_model = None
     _model_load_lock = None
-    _ollama_client = None
+    _ollama_client: OllamaClient | None = None
 
     def __init__(
         self, bridge_config: BridgeConfig, include_capabilities: bool = False, max_agent_steps: int = 5, enable_cag: bool = True
@@ -644,7 +624,7 @@ Do NOT skip to tool execution. Provide concrete details from the data above.
         return cls.get_embeddings(texts, model)
 
     @classmethod
-    def set_ollama_client(cls, ollama_client):
+    def set_ollama_client(cls, ollama_client: OllamaClient):
         """Set the Ollama client for embeddings."""
         cls._ollama_client = ollama_client
 
@@ -5594,7 +5574,7 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
         analysis_prompt = f"Analyze this decompiled function and suggest a name:\n{decompiled_code}"
 
         # 4. Use Ollama directly (no multi-phase workflow)
-        ai_response = self.bridge.ollama.generate(analysis_prompt)
+        ai_response = self.bridge._ollama_client.generate(analysis_prompt)
 
         # 5. Extract name and rename
 

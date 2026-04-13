@@ -5,7 +5,9 @@ import threading
 import tkinter as tk
 from queue import Queue
 from tkinter import filedialog, messagebox, scrolledtext, ttk
-from typing import Any, Dict, Literal, Optional, Tuple, Union
+from typing import Any, Literal, Tuple
+
+from src.cag.vector_store import SimpleVectorStore
 
 from ..bridge import Bridge
 from .theme_colors import ThemeColors
@@ -18,7 +20,7 @@ class RenamedFunctionsPanel:
         self.frame = ttk.LabelFrame(parent, text="Analyzed Functions", padding=10)
         self.bridge = bridge
         self._theme_colors = theme_colors
-        self._logger = logger = logging.getLogger("ollama-ghidra-bridge.ui")
+        self._logger = logging.getLogger("ollama-ghidra-bridge.ui")
         self.function_summaries: dict[str, str] = {}  # Store behavior summaries for functions
         self._streaming_load_active = False  # Flag to prevent updates during streaming
         self.batch_operation_in_progress = False  # Flag to prevent auto-refresh during batch operations
@@ -287,8 +289,6 @@ class RenamedFunctionsPanel:
 
                 # Use generic embeddings from Bridge
                 try:
-                    from src.bridge import Bridge
-
                     # Test embeddings availability
                     test_embeddings = Bridge.get_embeddings(["test"])
                     if not test_embeddings:
@@ -450,8 +450,6 @@ class RenamedFunctionsPanel:
             # Create a new vector store if one doesn't exist
             if vector_store is None:
                 try:
-                    from src.cag.vector_store import SimpleVectorStore
-
                     # Create empty vector store
                     vector_store = SimpleVectorStore(documents=[], embeddings=[])
                     # Set it directly on the cag_manager
@@ -1188,6 +1186,13 @@ class RenamedFunctionsPanel:
                                 if hasattr(child, "_update_memory_info"):
                                     child._update_memory_info()
                                     break
+
+                elif update_type == "refresh_functions":
+                    # Refresh function list on the main thread
+                    try:
+                        self._update_function_list()
+                    except Exception as e:
+                        self._logger.error(f"Error refreshing function list from queue: {e}")
 
                 elif update_type == "tree_operation":
                     operation = params

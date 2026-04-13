@@ -254,6 +254,40 @@ class AIResponsePanel:
 
                     self.response_text.see(tk.END)
 
+                # Handle update to an existing response
+                elif item[0] == "update":
+                    response_type, formatted = item[1], item[2]
+
+                    # Search for existing response of this type to replace it
+                    found = False
+                    text_content = self.response_text.get(1.0, tk.END)
+                    lines = text_content.split("\n")
+
+                    for i in range(len(lines)):
+                        if f"] {response_type.upper()}" in lines[i]:
+                            # Found the header line - now we need to find the end of this response section
+                            # to determine the range to replace
+                            start_line = i - 1  # Include the separator line above
+                            if start_line < 0:
+                                start_line = 0
+
+                            # Find the end of this section (next separator or end of text)
+                            end_line = i + 1
+                            while end_line < len(lines) and not lines[end_line].startswith("="):
+                                end_line += 1
+
+                            # We've found the range, now replace it
+                            self.response_text.delete(f"{start_line+1}.0", f"{end_line+1}.0")
+                            self.response_text.insert(f"{start_line+1}.0", formatted)
+                            found = True
+                            break
+
+                    # If not found, just append it
+                    if not found:
+                        self.response_text.insert(tk.END, formatted)
+
+                    self.response_text.see(tk.END)
+
                 # Mark as done
                 self.response_queue.task_done()
 
@@ -263,6 +297,34 @@ class AIResponsePanel:
         finally:
             # Schedule next check after 100ms
             self.response_text.after(100, self._check_queue)
+
+    def update_response(self, response_type: str, content: str):
+        """Update the most recent response of the given type with new content.
+        This is useful for streaming updates where content is incrementally added.
+        """
+        # Find the most recent entry of this type in history
+        found = False
+        for i in range(len(self.response_history) - 1, -1, -1):
+            if self.response_history[i]["type"] == response_type:
+                # Update the content in history
+                self.response_history[i]["content"] = content
+                found = True
+                break
+
+        if not found:
+            # If no matching response was found, add a new one
+            self.add_response(response_type, content)
+            return
+
+        # Use a special queue item type for updates
+        formatted_response = f"\n{'='*60}\n"
+        timestamp = datetime.now()
+        formatted_response += f"[{timestamp.strftime('%H:%M:%S')}] {response_type.upper()} (UPDATED)\n"
+        formatted_response += f"{'='*60}\n"
+        formatted_response += f"{content}\n"
+
+        # Use a special update type in the queue for the _check_queue method
+        self.response_queue.put(("update", response_type, formatted_response))
 
     def get_widget(self):
         """Return the frame widget."""
