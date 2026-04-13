@@ -18,6 +18,7 @@ logger = logging.getLogger("oghidra.benchmark.runners.oghidra")
 @dataclass
 class OGhidraResult:
     """Result from OGhidra function analysis."""
+
     function_address: str
     function_name: str
     decompiled_code: str
@@ -100,7 +101,7 @@ class OGhidraRunner:
         )
 
         # Generate AI summary
-        ai_response = self.bridge.ollama.generate(prompt=analysis_prompt)
+        ai_response = self.bridge._ollama_client.generate(prompt=analysis_prompt)
 
         # Parse response
         summary, suggested_name = self._parse_response(ai_response)
@@ -169,11 +170,11 @@ class OGhidraRunner:
         addresses = []
         for xref in xrefs:
             if isinstance(xref, dict):
-                addr = xref.get('from_address') or xref.get('to_address') or xref.get('address')
+                addr = xref.get("from_address") or xref.get("to_address") or xref.get("address")
                 if addr:
                     addresses.append(str(addr))
             elif isinstance(xref, str):
-                match = re.search(r'([0-9a-fA-F]{6,})', xref)
+                match = re.search(r"([0-9a-fA-F]{6,})", xref)
                 if match:
                     addresses.append(match.group(1))
         return addresses
@@ -218,12 +219,12 @@ Based on the function's code and context, provide:
         suggested_name = None
 
         # Extract suggested name
-        lines = response.split('\n')
+        lines = response.split("\n")
         for line in lines:
-            if 'suggested name:' in line.lower():
-                name_part = line.split(':', 1)[1].strip()
-                name_part = name_part.replace('**', '').replace('*', '').strip()
-                match = re.search(r'\b([a-z][a-zA-Z0-9_]*[a-zA-Z0-9])\b', name_part)
+            if "suggested name:" in line.lower():
+                name_part = line.split(":", 1)[1].strip()
+                name_part = name_part.replace("**", "").replace("*", "").strip()
+                match = re.search(r"\b([a-z][a-zA-Z0-9_]*[a-zA-Z0-9])\b", name_part)
                 if match:
                     suggested_name = match.group(1)
                     break

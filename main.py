@@ -45,7 +45,7 @@ def run_interactive_mode(bridge: Bridge, config: BridgeConfig):
     """Run the bridge in interactive mode."""
     print("Ollama-GhidraMCP Bridge (Interactive Mode)")
     print(
-        f"Default model: {bridge.ollama.config.model if hasattr(bridge, 'ollama') and hasattr(bridge.ollama, 'config') else config.ollama.model}"
+        f"Default model: {bridge._ollama_client.config.model if hasattr(bridge, 'ollama') and hasattr(bridge.ollama, 'config') else config.ollama.model}"
     )
 
     # Initialize a list to store outputs from the current session for review
@@ -63,8 +63,8 @@ def run_interactive_mode(bridge: Bridge, config: BridgeConfig):
                 break
             elif user_input.lower() == "health":
                 # Check Ollama and GhidraMCP health
-                ollama_health = bridge.ollama.check_health() if hasattr(bridge, "ollama") else False
-                ghidra_health = bridge.ghidra_client.check_health() if hasattr(bridge, "ghidra") else False
+                ollama_health = bridge._ollama_client.check_health()
+                ghidra_health = bridge.ghidra_client.check_health()
 
                 print("\n=== Health Check ===")
                 print(f"Ollama API: {'OK' if ollama_health else 'NOT OK'}")
@@ -157,7 +157,7 @@ def run_interactive_mode(bridge: Bridge, config: BridgeConfig):
                 continue
             elif user_input.lower() == "models":
                 # List available models
-                models = bridge.ollama_client.list_models()
+                models = bridge._ollama_client.list_models()
 
                 print("\n=== Available Models ===")
                 for model in models:
@@ -462,7 +462,7 @@ Tool Output:
                                     print(f"Sending output from {tool_name} to AI for analysis...")
                                     try:
                                         ai_analysis = (
-                                            bridge.ollama.generate(prompt=analysis_prompt)
+                                            bridge._ollama_client.generate(prompt=analysis_prompt)
                                             if hasattr(bridge, "ollama")
                                             else "Ollama client not available."
                                         )
@@ -583,7 +583,7 @@ Tool Output:
                         print(f"Sending output from analyze-function to AI for analysis...")
                         try:
                             ai_analysis = (
-                                bridge.ollama.generate(prompt=analysis_prompt)
+                                bridge._ollama_client.generate(prompt=analysis_prompt)
                                 if hasattr(bridge, "ollama")
                                 else "Ollama client not available."
                             )
@@ -869,7 +869,7 @@ EXAMPLES of good names:
 
 CRITICAL: You MUST include all four sections with the exact headers shown above. Focus on making the suggested name as specific and descriptive as possible."""
 
-                            ai_response = bridge.ollama.generate(prompt=analysis_query) if hasattr(bridge, "ollama") else None
+                            ai_response = bridge._ollama_client.generate(prompt=analysis_query) if hasattr(bridge, "ollama") else None
 
                             if ai_response and ai_response.strip():
                                 function_summary = ai_response.strip()
@@ -1177,7 +1177,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                 try:
                     # Ensure bridge.ollama is used
                     ai_review_response = (
-                        bridge.ollama.generate(prompt=review_prompt)
+                        bridge._ollama_client.generate(prompt=review_prompt)
                         if hasattr(bridge, "ollama")
                         else "Ollama client not available."
                     )
