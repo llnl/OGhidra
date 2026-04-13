@@ -3,7 +3,7 @@ import tkinter as tk
 from datetime import datetime
 from queue import Queue
 from tkinter import filedialog, messagebox, scrolledtext, ttk
-from typing import Optional, Tuple
+from typing import Literal, Optional, Tuple, Union
 
 from .theme_colors import ThemeColors
 
@@ -15,11 +15,16 @@ class AIResponsePanel:
         self.frame = ttk.LabelFrame(parent, text="AI Agent Responses", padding=10)
         self.generate_callback = generate_callback
         self._theme_colors = theme_colors
-        self.response_history = []
-        self.response_queue = Queue()
+        self.response_history: list[dict[str, str]] = []
+
+        # Queues for the asynchronous workers to post results
+        self.response_queue: Queue[Union[Tuple[Literal["regular"], str], Tuple[Literal["cot"], str, str]]] = Queue()
+
+        # Setup the GUI
         self._setup_widgets()
         self._setup_text_tags()
-        # Start periodic queue processing (check every 100ms)
+
+        # Start UI callback loops for displaying the results from asynchronous workers.
         self._check_queue()
 
     def _setup_widgets(self):

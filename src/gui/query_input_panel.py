@@ -1,7 +1,8 @@
+import logging
 import threading
 import time
 import tkinter as tk
-import logging 
+from queue import Queue
 from tkinter import messagebox, ttk
 
 from ..bridge import Bridge
@@ -29,7 +30,15 @@ class QueryInputPanel:
         self.should_stop = False  # Flag to control stopping
         self._theme_colors = theme_colors
         self._logger = logging.getLogger("ollama-ghidra-bridge.ui")
+        
+        # Queues for the asynchronous workers to post results
+        self.workflow_stage_queue: Queue[str] = Queue()
+        
+        # Setup the GUI
         self._setup_widgets()
+
+        # Start UI callback loops for displaying the results from asynchronous workers.
+        self._check_workflow_stage_queue()
 
     def _setup_widgets(self):
         """Setup the query input widgets."""
@@ -387,13 +396,14 @@ class QueryInputPanel:
             self.progress.after(0, self.progress.stop)
 
     def _monitor_workflow_stage(self):
-        """Monitor the bridge's workflow stage and update the diagram."""
+        """Monitor the bridge's workflow stage and add updates to the queue."""
         previous_stage = None
         while self.query_running:
             try:
                 current_stage = getattr(self.bridge, "current_workflow_stage", None)
                 if current_stage != previous_stage:
-                    self.workflow_diagram.set_current_stage(current_stage)
+                    # Add the stage change to the queue instead of updating UI directly
+                    self.workflow_stage_queue.put(current_stage)
                     previous_stage = current_stage
 
                 # Break if workflow is complete
@@ -404,6 +414,26 @@ class QueryInputPanel:
             except Exception as e:
                 self._logger.error(f"Error monitoring workflow stage: {e}")
                 break
+
+    def _check_workflow_stage_queue(self):
+        """Process items from the workflow stage queue on the main thread."""
+        try:
+            # Process all current items in the queue
+            while not self.workflow_stage_queue.empty():
+                # Get the current stage from the queue
+                current_stage = self.workflow_stage_queue.get_nowait()
+
+                # Update the workflow diagram on the main thread
+                self.workflow_diagram.set_current_stage(current_stage)
+
+                # Mark as done
+                self.workflow_stage_queue.task_done()
+
+        except Exception as e:
+            self._logger.error(f"Error processing workflow stage queue: {e}")
+
+        finally:
+            self.frame.after(100, self._check_workflow_stage_queue)
 
     def get_widget(self):
         """Return the frame widget."""
