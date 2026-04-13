@@ -2,8 +2,10 @@ import datetime
 import json
 import logging
 import tkinter as tk
+from queue import Queue
 from tkinter import filedialog, messagebox, scrolledtext, ttk
-
+import threading
+from typing import Any, Dict, Literal, Optional, Tuple, Union
 from ..bridge import Bridge
 from .theme_colors import ThemeColors
 
@@ -12,8 +14,6 @@ class RenamedFunctionsPanel:
     """Panel displaying renamed functions with their addresses and behavior summaries."""
 
     def __init__(self, parent, bridge: Bridge, theme_colors: ThemeColors):
-        import threading
-
         self.frame = ttk.LabelFrame(parent, text="Analyzed Functions", padding=10)
         self.bridge = bridge
         self._theme_colors = theme_colors
@@ -22,8 +22,15 @@ class RenamedFunctionsPanel:
         self._streaming_load_active = False  # Flag to prevent updates during streaming
         self.batch_operation_in_progress = False  # Flag to prevent auto-refresh during batch operations
         self.dict_lock = threading.RLock()  # Thread-safe lock for dictionary access
+
+        # Queue for thread-safe UI updates
+        self.ui_update_queue: Queue[Tuple[Literal['button', 'label', 'progress', 'close'], Any]] = Queue()
+
         self._setup_widgets()
         self._update_function_list()
+
+        # Start processing the UI update queue
+        self._check_ui_update_queue()
 
     def _setup_widgets(self):
         """Setup the renamed functions widgets."""
@@ -100,7 +107,6 @@ class RenamedFunctionsPanel:
 
     def _load_vectors_from_functions(self):
         """Load all analyzed functions into the vector store for RAG enhancement."""
-        import threading
         import tkinter.messagebox as messagebox
 
         # Check if CAG/RAG is available
@@ -185,17 +191,11 @@ class RenamedFunctionsPanel:
             vectors_failed = 0
 
             try:
-                # Disable the button during loading
-                self.load_vectors_button.after(
-                    0,
-                    lambda: self.load_vectors_button.config(state="disabled", text="Loading..."),
-                )
+                # Disable the button during loading - add to queue
+                self.ui_update_queue.put(('button', (self.load_vectors_button, "disabled", "Loading...")))
 
-                # Get all function data
-                progress_status.after(
-                    0,
-                    lambda: progress_status.config(text="Collecting function data..."),
-                )
+                # Get all function data - add to queue
+                self.ui_update_queue.put(('label', (progress_status, "Collecting function data...", "blue")))
 
                 functions_to_process = []
 
@@ -266,18 +266,12 @@ class RenamedFunctionsPanel:
                             )
 
                 total_functions = len(functions_to_process)
-                progress_bar.after(0, lambda: progress_bar.config(maximum=total_functions))
+                self.ui_update_queue.put(('progress', (progress_bar, total_functions, True)))
 
-                progress_status.after(
-                    0,
-                    lambda: progress_bar.config(text=f"Loading {total_functions} functions into vectors..."),
-                )
+                self.ui_update_queue.put(('label', (progress_status, f"Loading {total_functions} functions into vectors...", "blue")))
 
                 # **OPTIMIZED: Batch processing approach with embeddings**
-                progress_status.after(
-                    0,
-                    lambda: progress_status.config(text="Initializing embedding service..."),
-                )
+                self.ui_update_queue.put(('label', (progress_status, "Initializing embedding service...", "blue")))
 
                 # ✅ FIXED: Use generic embeddings from Bridge
                 try:
@@ -310,10 +304,7 @@ class RenamedFunctionsPanel:
                     batch_end = min(batch_start + BATCH_SIZE, total_functions)
                     batch = functions_to_process[batch_start:batch_end]
 
-                    progress_status.after(
-                        0,
-                        lambda: progress_status.config(text=f"Processing batch {batch_num + 1} of {num_batches}"),
-                    )
+                    self.ui_update_queue.put(('label', (progress_status, f"Processing batch {batch_num + 1} of {num_batches}", "blue")))
 
                     # ✅ FIXED: Use generic batch embeddings
                     # Filter out empty summaries which cause 400 errors
@@ -353,11 +344,8 @@ class RenamedFunctionsPanel:
 
                             # Update progress
                             overall_progress = batch_start + i + 1
-                            progress_bar.after(0, lambda: progress_bar.config(value=overall_progress))
-                            progress_detail.after(
-                                0,
-                                lambda: progress_detail.config(text=f"Added: {func_data['new_name']}"),
-                            )
+                            self.ui_update_queue.put(('progress', (progress_bar, overall_progress, False)))
+                            self.ui_update_queue.put(('label', (progress_detail, f"Added: {func_data['new_name']}", "gray")))
 
                         except Exception as e:
                             self._logger.warning(f"Failed to add {func_data['new_name']}: {e}")
@@ -369,22 +357,17 @@ class RenamedFunctionsPanel:
                     time.sleep(0.1)
 
                 # Update results
-                progress_status.after(0, lambda: progress_status.config(text="Vector loading completed!"))
+                self.ui_update_queue.put(('label', (progress_status, "Vector loading completed!", "blue")))
+
                 results_text = f"✅ Successfully loaded: {vectors_loaded} vectors\n"
                 if vectors_failed > 0:
                     results_text += f"❌ Failed to load: {vectors_failed} vectors\n"
                 results_text += f"📊 Total processed: {total_functions} functions"
 
-                results_label.after(
-                    0,
-                    lambda: results_label.config(text=results_text, foreground="#2BC72B"),
-                )
+                self.ui_update_queue.put(('label', (results_label, results_text, "#2BC72B")))
 
                 # Update vector status label
-                self.vector_status_label.after(
-                    0,
-                    lambda: self.vector_status_label.config(text=f"Vectors: {vectors_loaded} loaded", foreground="#2BC72B"),
-                )
+                self.ui_update_queue.put(('label', (self.vector_status_label, f"Vectors: {vectors_loaded} loaded", "#2BC72B")))
 
                 # Update memory panel if available
                 if hasattr(self.bridge, "cag_manager") and self.bridge.cag_manager:
@@ -408,10 +391,7 @@ class RenamedFunctionsPanel:
                 # Add close button
                 def close_dialog():
                     progress_dialog.destroy()
-                    self.load_vectors_button.after(
-                        0,
-                        lambda: self.load_vectors_button.config(state="normal", text="Load Vectors"),
-                    )
+                    self.ui_update_queue.put(('button', (self.load_vectors_button, "normal", "Load Vectors")))
 
                 close_button = ttk.Button(progress_frame, text="Close", command=close_dialog)
                 close_button.pack(pady=(10, 0))
@@ -421,23 +401,14 @@ class RenamedFunctionsPanel:
                     progress_dialog.after(3000, close_dialog)
 
             except Exception as e:
-                progress_status.after(
-                    0,
-                    lambda: progress_status.config(text="Error occurred during vector loading!"),
-                )
-                results_label.after(
-                    0,
-                    lambda: results_label.config(text=f"❌ Error: {str(e)}", foreground="#FF0000"),
-                )
+                self.ui_update_queue.put(('label', (progress_status, "Error occurred during vector loading!", "blue")))
+                self.ui_update_queue.put(('label', (results_label, f"❌ Error: {str(e)}", "#FF0000")))
                 self._logger.error(f"Vector loading error: {e}")
 
                 # Add close button
                 def close_dialog():
                     progress_dialog.destroy()
-                    self.load_vectors_button.after(
-                        0,
-                        lambda: self.load_vectors_button.config(state="normal", text="Load Vectors"),
-                    )
+                    self.ui_update_queue.put(('button', (self.load_vectors_button, "normal", "Load Vectors")))
 
                 close_button = ttk.Button(progress_frame, text="Close", command=close_dialog)
                 close_button.pack(pady=(10, 0))
@@ -1161,10 +1132,46 @@ class RenamedFunctionsPanel:
 
     def set_streaming_mode(self, active: bool):
         """Enable or disable streaming mode to prevent UI updates during bulk loading."""
-        self._streaming_load_active = active
+        self._streaming_load_active = active    
         if not active:
             # When streaming ends, do a final update
             self._update_function_list()
+
+    def _check_ui_update_queue(self):
+        """Process items from the UI update queue on the main thread."""
+        try:
+            # Process all current items in the queue
+            while not self.ui_update_queue.empty():
+                update_type, params = self.ui_update_queue.get_nowait()
+
+                if update_type == 'button':
+                    button, state, text = params
+                    button.config(state=state, text=text)
+
+                elif update_type == 'label':
+                    label, text, foreground = params
+                    label.config(text=text, foreground=foreground)
+
+                elif update_type == 'progress':
+                    progress_bar, value_or_max, is_max = params
+                    if is_max:
+                        progress_bar.config(maximum=value_or_max)
+                    else:
+                        progress_bar.config(value=value_or_max)
+
+                elif update_type == 'close':
+                    dialog, close_func = params
+                    dialog.after(params[0], params[1])
+
+                # Mark as done
+                self.ui_update_queue.task_done()
+
+        except Exception as e:
+            self._logger.error(f"Error processing UI update queue: {e}")
+
+        finally:
+            # Schedule next check after 100ms
+            self.frame.after(100, self._check_ui_update_queue)
 
     def get_widget(self):
         """Return the main frame widget."""
