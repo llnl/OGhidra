@@ -2,7 +2,9 @@ import threading
 import tkinter as tk
 import logging
 from pathlib import Path
+from queue import Queue
 from tkinter import messagebox, ttk
+from typing import Any, List, Literal, Optional, Tuple, Union
 
 from ..bridge import BridgeConfig
 
@@ -14,6 +16,9 @@ class ServerConfigDialog:
         self.config = config
         self.result = None
         self._logger = logging.getLogger("ollama-ghidra-bridge.ui")
+
+        # Queue for thread-safe UI updates
+        self.ui_update_queue: Queue[Tuple[Literal['messagebox'], Any]] = Queue()
 
         # Create the dialog window
         self.dialog = tk.Toplevel(parent)
@@ -38,6 +43,9 @@ class ServerConfigDialog:
         self.dialog.geometry(f"{dialog_width}x{dialog_height}+{x}+{y}")
 
         self._setup_widgets()
+
+        # Start processing the UI update queue
+        self._check_ui_update_queue()
 
         # Wait for dialog to close
         self.dialog.wait_window()
@@ -391,8 +399,8 @@ class ServerConfigDialog:
             except Exception as e:
                 results.append(f"GhidraMCP: ❌ {str(e)}")
 
-            # Show results
-            messagebox.showinfo("Connection Test", "\n".join(results))
+            # Add results to queue for thread-safe UI update
+            self.ui_update_queue.put(('messagebox', ("Connection Test", "\n".join(results))))
 
         threading.Thread(target=test, daemon=True).start()
 
@@ -506,6 +514,28 @@ class ServerConfigDialog:
                 f.writelines(new_lines)
         except Exception as e:
             self._logger.error(f"Failed to update .env file: {e}")
+
+    def _check_ui_update_queue(self):
+        """Process items from the UI update queue on the main thread."""
+        try:
+            # Process all current items in the queue
+            while not self.ui_update_queue.empty():
+                update_type, params = self.ui_update_queue.get_nowait()
+
+                if update_type == 'messagebox':
+                    title, message = params
+                    messagebox.showinfo(title, message)
+
+                # Mark as done
+                self.ui_update_queue.task_done()
+
+        except Exception as e:
+            self._logger.error(f"Error processing UI update queue: {e}")
+
+        finally:
+            # Schedule next check after 100ms
+            if hasattr(self, "dialog") and self.dialog.winfo_exists():
+                self.dialog.after(100, self._check_ui_update_queue)
 
     def _cancel(self):
         """Cancel the dialog."""

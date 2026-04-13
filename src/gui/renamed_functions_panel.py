@@ -1,11 +1,12 @@
 import datetime
 import json
 import logging
+import threading
 import tkinter as tk
 from queue import Queue
 from tkinter import filedialog, messagebox, scrolledtext, ttk
-import threading
 from typing import Any, Dict, Literal, Optional, Tuple, Union
+
 from ..bridge import Bridge
 from .theme_colors import ThemeColors
 
@@ -18,13 +19,18 @@ class RenamedFunctionsPanel:
         self.bridge = bridge
         self._theme_colors = theme_colors
         self._logger = logger = logging.getLogger("ollama-ghidra-bridge.ui")
-        self.function_summaries = {}  # Store behavior summaries for functions
+        self.function_summaries: dict[str, str] = {}  # Store behavior summaries for functions
         self._streaming_load_active = False  # Flag to prevent updates during streaming
         self.batch_operation_in_progress = False  # Flag to prevent auto-refresh during batch operations
         self.dict_lock = threading.RLock()  # Thread-safe lock for dictionary access
 
         # Queue for thread-safe UI updates
-        self.ui_update_queue: Queue[Tuple[Literal['button', 'label', 'progress', 'close'], Any]] = Queue()
+        self.ui_update_queue: Queue[
+            Tuple[Literal["button", "label", "progress", "dialog", "add_button", "memory_update", "tree_operation"], Any]
+        ] = Queue()
+
+        # Queue for returning data from the main thread to worker threads
+        self.data_result_queue: Queue[Any] = Queue()
 
         self._setup_widgets()
         self._update_function_list()
@@ -186,41 +192,45 @@ class RenamedFunctionsPanel:
         results_label.pack(pady=(10, 0))
 
         def load_vectors_worker():
-            """Background worker to load vectors."""
+            """Background worker to load vectors.
+            TRICKY: There should NEVER be any UI updates called from this worker.
+            Any updates should be done on the main thread otherwise the app crashes on Linux.
+            """
             vectors_loaded = 0
             vectors_failed = 0
 
             try:
                 # Disable the button during loading - add to queue
-                self.ui_update_queue.put(('button', (self.load_vectors_button, "disabled", "Loading...")))
+                self.ui_update_queue.put(("button", (self.load_vectors_button, "disabled", "Loading...")))
 
                 # Get all function data - add to queue
-                self.ui_update_queue.put(('label', (progress_status, "Collecting function data...", "blue")))
+                self.ui_update_queue.put(("label", (progress_status, "Collecting function data...", "blue")))
 
                 functions_to_process = []
 
-                # PRIMARY SOURCE: Collect from the tree widget (has ALL functions with summaries)
-                for item in self.tree.get_children():
-                    try:
-                        values = self.tree.item(item, "values")
-                        if len(values) >= 4:
-                            address = values[0]
-                            old_name = values[1]
-                            new_name = values[2]
-                            summary = values[3]
+                # Request tree data from main thread via queue
+                self.ui_update_queue.put(("tree_operation", "get_tree_data"))
 
-                            if summary and summary.strip():  # Only process functions with summaries
-                                functions_to_process.append(
-                                    {
-                                        "address": address,
-                                        "old_name": old_name,
-                                        "new_name": new_name,
-                                        "summary": summary,
-                                    }
-                                )
-                    except Exception as e:
-                        self._logger.warning(f"Error reading tree item: {e}")
-                        continue
+                # Wait for the main thread to process the request and provide data
+                tree_data = self.data_result_queue.get()
+                self.data_result_queue.task_done()
+
+                # Process the data we got from the main thread
+                for item_data in tree_data:
+                    address = item_data["address"]
+                    old_name = item_data["old_name"]
+                    new_name = item_data["new_name"]
+                    summary = item_data["summary"]
+
+                    if summary and summary.strip():  # Only process functions with summaries
+                        functions_to_process.append(
+                            {
+                                "address": address,
+                                "old_name": old_name,
+                                "new_name": new_name,
+                                "summary": summary,
+                            }
+                        )
 
                 # FALLBACK: If tree is empty, try bridge.function_address_mapping
                 if not functions_to_process and hasattr(self.bridge, "function_address_mapping"):
@@ -266,14 +276,16 @@ class RenamedFunctionsPanel:
                             )
 
                 total_functions = len(functions_to_process)
-                self.ui_update_queue.put(('progress', (progress_bar, total_functions, True)))
+                self.ui_update_queue.put(("progress", (progress_bar, total_functions, True)))
 
-                self.ui_update_queue.put(('label', (progress_status, f"Loading {total_functions} functions into vectors...", "blue")))
+                self.ui_update_queue.put(
+                    ("label", (progress_status, f"Loading {total_functions} functions into vectors...", "blue"))
+                )
 
                 # **OPTIMIZED: Batch processing approach with embeddings**
-                self.ui_update_queue.put(('label', (progress_status, "Initializing embedding service...", "blue")))
+                self.ui_update_queue.put(("label", (progress_status, "Initializing embedding service...", "blue")))
 
-                # ✅ FIXED: Use generic embeddings from Bridge
+                # Use generic embeddings from Bridge
                 try:
                     from src.bridge import Bridge
 
@@ -304,7 +316,9 @@ class RenamedFunctionsPanel:
                     batch_end = min(batch_start + BATCH_SIZE, total_functions)
                     batch = functions_to_process[batch_start:batch_end]
 
-                    self.ui_update_queue.put(('label', (progress_status, f"Processing batch {batch_num + 1} of {num_batches}", "blue")))
+                    self.ui_update_queue.put(
+                        ("label", (progress_status, f"Processing batch {batch_num + 1} of {num_batches}", "blue"))
+                    )
 
                     # ✅ FIXED: Use generic batch embeddings
                     # Filter out empty summaries which cause 400 errors
@@ -344,8 +358,8 @@ class RenamedFunctionsPanel:
 
                             # Update progress
                             overall_progress = batch_start + i + 1
-                            self.ui_update_queue.put(('progress', (progress_bar, overall_progress, False)))
-                            self.ui_update_queue.put(('label', (progress_detail, f"Added: {func_data['new_name']}", "gray")))
+                            self.ui_update_queue.put(("progress", (progress_bar, overall_progress, False)))
+                            self.ui_update_queue.put(("label", (progress_detail, f"Added: {func_data['new_name']}", "gray")))
 
                         except Exception as e:
                             self._logger.warning(f"Failed to add {func_data['new_name']}: {e}")
@@ -357,17 +371,17 @@ class RenamedFunctionsPanel:
                     time.sleep(0.1)
 
                 # Update results
-                self.ui_update_queue.put(('label', (progress_status, "Vector loading completed!", "blue")))
+                self.ui_update_queue.put(("label", (progress_status, "Vector loading completed!", "blue")))
 
                 results_text = f"✅ Successfully loaded: {vectors_loaded} vectors\n"
                 if vectors_failed > 0:
                     results_text += f"❌ Failed to load: {vectors_failed} vectors\n"
                 results_text += f"📊 Total processed: {total_functions} functions"
 
-                self.ui_update_queue.put(('label', (results_label, results_text, "#2BC72B")))
+                self.ui_update_queue.put(("label", (results_label, results_text, "#2BC72B")))
 
                 # Update vector status label
-                self.ui_update_queue.put(('label', (self.vector_status_label, f"Vectors: {vectors_loaded} loaded", "#2BC72B")))
+                self.ui_update_queue.put(("label", (self.vector_status_label, f"Vectors: {vectors_loaded} loaded", "#2BC72B")))
 
                 # Update memory panel if available
                 if hasattr(self.bridge, "cag_manager") and self.bridge.cag_manager:
@@ -378,42 +392,38 @@ class RenamedFunctionsPanel:
                             f"Vector store after loading: {len(vector_store.embeddings) if vector_store.embeddings else 0} vectors"
                         )
 
-                    # Trigger memory panel update by finding it in the UI hierarchy
-                    root = self.frame.winfo_toplevel()
-                    # Look for memory panel in the UI - it's typically in the left panel
-                    for widget in root.winfo_children():
-                        if hasattr(widget, "winfo_children"):
-                            for child in widget.winfo_children():
-                                if hasattr(child, "_update_memory_info"):
-                                    child._update_memory_info()
-                                    break
+                    # Trigger memory panel update via queue
+                    self.ui_update_queue.put(("memory_update", None))
 
-                # Add close button
+                # Add close button - via queue for thread safety
                 def close_dialog():
-                    progress_dialog.destroy()
-                    self.ui_update_queue.put(('button', (self.load_vectors_button, "normal", "Load Vectors")))
+                    # Use queue to destroy dialog and update button
+                    self.ui_update_queue.put(("dialog", ("destroy", progress_dialog)))
+                    self.ui_update_queue.put(("button", (self.load_vectors_button, "normal", "Load Vectors")))
 
-                close_button = ttk.Button(progress_frame, text="Close", command=close_dialog)
-                close_button.pack(pady=(10, 0))
+                # Create close button via queue
+                self.ui_update_queue.put(("add_button", (progress_frame, "Close", close_dialog, (10, 0))))
 
-                # Auto-close after 3 seconds if successful
+                # Auto-close after 3 seconds if successful - via queue
                 if vectors_failed == 0:
-                    progress_dialog.after(3000, close_dialog)
+                    self.ui_update_queue.put(("dialog", ("auto_close", (3000, close_dialog))))
 
             except Exception as e:
-                self.ui_update_queue.put(('label', (progress_status, "Error occurred during vector loading!", "blue")))
-                self.ui_update_queue.put(('label', (results_label, f"❌ Error: {str(e)}", "#FF0000")))
+                self.ui_update_queue.put(("label", (progress_status, "Error occurred during vector loading!", "blue")))
+                self.ui_update_queue.put(("label", (results_label, f"❌ Error: {str(e)}", "#FF0000")))
                 self._logger.error(f"Vector loading error: {e}")
 
-                # Add close button
+                # Add close button - via queue for thread safety
                 def close_dialog():
-                    progress_dialog.destroy()
-                    self.ui_update_queue.put(('button', (self.load_vectors_button, "normal", "Load Vectors")))
+                    # Use queue to destroy dialog and update button
+                    self.ui_update_queue.put(("dialog", ("destroy", progress_dialog)))
+                    self.ui_update_queue.put(("button", (self.load_vectors_button, "normal", "Load Vectors")))
 
-                close_button = ttk.Button(progress_frame, text="Close", command=close_dialog)
-                close_button.pack(pady=(10, 0))
+                # Create close button via queue
+                self.ui_update_queue.put(("add_button", (progress_frame, "Close", close_dialog, (10, 0))))
 
         # Start loading in background thread
+        # TRICKY: Never invoke tkinter UI elements directly from worker threads otherwise it crashes on Linux.
         threading.Thread(target=load_vectors_worker, daemon=True).start()
 
     def _add_function_to_vector_store_direct(self, func_data, embedding):
@@ -1035,7 +1045,7 @@ class RenamedFunctionsPanel:
                     self.bridge.analysis_state["functions_renamed"] = {}
 
                 # Clear our summaries
-                self.function_summaries = {}
+                self.function_summaries: dict[str, str] = {}
 
                 # Update the display
                 self._update_function_list()
@@ -1114,9 +1124,6 @@ class RenamedFunctionsPanel:
                 # Store in analysis_state using only address as key to avoid duplicate name entries
                 self.bridge.analysis_state["functions_renamed"][address] = new_name
 
-                # Debug logging to verify data storage
-                import logging
-
                 self._logger.info(f"Added function to session: {address} | {old_name} -> {new_name}")
                 self._logger.info(
                     f"Bridge function_address_mapping now has {len(self.bridge.function_address_mapping)} entries"
@@ -1132,7 +1139,7 @@ class RenamedFunctionsPanel:
 
     def set_streaming_mode(self, active: bool):
         """Enable or disable streaming mode to prevent UI updates during bulk loading."""
-        self._streaming_load_active = active    
+        self._streaming_load_active = active
         if not active:
             # When streaming ends, do a final update
             self._update_function_list()
@@ -1144,24 +1151,71 @@ class RenamedFunctionsPanel:
             while not self.ui_update_queue.empty():
                 update_type, params = self.ui_update_queue.get_nowait()
 
-                if update_type == 'button':
+                if update_type == "button":
                     button, state, text = params
                     button.config(state=state, text=text)
 
-                elif update_type == 'label':
+                elif update_type == "label":
                     label, text, foreground = params
                     label.config(text=text, foreground=foreground)
 
-                elif update_type == 'progress':
+                elif update_type == "progress":
                     progress_bar, value_or_max, is_max = params
                     if is_max:
                         progress_bar.config(maximum=value_or_max)
                     else:
                         progress_bar.config(value=value_or_max)
 
-                elif update_type == 'close':
-                    dialog, close_func = params
-                    dialog.after(params[0], params[1])
+                elif update_type == "dialog":
+                    operation, dialog = params
+                    if operation == "destroy":
+                        dialog.destroy()
+                    elif operation == "auto_close":
+                        delay, close_func = dialog
+                        self.frame.after(delay, close_func)
+
+                elif update_type == "add_button":
+                    parent_frame, button_text, command, padding = params
+                    button = ttk.Button(parent_frame, text=button_text, command=command)
+                    button.pack(pady=padding)
+
+                elif update_type == "memory_update":
+                    # Find and update memory panel from main thread
+                    root = self.frame.winfo_toplevel()
+                    for widget in root.winfo_children():
+                        if hasattr(widget, "winfo_children"):
+                            for child in widget.winfo_children():
+                                if hasattr(child, "_update_memory_info"):
+                                    child._update_memory_info()
+                                    break
+
+                elif update_type == "tree_operation":
+                    operation = params
+                    if operation == "get_tree_data":
+                        # Collect data from tree on main thread
+                        tree_data = []
+                        try:
+                            for item in self.tree.get_children():
+                                try:
+                                    values = self.tree.item(item, "values")
+                                    if len(values) >= 4:
+                                        tree_data.append(
+                                            {
+                                                "address": values[0],
+                                                "old_name": values[1],
+                                                "new_name": values[2],
+                                                "summary": values[3],
+                                            }
+                                        )
+                                except Exception as e:
+                                    self._logger.warning(f"Error reading tree item in main thread: {e}")
+
+                            # Put result in the result queue
+                            self.data_result_queue.put(tree_data)
+                        except Exception as e:
+                            self._logger.error(f"Error getting tree data: {e}")
+                            # Put an empty result in case of error
+                            self.data_result_queue.put([])
 
                 # Mark as done
                 self.ui_update_queue.task_done()
