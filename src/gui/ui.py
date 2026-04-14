@@ -124,12 +124,16 @@ class OGhidraUI:
     def _setup_main_panel(self, parent):
         """Setup the main panel with query input and AI responses (primary focus)."""
         # Query input panel
-        self.query_panel = QueryInputPanel(parent, self.bridge, None, None, theme_colors=self._theme_colors)  # workflow_diagram set later
+        self.query_panel = QueryInputPanel(
+            parent, self.bridge, None, None, theme_colors=self._theme_colors
+        )  # workflow_diagram set later
         self.query_panel.get_widget().after(0, lambda: self.query_panel.get_widget().pack(fill="x", pady=(0, 10)))
 
         # AI Response panel (main content area)
         # Pass the generate report callback from main UI
-        self.response_panel = AIResponsePanel(parent, generate_callback=self._menu_generate_report, theme_colors=self._theme_colors)
+        self.response_panel = AIResponsePanel(
+            parent, generate_callback=self._menu_generate_report, theme_colors=self._theme_colors
+        )
         self.response_panel.get_widget().after(0, lambda: self.response_panel.get_widget().pack(fill="both", expand=True))
 
     def _setup_sidebar_panel(self, parent):
@@ -155,7 +159,7 @@ class OGhidraUI:
         self.renamed_functions_panel._start_auto_refresh()
 
         # Initial health check and setup periodic updates
-        self._update_health_status()
+        self._query_and_update_health_status()
         self._start_health_check_timer()
 
         # Wire analyzed-functions panel into the query panel so Hybrid Search status can
@@ -181,13 +185,7 @@ class OGhidraUI:
         self.bridge._ui_cot_callback = self.response_panel.add_cot_update
 
         # Tool panel (hidden - accessed via Analysis menu)
-        self.tool_panel = ToolButtonsPanel(
-            parent,
-            self.bridge,
-            None,
-            self.workflow_diagram,
-            self.renamed_functions_panel
-        )
+        self.tool_panel = ToolButtonsPanel(parent, self.bridge, None, self.workflow_diagram, self.renamed_functions_panel)
 
         # Connect panels to response panel and each other
         self.tool_panel.response_panel = self.response_panel
@@ -1045,21 +1043,21 @@ class OGhidraUI:
 
             self._logger.error(f"Streaming setup error: {e}\n{traceback.format_exc()}")
 
-    def _update_health_status(self):
+    def _query_and_update_health_status(self):
         """Update the health status in the status panel independently for each service."""
 
-        def check_ollama():
-            # Check Ollama independently
-            ollama_result = None
+        def check_llm_client():
+            # Check LLM client independently
+            llm_result = None
             try:
-                ollama_result = self.bridge.llm_client.check_health()
+                llm_result = self.bridge.llm_client.check_health()
             except Exception as e:
-                ollama_result = e
+                llm_result = e
 
-            # Update just the Ollama status
-            self.status_panel.update_ollama_status(ollama_result)
+            # Update just the LLM status
+            self.status_panel.update_llm_status(llm_result)
 
-        def check_ghidra():
+        def check_ghidra_client():
             # Check Ghidra independently
             ghidra_result = None
             try:
@@ -1082,8 +1080,8 @@ class OGhidraUI:
             self.status_panel.update_cag_status(cag_result)
 
         # Start independent threads for each check
-        threading.Thread(target=check_ollama, daemon=True).start()
-        threading.Thread(target=check_ghidra, daemon=True).start()
+        threading.Thread(target=check_llm_client, daemon=True).start()
+        threading.Thread(target=check_ghidra_client, daemon=True).start()
         threading.Thread(target=check_cag, daemon=True).start()
 
     def _start_health_check_timer(self):
@@ -1091,11 +1089,11 @@ class OGhidraUI:
 
         # Update every 60 seconds
         def timer_callback():
-            self._update_health_status()
+            self._query_and_update_health_status()
             self.root.after(60000, timer_callback)
 
         # Start an immediate check when the application starts
-        self._update_health_status()
+        self._query_and_update_health_status()
 
         # Schedule recurring checks every 60 seconds
         self.root.after(60000, timer_callback)

@@ -5,6 +5,7 @@ Main entry point for the Ollama-GhidraMCP Bridge application.
 
 import argparse
 import json
+import logging
 import sys
 
 from dotenv import load_dotenv
@@ -12,7 +13,7 @@ from dotenv import load_dotenv
 # Load environment variables from .env file if present
 load_dotenv(override=True)
 
-from src.bridge import Bridge
+from src.bridge import Bridge, setup_logging
 
 # Import after loading environment variables
 from src.config import BridgeConfig, get_config
@@ -1242,6 +1243,14 @@ def main():
     # UI now defaults to ON when no other mode flags are passed
     parser.add_argument("--ui", action="store_true", help="Launch the graphical user interface (default)")
 
+    # Logging options
+    parser.add_argument(
+        "--log-level",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        default="INFO",
+        help="Set the logging level (default: INFO)"
+    )
+
     # Capabilities list is now included by default; provide opt-out flag instead
     parser.add_argument(
         "--no-capabilities", "--no-cap", action="store_true", help="Do NOT include tool capabilities in the prompt"
@@ -1263,6 +1272,32 @@ def main():
     # Override CAG settings from command line if specified
     if args.disable_cag:
         config.cag_enabled = False
+
+    # Override log level if specified
+    if args.log_level:
+        config.log_level = args.log_level
+
+    # Configure Python logging system with our log level
+    try:
+        # First try to use the setup_logging function from bridge.py
+        logger = setup_logging(config)
+    except Exception as e:
+        # Fallback to directly configuring logging if setup_logging fails
+        handlers = []
+        handlers.append(logging.StreamHandler(sys.stdout))
+        if hasattr(config, "log_file_enabled") and config.log_file_enabled and hasattr(config, "log_file"):
+            handlers.append(logging.FileHandler(config.log_file))
+
+        logging.basicConfig(
+            level=getattr(logging, config.log_level),
+            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            handlers=handlers,
+        )
+        logger = logging.getLogger("ollama-ghidra-bridge")
+
+    # Add a DEBUG message to verify logging level
+    logger.debug(f"Starting application with log level: {config.log_level}")
+    logger.info(f"Application initialized with model: {config.ollama.model if hasattr(config, 'ollama') else 'unknown'}")
 
     # Create the bridge
     bridge = Bridge(

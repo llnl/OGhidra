@@ -724,7 +724,9 @@ class OllamaClient:
         Returns True if healthy, False otherwise.
         """
         try:
-            response = requests.get(f"{self.base_url}/api/tags", timeout=5, auth=self.auth)
+            request_str = f"{self.base_url}/api/tags"
+            self.logger.debug(f"Querying the ollama server for it's status using: {request_str}")
+            response = requests.get(request_str, timeout=5, auth=self.auth)
             return response.status_code == 200
         except Exception as e:
             self.logger.error(f"Ollama health check failed: {e}")
