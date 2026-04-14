@@ -3,10 +3,12 @@ Configuration module for the Ollama-GhidraMCP Bridge.
 """
 
 import os
-from pydantic import BaseModel, Field, validator, AnyHttpUrl
-from pydantic_settings import BaseSettings
-from typing import Optional, Dict, Any, List, ClassVar
 import re
+from typing import Any, ClassVar, Dict, List, Optional
+
+from pydantic import AnyHttpUrl, BaseModel, Field, field_validator
+from pydantic_settings import BaseSettings
+
 
 class ToolParameters(BaseModel):
     type: str = "object"
@@ -24,15 +26,15 @@ class Tool(BaseModel):
 
 class OllamaConfig(BaseModel):
     """Configuration for the Ollama client."""
-    base_url: AnyHttpUrl = Field(default="http://localhost:11434", env="OLLAMA_BASE_URL")
+    base_url: AnyHttpUrl = Field(default="http://localhost:11434", json_schema_extra={"env": "OLLAMA_BASE_URL"})
     # Default model. This is primarily set by the OLLAMA_MODEL environment variable.
     # llama3.1 is recommended for features like tool calling.
-    model: str = Field(default="gemma3:27b", min_length=1, description="Model name cannot be empty", env="OLLAMA_MODEL")
+    model: str = Field(default="gemma3:27b", min_length=1, description="Model name cannot be empty", json_schema_extra={"env": "OLLAMA_MODEL"})
     # Embedding model for vector operations
-    embedding_model: str = Field(default="nomic-embed-text", min_length=1, description="Embedding model name cannot be empty", env="OLLAMA_EMBEDDING_MODEL")
-    timeout: int = Field(ge=1, le=600, default=120, description="Timeout for requests in seconds (1-600)", env="OLLAMA_TIMEOUT")
-    username: str = Field(default=None, env="OLLAMA_USERNAME")
-    password: str = Field(default=None, env="OLLAMA_PASSWORD")
+    embedding_model: str = Field(default="nomic-embed-text", min_length=1, description="Embedding model name cannot be empty", json_schema_extra={"env": "OLLAMA_EMBEDDING_MODEL"})
+    timeout: int = Field(ge=1, le=600, default=120, description="Timeout for requests in seconds (1-600)", json_schema_extra={"env": "OLLAMA_TIMEOUT"})
+    username: str = Field(default=None, json_schema_extra={"env": "OLLAMA_USERNAME"})
+    password: str = Field(default=None, json_schema_extra={"env": "OLLAMA_PASSWORD"})
     
     # Execution loop settings (INNER LOOP - tools per execution phase)
     max_execution_steps: int = Field(
@@ -40,13 +42,13 @@ class OllamaConfig(BaseModel):
         ge=1,
         le=50,
         description="Maximum tool executions per investigation (1-50)",
-        env="MAX_EXECUTION_STEPS"
+        json_schema_extra={"env": "MAX_EXECUTION_STEPS"}
     )
     
     execution_loop_enabled: bool = Field(
         default=True,
         description="Enable multi-tool execution loop for comprehensive investigations",
-        env="EXECUTION_LOOP_ENABLED"
+        json_schema_extra={"env": "EXECUTION_LOOP_ENABLED"}
     )
     
     # Agentic loop settings (OUTER LOOP - full planning→execution→analysis cycles)
@@ -55,32 +57,32 @@ class OllamaConfig(BaseModel):
         ge=1,
         le=10,
         description="Maximum Planning→Execution→Analysis cycles per query (1-10)",
-        env="MAX_AGENTIC_CYCLES"
+        json_schema_extra={"env": "MAX_AGENTIC_CYCLES"}
     )
     
     agentic_loop_enabled: bool = Field(
         default=True,
         description="Enable multi-cycle agentic loop with goal evaluation and re-planning",
-        env="AGENTIC_LOOP_ENABLED"
+        json_schema_extra={"env": "AGENTIC_LOOP_ENABLED"}
     )
     
     # LLM Logging Configuration
-    llm_logging_enabled: bool = Field(default=True, env="LLM_LOGGING_ENABLED")
-    llm_log_file: str = Field(default="logs/llm_interactions.log", env="LLM_LOG_FILE")
-    llm_log_prompts: bool = Field(default=True, env="LLM_LOG_PROMPTS")
-    llm_log_responses: bool = Field(default=True, env="LLM_LOG_RESPONSES")
-    llm_log_tokens: bool = Field(default=True, env="LLM_LOG_TOKENS")
-    llm_log_timing: bool = Field(default=True, env="LLM_LOG_TIMING")
-    llm_log_format: str = Field(default="json", env="LLM_LOG_FORMAT")  # "json" or "text"
+    llm_logging_enabled: bool = Field(default=True, json_schema_extra={"env": "LLM_LOGGING_ENABLED"})
+    llm_log_file: str = Field(default="logs/llm_interactions.log", json_schema_extra={"env": "LLM_LOG_FILE"})
+    llm_log_prompts: bool = Field(default=True, json_schema_extra={"env": "LLM_LOG_PROMPTS"})
+    llm_log_responses: bool = Field(default=True, json_schema_extra={"env": "LLM_LOG_RESPONSES"})
+    llm_log_tokens: bool = Field(default=True, json_schema_extra={"env": "LLM_LOG_TOKENS"})
+    llm_log_timing: bool = Field(default=True, json_schema_extra={"env": "LLM_LOG_TIMING"})
+    llm_log_format: str = Field(default="json", json_schema_extra={"env": "LLM_LOG_FORMAT"})  # "json" or "text"
     
     # Live CoT View
-    show_reasoning: bool = Field(default=True, description="Print Chain of Thought reasoning to stdout", env="OLLAMA_SHOW_REASONING")
+    show_reasoning: bool = Field(default=True, description="Print Chain of Thought reasoning to stdout", json_schema_extra={"env": "OLLAMA_SHOW_REASONING"})
     
     # Request Delay
-    request_delay: float = Field(default=0.0, ge=0.0, description="Delay in seconds before each request", env="OLLAMA_REQUEST_DELAY")
+    request_delay: float = Field(default=0.0, ge=0.0, description="Delay in seconds before each request", json_schema_extra={"env": "OLLAMA_REQUEST_DELAY"})
     
     # Request Retries
-    max_retries: int = Field(default=3, ge=0, description="Maximum number of retries for transient errors", env="OLLAMA_MAX_RETRIES")
+    max_retries: int = Field(default=3, ge=0, description="Maximum number of retries for transient errors", json_schema_extra={"env": "OLLAMA_MAX_RETRIES"})
     
     # Context Budget Management
     context_budget: int = Field(
@@ -88,7 +90,7 @@ class OllamaConfig(BaseModel):
         ge=4000,
         le=2000000,
         description="Maximum context tokens for prompts (4000-2000000)",
-        env="CONTEXT_BUDGET"
+        json_schema_extra={"env": "CONTEXT_BUDGET"}
     )
     
     context_budget_execution: float = Field(
@@ -96,25 +98,25 @@ class OllamaConfig(BaseModel):
         ge=0.1,
         le=0.8,
         description="Fraction of context budget for execution results (0.1-0.8)",
-        env="CONTEXT_BUDGET_EXECUTION"
+        json_schema_extra={"env": "CONTEXT_BUDGET_EXECUTION"}
     )
     
     enable_result_summarization: bool = Field(
         default=True,
         description="Use LLM to summarize large results instead of truncating",
-        env="ENABLE_RESULT_SUMMARIZATION"
+        json_schema_extra={"env": "ENABLE_RESULT_SUMMARIZATION"}
     )
     
     result_cache_enabled: bool = Field(
         default=True,
         description="Cache full results and pass references to AI",
-        env="RESULT_CACHE_ENABLED"
+        json_schema_extra={"env": "RESULT_CACHE_ENABLED"}
     )
     
     tiered_context_enabled: bool = Field(
         default=True,
         description="Use tiered context (detailed recent, summarized older)",
-        env="TIERED_CONTEXT_ENABLED"
+        json_schema_extra={"env": "TIERED_CONTEXT_ENABLED"}
     )
     
     # Sliding Window & Tiered Context Limits
@@ -124,7 +126,7 @@ class OllamaConfig(BaseModel):
         ge=1,
         le=50,
         description="Maximum execution steps to keep in full detail (sliding window)",
-        env="MAX_DETAILED_STEPS"
+        json_schema_extra={"env": "MAX_DETAILED_STEPS"}
     )
     
     current_loop_max_chars: int = Field(
@@ -132,7 +134,7 @@ class OllamaConfig(BaseModel):
         ge=100,
         le=50000,
         description="Max chars for current loop results (full details)",
-        env="CURRENT_LOOP_MAX_CHARS"
+        json_schema_extra={"env": "CURRENT_LOOP_MAX_CHARS"}
     )
     
     prev_loop_max_chars: int = Field(
@@ -140,7 +142,7 @@ class OllamaConfig(BaseModel):
         ge=50,
         le=10000,
         description="Max chars for previous loop results (bullet summaries)",
-        env="PREV_LOOP_MAX_CHARS"
+        json_schema_extra={"env": "PREV_LOOP_MAX_CHARS"}
     )
     
     older_loop_max_chars: int = Field(
@@ -148,7 +150,7 @@ class OllamaConfig(BaseModel):
         ge=20,
         le=2000,
         description="Max chars for older loop results (one-line refs)",
-        env="OLDER_LOOP_MAX_CHARS"
+        json_schema_extra={"env": "OLDER_LOOP_MAX_CHARS"}
     )
     
     # Hybrid Context Management Settings
@@ -157,13 +159,13 @@ class OllamaConfig(BaseModel):
         ge=1,
         le=50,
         description="Maximum items per result category in ranked results",
-        env="TOP_N_PER_CATEGORY"
+        json_schema_extra={"env": "TOP_N_PER_CATEGORY"}
     )
     
     enable_correlation_hints: bool = Field(
         default=True,
         description="Build cross-tool address correlations for analysis",
-        env="ENABLE_CORRELATION_HINTS"
+        json_schema_extra={"env": "ENABLE_CORRELATION_HINTS"}
     )
     
     min_correlation_mentions: int = Field(
@@ -171,26 +173,26 @@ class OllamaConfig(BaseModel):
         ge=2,
         le=5,
         description="Minimum tool mentions to surface a correlation",
-        env="MIN_CORRELATION_MENTIONS"
+        json_schema_extra={"env": "MIN_CORRELATION_MENTIONS"}
     )
     
     # Interactive Execution Gate (OpenCode-inspired)
     execution_gate_enabled: bool = Field(
         default=True,
         description="Enable interactive execution gate for pause/review during loops",
-        env="EXECUTION_GATE_ENABLED"
+        json_schema_extra={"env": "EXECUTION_GATE_ENABLED"}
     )
     
     gate_on_artifact: bool = Field(
         default=True,
         description="Pause when critical artifact found in tool results",
-        env="GATE_ON_ARTIFACT"
+        json_schema_extra={"env": "GATE_ON_ARTIFACT"}
     )
     
     gate_on_repetition: bool = Field(
         default=True,
         description="Pause on N identical tool calls (doom-loop detection)",
-        env="GATE_ON_REPETITION"
+        json_schema_extra={"env": "GATE_ON_REPETITION"}
     )
     
     gate_repetition_threshold: int = Field(
@@ -198,27 +200,27 @@ class OllamaConfig(BaseModel):
         ge=2,
         le=10,
         description="How many identical calls before triggering repetition gate",
-        env="GATE_REPETITION_THRESHOLD"
+        json_schema_extra={"env": "GATE_REPETITION_THRESHOLD"}
     )
     
     gate_on_high_risk_tool: bool = Field(
         default=False,
         description="Pause before destructive tools (rename_function, etc.)",
-        env="GATE_ON_HIGH_RISK_TOOL"
+        json_schema_extra={"env": "GATE_ON_HIGH_RISK_TOOL"}
     )
     
     gate_auto_resume_timeout: int = Field(
         default=0,
         ge=0,
         description="Seconds before auto-resuming after gate (0 = wait forever)",
-        env="GATE_AUTO_RESUME_TIMEOUT"
+        json_schema_extra={"env": "GATE_AUTO_RESUME_TIMEOUT"}
     )
     
     # Session Compaction (OpenCode-inspired)
     compaction_enabled: bool = Field(
         default=True,
         description="Enable smart context pruning to prevent overflow",
-        env="COMPACTION_ENABLED"
+        json_schema_extra={"env": "COMPACTION_ENABLED"}
     )
     
     compaction_threshold: float = Field(
@@ -226,13 +228,13 @@ class OllamaConfig(BaseModel):
         ge=0.3,
         le=0.95,
         description="Context usage fraction that triggers compaction (0.3-0.95)",
-        env="COMPACTION_THRESHOLD"
+        json_schema_extra={"env": "COMPACTION_THRESHOLD"}
     )
     
     compaction_auto: bool = Field(
         default=True,
         description="Auto-compact between agentic cycles when threshold exceeded",
-        env="COMPACTION_AUTO"
+        json_schema_extra={"env": "COMPACTION_AUTO"}
     )
     
     # Enable or disable Context-Augmented Generation
@@ -242,10 +244,10 @@ class OllamaConfig(BaseModel):
     review_thoroughness: str = Field(
         default="standard",
         description="Review depth: 'basic', 'standard', or 'thorough'",
-        env="REVIEW_THOROUGHNESS"
+        json_schema_extra={"env": "REVIEW_THOROUGHNESS"}
     )
     
-    @validator('review_thoroughness')
+    @field_validator('review_thoroughness')
     def validate_review_thoroughness(cls, v):
         """Validate review thoroughness level."""
         valid_levels = {'basic', 'standard', 'thorough'}
@@ -253,14 +255,14 @@ class OllamaConfig(BaseModel):
         if v_lower not in valid_levels:
             raise ValueError(f'review_thoroughness must be one of {valid_levels}')
         return v_lower
-    @validator('model')
+    @field_validator('model')
     def validate_model_name(cls, v):
         """Ensure model name follows expected patterns."""
         if not re.match(r'^[a-zA-Z0-9][a-zA-Z0-9_\-:.]*$', v):
             raise ValueError('Model name contains invalid characters. Use only alphanumeric, underscore, dash, colon, and dot.')
         return v
     
-    @validator('model_map')
+    @field_validator('model_map')
     def validate_model_phases(cls, v):
         """Validate that model_map contains valid phase names."""
         valid_phases = {'planning', 'execution', 'analysis', 'evaluation', 'review'}
@@ -1139,18 +1141,18 @@ You MUST output ONLY valid JSON (no markdown, no explanation) with this structur
 
 class GoogleConfig(BaseModel):
     """Configuration for the Google Gemini client."""
-    api_key: str = Field(default="", description="Google API Key", env="GOOGLE_API_KEY")
+    api_key: str = Field(default="", description="Google API Key", json_schema_extra={"env": "GOOGLE_API_KEY"})
     # Default model (e.g., gemini-2.0-flash, gemini-3-flash)
-    model: str = Field(default="gemini-3-flash", description="Default Gemini model", env="GOOGLE_MODEL")
+    model: str = Field(default="gemini-3-flash", description="Default Gemini model", json_schema_extra={"env": "GOOGLE_MODEL"})
     # Embedding model
-    embedding_model: str = Field(default="gemini-embedding-1.0", description="Embedding model name", env="GOOGLE_EMBEDDING_MODEL")
-    timeout: int = Field(ge=1, le=600, default=120, description="Timeout for requests in seconds (1-600)", env="GOOGLE_TIMEOUT")
+    embedding_model: str = Field(default="gemini-embedding-1.0", description="Embedding model name", json_schema_extra={"env": "GOOGLE_EMBEDDING_MODEL"})
+    timeout: int = Field(ge=1, le=600, default=120, description="Timeout for requests in seconds (1-600)", json_schema_extra={"env": "GOOGLE_TIMEOUT"})
     
     # Request Delay
-    request_delay: float = Field(default=0.0, ge=0.0, description="Delay in seconds before each request", env="GOOGLE_REQUEST_DELAY")
+    request_delay: float = Field(default=0.0, ge=0.0, description="Delay in seconds before each request", json_schema_extra={"env": "GOOGLE_REQUEST_DELAY"})
     
     # Request Retries
-    max_retries: int = Field(default=3, ge=0, description="Maximum number of retries for transient errors", env="GOOGLE_MAX_RETRIES")
+    max_retries: int = Field(default=3, ge=0, description="Maximum number of retries for transient errors", json_schema_extra={"env": "GOOGLE_MAX_RETRIES"})
     
     # Model map for phases
     model_map: Dict[str, str] = Field(default_factory=lambda: {
@@ -1170,41 +1172,41 @@ class GoogleConfig(BaseModel):
     tools: List[Tool] = Field(default_factory=lambda: OllamaConfig().tools)
 
     # Context Budget (reused logic)
-    context_budget: int = Field(default=80000, ge=4000, le=2000000, env="CONTEXT_BUDGET")
-    context_budget_execution: float = Field(default=0.5, ge=0.1, le=0.8, env="CONTEXT_BUDGET_EXECUTION")
-    enable_result_summarization: bool = Field(default=True, env="ENABLE_RESULT_SUMMARIZATION")
-    result_cache_enabled: bool = Field(default=True, env="RESULT_CACHE_ENABLED")
-    tiered_context_enabled: bool = Field(default=True, env="TIERED_CONTEXT_ENABLED")
+    context_budget: int = Field(default=80000, ge=4000, le=2000000, json_schema_extra={"env": "CONTEXT_BUDGET"})
+    context_budget_execution: float = Field(default=0.5, ge=0.1, le=0.8, json_schema_extra={"env": "CONTEXT_BUDGET_EXECUTION"})
+    enable_result_summarization: bool = Field(default=True, json_schema_extra={"env": "ENABLE_RESULT_SUMMARIZATION"})
+    result_cache_enabled: bool = Field(default=True, json_schema_extra={"env": "RESULT_CACHE_ENABLED"})
+    tiered_context_enabled: bool = Field(default=True, json_schema_extra={"env": "TIERED_CONTEXT_ENABLED"})
 
     # Logging
-    llm_logging_enabled: bool = Field(default=False, env="LLM_LOGGING_ENABLED")
-    llm_log_file: str = Field(default="logs/llm_interactions.log", env="LLM_LOG_FILE")
-    llm_log_prompts: bool = Field(default=True, env="LLM_LOG_PROMPTS")
-    llm_log_responses: bool = Field(default=True, env="LLM_LOG_RESPONSES")
-    llm_log_tokens: bool = Field(default=True, env="LLM_LOG_TOKENS")
-    llm_log_timing: bool = Field(default=True, env="LLM_LOG_TIMING")
-    llm_log_format: str = Field(default="json", env="LLM_LOG_FORMAT")
+    llm_logging_enabled: bool = Field(default=False, json_schema_extra={"env": "LLM_LOGGING_ENABLED"})
+    llm_log_file: str = Field(default="logs/llm_interactions.log", json_schema_extra={"env": "LLM_LOG_FILE"})
+    llm_log_prompts: bool = Field(default=True, json_schema_extra={"env": "LLM_LOG_PROMPTS"})
+    llm_log_responses: bool = Field(default=True, json_schema_extra={"env": "LLM_LOG_RESPONSES"})
+    llm_log_tokens: bool = Field(default=True, json_schema_extra={"env": "LLM_LOG_TOKENS"})
+    llm_log_timing: bool = Field(default=True, json_schema_extra={"env": "LLM_LOG_TIMING"})
+    llm_log_format: str = Field(default="json", json_schema_extra={"env": "LLM_LOG_FORMAT"})
 
 class ExternalConfig(BaseModel):
     """Configuration for Generic External LLM Providers (Google, OpenAI, etc.)."""
-    provider: str = Field(default="google", description="Provider type: 'google', 'openai', etc.", env="EXTERNAL_PROVIDER") 
-    api_key: str = Field(default="", description="API Key", env="EXTERNAL_API_KEY")
-    base_url: str = Field(default="", description="Base URL for API", env="EXTERNAL_BASE_URL")
-    model: str = Field(default="gemini-1.5-flash", description="Default Model Name", env="EXTERNAL_MODEL")
-    embedding_model: str = Field(default="", description="Embedding model name", env="EXTERNAL_EMBEDDING_MODEL")
-    timeout: int = Field(ge=1, le=600, default=120, description="Timeout in seconds", env="EXTERNAL_TIMEOUT")
+    provider: str = Field(default="google", description="Provider type: 'google', 'openai', etc.", json_schema_extra={"env": "EXTERNAL_PROVIDER"}) 
+    api_key: str = Field(default="", description="API Key", json_schema_extra={"env": "EXTERNAL_API_KEY"})
+    base_url: str = Field(default="", description="Base URL for API", json_schema_extra={"env": "EXTERNAL_BASE_URL"})
+    model: str = Field(default="gemini-1.5-flash", description="Default Model Name", json_schema_extra={"env": "EXTERNAL_MODEL"})
+    embedding_model: str = Field(default="", description="Embedding model name", json_schema_extra={"env": "EXTERNAL_EMBEDDING_MODEL"})
+    timeout: int = Field(ge=1, le=600, default=120, description="Timeout in seconds", json_schema_extra={"env": "EXTERNAL_TIMEOUT"})
     
     # Request Delay
-    request_delay: float = Field(default=0.0, ge=0.0, description="Delay in seconds before each request", env="EXTERNAL_REQUEST_DELAY")
+    request_delay: float = Field(default=0.0, ge=0.0, description="Delay in seconds before each request", json_schema_extra={"env": "EXTERNAL_REQUEST_DELAY"})
     
     # Request Retries
-    max_retries: int = Field(default=5, ge=0, description="Maximum number of retries for transient errors", env="EXTERNAL_MAX_RETRIES")
+    max_retries: int = Field(default=5, ge=0, description="Maximum number of retries for transient errors", json_schema_extra={"env": "EXTERNAL_MAX_RETRIES"})
     
     # Generation Config
-    temperature: float = Field(default=0.7, ge=0.0, le=2.0, env="EXTERNAL_TEMPERATURE")
-    max_tokens: int = Field(default=8192, ge=1, env="EXTERNAL_MAX_TOKENS")
-    top_p: float = Field(default=0.95, ge=0.0, le=1.0, env="EXTERNAL_TOP_P")
-    top_k: int = Field(default=40, ge=1, env="EXTERNAL_TOP_K")
+    temperature: float = Field(default=0.7, ge=0.0, le=2.0, json_schema_extra={"env": "EXTERNAL_TEMPERATURE"})
+    max_tokens: int = Field(default=8192, ge=1, json_schema_extra={"env": "EXTERNAL_MAX_TOKENS"})
+    top_p: float = Field(default=0.95, ge=0.0, le=1.0, json_schema_extra={"env": "EXTERNAL_TOP_P"})
+    top_k: int = Field(default=40, ge=1, json_schema_extra={"env": "EXTERNAL_TOP_K"})
     
     # Model map for phases
     model_map: Dict[str, str] = Field(default_factory=lambda: {
@@ -1223,34 +1225,34 @@ class ExternalConfig(BaseModel):
     tools: List[Tool] = Field(default_factory=lambda: OllamaConfig().tools)
 
     # Context Budget (reused logic)
-    context_budget: int = Field(default=20000, ge=4000, le=2000000, env="CONTEXT_BUDGET")
-    context_budget_execution: float = Field(default=0.5, ge=0.1, le=0.8, env="CONTEXT_BUDGET_EXECUTION")
-    enable_result_summarization: bool = Field(default=True, env="ENABLE_RESULT_SUMMARIZATION")
-    result_cache_enabled: bool = Field(default=True, env="RESULT_CACHE_ENABLED")
-    tiered_context_enabled: bool = Field(default=True, env="TIERED_CONTEXT_ENABLED")
+    context_budget: int = Field(default=20000, ge=4000, le=2000000, json_schema_extra={"env": "CONTEXT_BUDGET"})
+    context_budget_execution: float = Field(default=0.5, ge=0.1, le=0.8, json_schema_extra={"env": "CONTEXT_BUDGET_EXECUTION"})
+    enable_result_summarization: bool = Field(default=True, json_schema_extra={"env": "ENABLE_RESULT_SUMMARIZATION"})
+    result_cache_enabled: bool = Field(default=True, json_schema_extra={"env": "RESULT_CACHE_ENABLED"})
+    tiered_context_enabled: bool = Field(default=True, json_schema_extra={"env": "TIERED_CONTEXT_ENABLED"})
     
     # Sliding Window & Tiered Context Limits
-    max_detailed_steps: int = Field(default=5, ge=1, le=50, env="MAX_DETAILED_STEPS")
-    current_loop_max_chars: int = Field(default=2000, ge=100, le=50000, env="CURRENT_LOOP_MAX_CHARS")
+    max_detailed_steps: int = Field(default=5, ge=1, le=50, json_schema_extra={"env": "MAX_DETAILED_STEPS"})
+    current_loop_max_chars: int = Field(default=2000, ge=100, le=50000, json_schema_extra={"env": "CURRENT_LOOP_MAX_CHARS"})
 
-    prev_loop_max_chars: int = Field(default=800, ge=50, le=10000, env="PREV_LOOP_MAX_CHARS")
-    older_loop_max_chars: int = Field(default=200, ge=20, le=2000, env="OLDER_LOOP_MAX_CHARS")
+    prev_loop_max_chars: int = Field(default=800, ge=50, le=10000, json_schema_extra={"env": "PREV_LOOP_MAX_CHARS"})
+    older_loop_max_chars: int = Field(default=200, ge=20, le=2000, json_schema_extra={"env": "OLDER_LOOP_MAX_CHARS"})
     
     # Logging
-    llm_logging_enabled: bool = Field(default=False, env="LLM_LOGGING_ENABLED")
-    llm_log_file: str = Field(default="logs/llm_interactions.log", env="LLM_LOG_FILE")
-    llm_log_prompts: bool = Field(default=True, env="LLM_LOG_PROMPTS")
-    llm_log_responses: bool = Field(default=True, env="LLM_LOG_RESPONSES")
-    llm_log_tokens: bool = Field(default=True, env="LLM_LOG_TOKENS")
-    llm_log_timing: bool = Field(default=True, env="LLM_LOG_TIMING")
-    llm_log_format: str = Field(default="json", env="LLM_LOG_FORMAT")
+    llm_logging_enabled: bool = Field(default=False, json_schema_extra={"env": "LLM_LOGGING_ENABLED"})
+    llm_log_file: str = Field(default="logs/llm_interactions.log", json_schema_extra={"env": "LLM_LOG_FILE"})
+    llm_log_prompts: bool = Field(default=True, json_schema_extra={"env": "LLM_LOG_PROMPTS"})
+    llm_log_responses: bool = Field(default=True, json_schema_extra={"env": "LLM_LOG_RESPONSES"})
+    llm_log_tokens: bool = Field(default=True, json_schema_extra={"env": "LLM_LOG_TOKENS"})
+    llm_log_timing: bool = Field(default=True, json_schema_extra={"env": "LLM_LOG_TIMING"})
+    llm_log_format: str = Field(default="json", json_schema_extra={"env": "LLM_LOG_FORMAT"})
 
 
     # Execution/Agentic loop settings (reused)
-    max_execution_steps: int = Field(default=10, ge=1, le=50, env="MAX_EXECUTION_STEPS")
-    execution_loop_enabled: bool = Field(default=True, env="EXECUTION_LOOP_ENABLED")
-    max_agentic_cycles: int = Field(default=3, ge=1, le=10, env="MAX_AGENTIC_CYCLES")
-    agentic_loop_enabled: bool = Field(default=True, env="AGENTIC_LOOP_ENABLED")
+    max_execution_steps: int = Field(default=10, ge=1, le=50, json_schema_extra={"env": "MAX_EXECUTION_STEPS"})
+    execution_loop_enabled: bool = Field(default=True, json_schema_extra={"env": "EXECUTION_LOOP_ENABLED"})
+    max_agentic_cycles: int = Field(default=3, ge=1, le=10, json_schema_extra={"env": "MAX_AGENTIC_CYCLES"})
+    agentic_loop_enabled: bool = Field(default=True, json_schema_extra={"env": "AGENTIC_LOOP_ENABLED"})
     
     # System prompts (reused from OllamaConfig default factories usually, but we need to define them here)
     # We can copy them from OllamaConfig to ensure consistency
@@ -1265,38 +1267,38 @@ class CustomAPIConfig(BaseModel):
     """Configuration for Custom API (OpenAI-compatible) client."""
     api_url: AnyHttpUrl = Field(
         default="https://api.example.com/v1/chat/completions",
-        env="CUSTOM_API_URL"
+        json_schema_extra={"env": "CUSTOM_API_URL"}
     )
-    api_key: str = Field(default="", env="CUSTOM_API_KEY")
+    api_key: str = Field(default="", json_schema_extra={"env": "CUSTOM_API_KEY"})
     model: str = Field(
         default="gpt-4",
         min_length=1,
         description="Model name for Custom API",
-        env="CUSTOM_API_MODEL"
+        json_schema_extra={"env": "CUSTOM_API_MODEL"}
     )
     embedding_model: str = Field(
         default="text-embedding-ada-002",
         min_length=1,
         description="Embedding model for Custom API",
-        env="CUSTOM_API_EMBEDDING_MODEL"
+        json_schema_extra={"env": "CUSTOM_API_EMBEDDING_MODEL"}
     )
     timeout: int = Field(
         ge=1,
         le=600,
         default=300,
         description="Timeout for requests in seconds (1-600)",
-        env="CUSTOM_API_TIMEOUT"
+        json_schema_extra={"env": "CUSTOM_API_TIMEOUT"}
     )
     
     # Generation parameters
-    temperature: float = Field(default=0.7, ge=0.0, le=2.0, env="CUSTOM_API_TEMPERATURE")
-    max_tokens: int = Field(default=4096, ge=1, env="CUSTOM_API_MAX_TOKENS")
+    temperature: float = Field(default=0.7, ge=0.0, le=2.0, json_schema_extra={"env": "CUSTOM_API_TEMPERATURE"})
+    max_tokens: int = Field(default=4096, ge=1, json_schema_extra={"env": "CUSTOM_API_MAX_TOKENS"})
     
     # SSL verification (may need to disable for custom certs)
-    verify_ssl: bool = Field(default=False, env="CUSTOM_API_VERIFY_SSL")
+    verify_ssl: bool = Field(default=False, json_schema_extra={"env": "CUSTOM_API_VERIFY_SSL"})
     
     # Default system prompt
-    default_system_prompt: str = Field(default="", env="CUSTOM_API_SYSTEM_PROMPT")
+    default_system_prompt: str = Field(default="", json_schema_extra={"env": "CUSTOM_API_SYSTEM_PROMPT"})
     
     # Model map for different phases
     model_map: Dict[str, str] = Field(default_factory=lambda: {
@@ -1306,50 +1308,50 @@ class CustomAPIConfig(BaseModel):
     })
     
     # LLM Logging (inherited from main config)
-    llm_logging_enabled: bool = Field(default=True, env="LLM_LOGGING_ENABLED")
-    llm_log_file: str = Field(default="logs/llm_interactions_custom.log", env="CUSTOM_API_LOG_FILE")
-    llm_log_prompts: bool = Field(default=True, env="LLM_LOG_PROMPTS")
-    llm_log_responses: bool = Field(default=True, env="LLM_LOG_RESPONSES")
-    llm_log_tokens: bool = Field(default=True, env="LLM_LOG_TOKENS")
-    llm_log_timing: bool = Field(default=True, env="LLM_LOG_TIMING")
-    llm_log_format: str = Field(default="json", env="LLM_LOG_FORMAT")
+    llm_logging_enabled: bool = Field(default=True, json_schema_extra={"env": "LLM_LOGGING_ENABLED"})
+    llm_log_file: str = Field(default="logs/llm_interactions_custom.log", json_schema_extra={"env": "CUSTOM_API_LOG_FILE"})
+    llm_log_prompts: bool = Field(default=True, json_schema_extra={"env": "LLM_LOG_PROMPTS"})
+    llm_log_responses: bool = Field(default=True, json_schema_extra={"env": "LLM_LOG_RESPONSES"})
+    llm_log_tokens: bool = Field(default=True, json_schema_extra={"env": "LLM_LOG_TOKENS"})
+    llm_log_timing: bool = Field(default=True, json_schema_extra={"env": "LLM_LOG_TIMING"})
+    llm_log_format: str = Field(default="json", json_schema_extra={"env": "LLM_LOG_FORMAT"})
     
     # Request settings
-    request_delay: float = Field(default=0.0, ge=0.0, env="CUSTOM_API_REQUEST_DELAY")
-    max_retries: int = Field(default=3, ge=0, env="CUSTOM_API_MAX_RETRIES")
+    request_delay: float = Field(default=0.0, ge=0.0, json_schema_extra={"env": "CUSTOM_API_REQUEST_DELAY"})
+    max_retries: int = Field(default=3, ge=0, json_schema_extra={"env": "CUSTOM_API_MAX_RETRIES"})
 
     # Global throttling / concurrency control (advanced)
-    max_concurrency: int = Field(default=1, ge=1, env="CUSTOM_API_MAX_CONCURRENCY")
-    global_min_interval: float = Field(default=0.0, ge=0.0, env="CUSTOM_API_GLOBAL_MIN_INTERVAL")
-    respect_retry_after: bool = Field(default=True, env="CUSTOM_API_RESPECT_RETRY_AFTER")
-    retry_after_max_seconds: int = Field(default=60, ge=0, env="CUSTOM_API_RETRY_AFTER_MAX_SECONDS")
+    max_concurrency: int = Field(default=1, ge=1, json_schema_extra={"env": "CUSTOM_API_MAX_CONCURRENCY"})
+    global_min_interval: float = Field(default=0.0, ge=0.0, json_schema_extra={"env": "CUSTOM_API_GLOBAL_MIN_INTERVAL"})
+    respect_retry_after: bool = Field(default=True, json_schema_extra={"env": "CUSTOM_API_RESPECT_RETRY_AFTER"})
+    retry_after_max_seconds: int = Field(default=60, ge=0, json_schema_extra={"env": "CUSTOM_API_RETRY_AFTER_MAX_SECONDS"})
 
     # Adaptive throttling (advanced)
-    adaptive_throttle_enabled: bool = Field(default=True, env="CUSTOM_API_ADAPTIVE_THROTTLE_ENABLED")
-    adaptive_max_interval: float = Field(default=10.0, ge=0.0, env="CUSTOM_API_ADAPTIVE_MAX_INTERVAL")
-    adaptive_increase_factor: float = Field(default=1.5, ge=1.0, env="CUSTOM_API_ADAPTIVE_INCREASE_FACTOR")
-    adaptive_decrease_factor: float = Field(default=0.9, gt=0.0, le=1.0, env="CUSTOM_API_ADAPTIVE_DECREASE_FACTOR")
-    adaptive_success_streak_threshold: int = Field(default=10, ge=1, env="CUSTOM_API_ADAPTIVE_SUCCESS_STREAK_THRESHOLD")
-    adaptive_jitter_seconds: float = Field(default=0.25, ge=0.0, env="CUSTOM_API_ADAPTIVE_JITTER_SECONDS")
+    adaptive_throttle_enabled: bool = Field(default=True, json_schema_extra={"env": "CUSTOM_API_ADAPTIVE_THROTTLE_ENABLED"})
+    adaptive_max_interval: float = Field(default=10.0, ge=0.0, json_schema_extra={"env": "CUSTOM_API_ADAPTIVE_MAX_INTERVAL"})
+    adaptive_increase_factor: float = Field(default=1.5, ge=1.0, json_schema_extra={"env": "CUSTOM_API_ADAPTIVE_INCREASE_FACTOR"})
+    adaptive_decrease_factor: float = Field(default=0.9, gt=0.0, le=1.0, json_schema_extra={"env": "CUSTOM_API_ADAPTIVE_DECREASE_FACTOR"})
+    adaptive_success_streak_threshold: int = Field(default=10, ge=1, json_schema_extra={"env": "CUSTOM_API_ADAPTIVE_SUCCESS_STREAK_THRESHOLD"})
+    adaptive_jitter_seconds: float = Field(default=0.25, ge=0.0, json_schema_extra={"env": "CUSTOM_API_ADAPTIVE_JITTER_SECONDS"})
     
     # Context Budget (reused logic)
-    context_budget: int = Field(default=20000, ge=4000, le=2000000, env="CONTEXT_BUDGET")
-    context_budget_execution: float = Field(default=0.5, ge=0.1, le=0.8, env="CONTEXT_BUDGET_EXECUTION")
-    enable_result_summarization: bool = Field(default=True, env="ENABLE_RESULT_SUMMARIZATION")
-    result_cache_enabled: bool = Field(default=True, env="RESULT_CACHE_ENABLED")
-    tiered_context_enabled: bool = Field(default=True, env="TIERED_CONTEXT_ENABLED")
+    context_budget: int = Field(default=20000, ge=4000, le=2000000, json_schema_extra={"env": "CONTEXT_BUDGET"})
+    context_budget_execution: float = Field(default=0.5, ge=0.1, le=0.8, json_schema_extra={"env": "CONTEXT_BUDGET_EXECUTION"})
+    enable_result_summarization: bool = Field(default=True, json_schema_extra={"env": "ENABLE_RESULT_SUMMARIZATION"})
+    result_cache_enabled: bool = Field(default=True, json_schema_extra={"env": "RESULT_CACHE_ENABLED"})
+    tiered_context_enabled: bool = Field(default=True, json_schema_extra={"env": "TIERED_CONTEXT_ENABLED"})
     
     # Sliding Window & Tiered Context Limits
-    max_detailed_steps: int = Field(default=5, ge=1, le=50, env="MAX_DETAILED_STEPS")
-    current_loop_max_chars: int = Field(default=2000, ge=100, le=50000, env="CURRENT_LOOP_MAX_CHARS")
-    prev_loop_max_chars: int = Field(default=800, ge=50, le=10000, env="PREV_LOOP_MAX_CHARS")
-    older_loop_max_chars: int = Field(default=200, ge=20, le=2000, env="OLDER_LOOP_MAX_CHARS")
+    max_detailed_steps: int = Field(default=5, ge=1, le=50, json_schema_extra={"env": "MAX_DETAILED_STEPS"})
+    current_loop_max_chars: int = Field(default=2000, ge=100, le=50000, json_schema_extra={"env": "CURRENT_LOOP_MAX_CHARS"})
+    prev_loop_max_chars: int = Field(default=800, ge=50, le=10000, json_schema_extra={"env": "PREV_LOOP_MAX_CHARS"})
+    older_loop_max_chars: int = Field(default=200, ge=20, le=2000, json_schema_extra={"env": "OLDER_LOOP_MAX_CHARS"})
     
     # Execution/Agentic loop settings (reused)
-    max_execution_steps: int = Field(default=10, ge=1, le=50, env="MAX_EXECUTION_STEPS")
-    execution_loop_enabled: bool = Field(default=True, env="EXECUTION_LOOP_ENABLED")
-    max_agentic_cycles: int = Field(default=3, ge=1, le=10, env="MAX_AGENTIC_CYCLES")
-    agentic_loop_enabled: bool = Field(default=True, env="AGENTIC_LOOP_ENABLED")
+    max_execution_steps: int = Field(default=10, ge=1, le=50, json_schema_extra={"env": "MAX_EXECUTION_STEPS"})
+    execution_loop_enabled: bool = Field(default=True, json_schema_extra={"env": "EXECUTION_LOOP_ENABLED"})
+    max_agentic_cycles: int = Field(default=3, ge=1, le=10, json_schema_extra={"env": "MAX_AGENTIC_CYCLES"})
+    agentic_loop_enabled: bool = Field(default=True, json_schema_extra={"env": "AGENTIC_LOOP_ENABLED"})
     
     # Reuse tools and system prompts from OllamaConfig
     tools: List[Tool] = Field(default_factory=lambda: OllamaConfig().tools)
@@ -1362,12 +1364,12 @@ class CustomAPIConfig(BaseModel):
 
 class GhidraMCPConfig(BaseModel):
     """Configuration for the GhidraMCP client."""
-    base_url: AnyHttpUrl = Field(default="http://localhost:8080", env="GHIDRA_BASE_URL")
-    timeout: int = Field(ge=1, le=300, default=30, description="Timeout in seconds (1-300)", env="GHIDRA_TIMEOUT")
-    mock_mode: bool = Field(default=False, env="GHIDRA_MOCK_MODE")
-    api_path: str = Field(default="", description="API path for GhidraMCP", env="GHIDRA_API_PATH")
+    base_url: AnyHttpUrl = Field(default="http://localhost:8080", json_schema_extra={"env": "GHIDRA_BASE_URL"})
+    timeout: int = Field(ge=1, le=300, default=30, description="Timeout in seconds (1-300)", json_schema_extra={"env": "GHIDRA_TIMEOUT"})
+    mock_mode: bool = Field(default=False, json_schema_extra={"env": "GHIDRA_MOCK_MODE"})
+    api_path: str = Field(default="", description="API path for GhidraMCP", json_schema_extra={"env": "GHIDRA_API_PATH"})
     
-    @validator('api_path')
+    @field_validator('api_path')
     def validate_api_path(cls, v):
         """Validate API path format."""
         if v and not v.startswith('/'):
@@ -1383,7 +1385,7 @@ class SessionHistoryConfig(BaseModel):
     use_vector_embeddings: bool = False
     vector_db_path: str = Field(default="data/vector_db", description="Path to vector database directory")
     
-    @validator('storage_path')
+    @field_validator('storage_path')
     def validate_storage_path(cls, v):
         """Validate storage path format."""
         if not v.strip():
@@ -1392,7 +1394,7 @@ class SessionHistoryConfig(BaseModel):
             raise ValueError('Storage path must end with .jsonl extension')
         return v.strip()
     
-    @validator('vector_db_path')
+    @field_validator('vector_db_path')
     def validate_vector_db_path(cls, v):
         """Validate vector database path."""
         if not v.strip():
@@ -1405,7 +1407,7 @@ class BridgeConfig(BaseSettings):
     google: GoogleConfig = Field(default_factory=GoogleConfig) # Deprecated, keep for compat
     external: ExternalConfig = Field(default_factory=ExternalConfig)
     custom_api: CustomAPIConfig = Field(default_factory=CustomAPIConfig)
-    llm_provider: str = Field(default="ollama", description="LLM provider: 'ollama', 'google' (legacy), 'external', or 'custom_api'", env="LLM_PROVIDER")
+    llm_provider: str = Field(default="ollama", description="LLM provider: 'ollama', 'google' (legacy), 'external', or 'custom_api'", json_schema_extra={"env": "LLM_PROVIDER"})
     ghidra: GhidraMCPConfig = Field(default_factory=GhidraMCPConfig)
     session_history: SessionHistoryConfig = Field(default_factory=SessionHistoryConfig)
     
@@ -1433,7 +1435,7 @@ class BridgeConfig(BaseSettings):
     # Enable or disable review phase
     enable_review: bool = True
     
-    @validator('log_level')
+    @field_validator('log_level')
     def validate_log_level(cls, v):
         """Validate log level."""
         valid_levels = {'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'}
@@ -1442,7 +1444,7 @@ class BridgeConfig(BaseSettings):
             raise ValueError(f'log_level must be one of {valid_levels}')
         return v_upper
     
-    @validator('log_file')
+    @field_validator('log_file')
     def validate_log_file(cls, v):
         """Validate log file path."""
         if not v.strip():
@@ -1451,7 +1453,7 @@ class BridgeConfig(BaseSettings):
             raise ValueError('Log file must have .log extension')
         return v.strip()
     
-    @validator('knowledge_base_dir')
+    @field_validator('knowledge_base_dir')
     def validate_knowledge_base_dir(cls, v):
         """Validate knowledge base directory."""
         if not v.strip():

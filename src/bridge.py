@@ -777,7 +777,7 @@ Do NOT skip to tool execution. Provide concrete details from the data above.
 
         return prompt_text
 
-    def _build_structured_prompt(self, phase: str = None) -> tuple:
+    def _build_structured_prompt(self, phase: str | None = None) -> tuple:
         """
         Build structured prompts with proper separation between system and user prompts.
 
@@ -1132,9 +1132,7 @@ You can help analyze binary files by executing commands through GhidraMCP."""
         # Check if all critical planned tools have been executed
         # Update the pending_critical list based on current execution status
         pending_critical = [
-            tool
-            for tool in self.planned_tools_tracker["planned"]
-            if tool["is_critical"] and tool["execution_status"] == "pending"
+            tool for tool in self.current_plan_tools if tool["is_critical"] and tool["execution_status"] == "pending"
         ]
 
         if pending_critical:
@@ -2383,24 +2381,24 @@ You can help analyze binary files by executing commands through GhidraMCP."""
             # For non-verbose commands, just show a success message
             print(f"✓ Successfully executed {cmd_name}")
 
+    def _canonical_params(cmd, params):
+        """Strip default offset/limit values for read-only tools so signatures match."""
+        defaults = {"offset": 0, "limit": 500}
+        # --- Duplicate-detection helpers ---
+        READ_ONLY_PAGINATED = {"list_strings", "list_imports", "list_exports", "list_segments"}
+
+        if cmd in READ_ONLY_PAGINATED:
+            cleaned = {k: v for k, v in params.items() if defaults.get(k) != v}
+        else:
+            cleaned = params
+        return tuple(sorted(cleaned.items()))
+
     def _execute_plan(self) -> str:
         """
         Execute the generated plan.
         Returns:
             A string representing all tool results or errors.
         """
-        # --- Duplicate-detection helpers ---
-        READ_ONLY_PAGINATED = {"list_strings", "list_imports", "list_exports", "list_segments"}
-
-        def _canonical_params(cmd, params):
-            """Strip default offset/limit values for read-only tools so signatures match."""
-            defaults = {"offset": 0, "limit": 500}
-            if cmd in READ_ONLY_PAGINATED:
-                cleaned = {k: v for k, v in params.items() if defaults.get(k) != v}
-            else:
-                cleaned = params
-            return tuple(sorted(cleaned.items()))
-
         logging.info("Starting execution phase")
 
         all_results = []
@@ -2491,7 +2489,7 @@ You can help analyze binary files by executing commands through GhidraMCP."""
                 cmd_name, cmd_params = commands[0]  # Get first command
 
                 # Create signature for this exact command
-                cmd_signature = f"{cmd_name}({_canonical_params(cmd_name, cmd_params)})"
+                cmd_signature = f"{cmd_name}({self._canonical_params(cmd_name, cmd_params)})"
 
                 # First check CAG memory for intelligent duplicate detection
                 skip_due_to_memory = False
@@ -2644,7 +2642,7 @@ You can help analyze binary files by executing commands through GhidraMCP."""
                     # Add command result to context (legacy - for backward compatibility)
                     self.add_to_context("tool_result", context_result)
                     # Cache signature for duplicate detection intelligence
-                    sig_exec = f"{cmd_name}({_canonical_params(cmd_name, cmd_params)})"
+                    sig_exec = f"{cmd_name}({self._canonical_params(cmd_name, cmd_params)})"
                     self.analysis_state.setdefault("cached_results", {})[sig_exec] = True
 
                     # Update analysis state
@@ -4727,7 +4725,7 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
             # Method 2: If no address in old_name, try get_current_function (single function rename scenario)
             if not address:
                 try:
-                    current_function_result = self.ghidra.get_current_function()
+                    current_function_result = self.ghidra_client.get_current_function()
                     if isinstance(current_function_result, str) and "at " in current_function_result:
                         # Extract address from result like "Function: FUN_401000 at 401000"
                         match = re.search(r"at\s+([0-9a-fA-F]+)", current_function_result)
@@ -4740,7 +4738,7 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
             # Method 3: If still no address, try to get it from decompiling the function by name
             if not address:
                 try:
-                    decompile_result = self.ghidra.decompile_function(old_name)
+                    decompile_result = self.ghidra_client.decompile_function(old_name)
                     if isinstance(decompile_result, str):
                         addr_match = re.search(r"([0-9a-fA-F]{8,})", decompile_result)
                         if addr_match:
@@ -5185,7 +5183,7 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
             command_name: The name of the executed command
             params: The parameters used for the command
         """
-        for tool_entry in self.planned_tools_tracker["planned"]:
+        for tool_entry in self.current_plan_tools:
             if tool_entry["tool"] == command_name:
                 tool_entry["execution_status"] = "executed"
                 break
@@ -5198,19 +5196,17 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
             A string to be included in the review prompt if there are pending critical tools
         """
         # Update the pending_critical list based on current execution status
-        self.planned_tools_tracker["pending_critical"] = [
-            tool
-            for tool in self.planned_tools_tracker["planned"]
-            if tool["is_critical"] and tool["execution_status"] == "pending"
+        self.current_plan_tools["pending_critical"] = [
+            tool for tool in self.current_plan_tools if tool["is_critical"] and tool["execution_status"] == "pending"
         ]
 
-        if not self.planned_tools_tracker["pending_critical"]:
+        if not self.current_plan_tools["pending_critical"]:
             return ""
 
         # Generate the prompt
         pending_tools_prompt = "\n\nThere are pending critical tool calls that appear necessary but have not been executed:\n"
 
-        for tool in self.planned_tools_tracker["pending_critical"]:
+        for tool in self.current_plan_tools["pending_critical"]:
             pending_tools_prompt += f"- {tool['tool']}: Mentioned in context \"{tool['context']}\"\n"
 
         pending_tools_prompt += "\nPlease ensure these critical tool calls are explicitly executed before concluding the task."
@@ -5303,182 +5299,6 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
             # Create a new list if neither
             self.context = [{"role": role, "content": content}]
 
-    def execute_goal(self, goal: str) -> Tuple[bool, List[str]]:
-        """
-        Execute a goal by breaking it down into steps and executing each step.
-
-        Args:
-            goal: The goal to execute
-
-        Returns:
-            Tuple of (success, results)
-        """
-        logging.info(f"Executing goal: {goal}")
-        self.context["goal"] = goal
-        self.current_goal = goal
-        self.executed_tools = set()  # Reset tool tracking for new goal
-        self.step_result_map = {}  # Reset step result map for new goal
-        all_results = []
-        step_count = 0
-        self.goal_achieved = False
-
-        # Use CAG manager to enhance context with knowledge and session data
-        if self.enable_cag and self.cag_manager:
-            # Update session cache with current context
-            self.cag_manager.update_session_from_bridge_context(self.context)
-
-        logging.info("Starting planning phase")
-        planning_prompt = self._build_planning_prompt(goal)
-        planning_response = self.chat_engine.query(planning_prompt)
-        logging.info(f"Received planning response: {planning_response[:100]}...")
-
-        # Extract tools from the plan
-        planned_tools = self._extract_planned_tools(planning_response)
-        logging.info(f"Extracted {len(planned_tools)} planned tools from plan")
-
-        # Add the plan to context
-        self.add_to_context("plan", planning_response)
-
-        logging.info("Planning phase completed")
-        logging.info("Starting execution phase")
-
-        while step_count < self.max_goal_steps and not self.goal_achieved:
-            step_count += 1
-            logging.info(f"Step {step_count}/{self.max_goal_steps}: Sending query to Ollama")
-
-            # Generate prompt based on current context
-            prompt = self._build_execution_prompt()
-
-            # Get response from Ollama
-            response = self.chat_engine.query(prompt)
-            logging.info(f"Received response from Ollama: {response[:100]}...")
-
-            # Update context with the response
-            self.add_to_context("execution_response", response)
-
-            # Process commands in the response
-            commands = self.command_parser.extract_commands(response)
-
-            if self._is_goal_achieved(response):
-                logging.info("Goal achievement indicated in response")
-                self.goal_achieved = True
-                all_results.append(f"Step {step_count} - Goal achievement indicated: {response}")
-                break
-
-            # Execute commands
-            execution_result = ""
-            for cmd_name, cmd_params in commands:
-                try:
-                    # Add tool call to context
-                    tool_call = f"EXECUTE: {cmd_name}({', '.join([f'{k}=\"{v}\"' for k, v in cmd_params.items()])})"
-                    self.add_to_context("tool_call", tool_call)
-
-                    # Track executed tools with full signature for duplicate detection
-                    param_sig = str(sorted(cmd_params.items())) if cmd_params else ""
-                    cmd_signature = f"{cmd_name}:{param_sig}"
-
-                    # Skip if already executed with same params
-                    if cmd_signature in self.executed_tools:
-                        self.logger.warning(f"Skipping duplicate: {cmd_name}")
-                        continue
-
-                    self.executed_tools.add(cmd_signature)
-
-                    # Execute command
-                    result = self.execute_command(cmd_name, cmd_params)
-
-                    # Format result for display
-                    formatted_result = self.command_parser.format_command_results(cmd_name, cmd_params, result)
-                    logging.info(f"Command executed: {cmd_name}")
-                    logging.info(f"Result: {formatted_result[:100]}...")
-
-                    # Add result to context
-                    self.add_to_context("tool_result", formatted_result)
-
-                    # Cache signature for duplicate detection intelligence
-                    sig = f"{cmd_name}({_canonical_params(cmd_name, cmd_params)})"
-                    self.analysis_state["cached_results"][sig] = True
-
-                    # Special logic to re-orient the agent after analysis
-                    if cmd_name == "analyze_function":
-                        # This prompt is a direct instruction, framed as a user follow-up, to force the next action.
-                        reminder_prompt = f"""
-                        Excellent, the analysis is complete. Now, using that analysis, complete the original task: '{self.current_goal}'.
-                        Your final step is to call the `rename_function` tool.
-                        - Find the CURRENT function name from the most recent `get_current_function` output in the history.
-                        - Create a descriptive new name based on the analysis you just performed.
-                        - Then, call the `rename_function` tool with the CURRENT function's old and new names.
-                        - IMPORTANT: Only rename the function that is currently selected in Ghidra, not any other function.
-                        """
-                        self.add_to_context("user", reminder_prompt)  # Use "user" role for higher salience
-                        self.logger.info("Injecting user follow-up prompt to refocus agent on the final rename step.")
-
-                    # Check for context mismatches in rename operations
-                    if cmd_name == "rename_function" and "old_name" in cmd_params:
-                        old_name = cmd_params["old_name"]
-                        # Check if this rename operation might be working on the wrong function
-                        if "✓ Successfully executed" in execution_result and old_name.startswith("FUN_"):
-                            context_check_prompt = f"""
-                            ATTENTION: You just renamed '{old_name}' successfully, but please verify this is the correct function.
-                            
-                            If your goal is to rename the CURRENT function (the one selected in Ghidra), you should:
-                            1. Use `get_current_function()` to confirm which function is currently selected
-                            2. Only rename that specific function
-                            
-                            If you've already completed the task successfully, respond with "GOAL ACHIEVED".
-                            """
-                            self.add_to_context("system", context_check_prompt)
-
-                    execution_result = formatted_result
-                    all_results.append(f"Command: {cmd_name}\nResult: {execution_result}\n")
-
-                except Exception as e:
-                    error_msg = f"ERROR: {str(e)}"
-                    logging.error(f"Error executing {cmd_name}: {error_msg}")
-                    execution_result = error_msg
-                    self.add_to_context("tool_error", error_msg)
-                    all_results.append(f"Error executing {cmd_name}: {error_msg}")
-
-            # If no commands found, end the execution phase
-            if not commands:
-                logging.info("No commands found in AI response, ending tool execution loop")
-                all_results.append(f"Step {step_count} - No tool calls: {response}")
-                break
-
-        if step_count >= self.max_goal_steps:
-            logging.info(f"Reached maximum steps ({self.max_goal_steps}), ending tool execution loop")
-            all_results.append(f"Reached maximum steps ({self.max_goal_steps})")
-
-        logging.info("Execution phase completed")
-
-        # Only do review if requested
-        if self.enable_review:
-            all_results.append("\n=== REVIEW PHASE ===\n")
-            all_results.extend(self._perform_review_phase())
-
-        return self.goal_achieved, all_results
-
-    def _is_goal_achieved(self, response: str) -> bool:
-        """
-        Check if the response indicates that the goal has been achieved.
-
-        Args:
-            response: The AI response to check
-
-        Returns:
-            True if the goal is achieved, False otherwise
-        """
-        response_upper = response.upper()
-        goal_indicators = [
-            "GOAL ACHIEVED",
-            "GOAL COMPLETE",
-            "TASK COMPLETED",
-            "SUCCESSFULLY COMPLETED",
-            "OBJECTIVE ACCOMPLISHED",
-        ]
-
-        return any(indicator in response_upper for indicator in goal_indicators)
-
     def _build_execution_prompt(self) -> str:
         """
         Build a prompt for the execution phase.
@@ -5490,8 +5310,8 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
         system_prompt, user_prompt = self._build_structured_prompt(phase="execution")
 
         # Add function call best practices to system prompt
-        if hasattr(config, "FUNCTION_CALL_BEST_PRACTICES") and config.FUNCTION_CALL_BEST_PRACTICES:
-            system_prompt += f"\n\nFunction call best practices:\n{config.FUNCTION_CALL_BEST_PRACTICES}\n"
+        if hasattr(self.bridge_config, "FUNCTION_CALL_BEST_PRACTICES") and self.bridge_config.FUNCTION_CALL_BEST_PRACTICES:
+            system_prompt += f"\n\nFunction call best practices:\n{self.bridge_config.FUNCTION_CALL_BEST_PRACTICES}\n"
 
         # Return both prompts as a tuple
         return (system_prompt, user_prompt)
@@ -5518,8 +5338,8 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
             user_prompt += "\n\n**Use these findings to refine your investigation plan.**\n"
 
         # Add function call best practices to system prompt
-        if hasattr(config, "FUNCTION_CALL_BEST_PRACTICES") and config.FUNCTION_CALL_BEST_PRACTICES:
-            system_prompt += f"\n\nFunction call best practices:\n{config.FUNCTION_CALL_BEST_PRACTICES}\n"
+        if hasattr(self.bridge_config, "FUNCTION_CALL_BEST_PRACTICES") and self.bridge_config.FUNCTION_CALL_BEST_PRACTICES:
+            system_prompt += f"\n\nFunction call best practices:\n{self.bridge_config.FUNCTION_CALL_BEST_PRACTICES}\n"
 
         # Return both prompts as a tuple
         return (system_prompt, user_prompt)
@@ -5534,8 +5354,8 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
         system_prompt, user_prompt = self._build_structured_prompt(phase="review")
 
         # Add function call best practices to system prompt
-        if hasattr(config, "FUNCTION_CALL_BEST_PRACTICES") and config.FUNCTION_CALL_BEST_PRACTICES:
-            system_prompt += f"\n\nFunction call best practices:\n{config.FUNCTION_CALL_BEST_PRACTICES}\n"
+        if hasattr(self.bridge_config, "FUNCTION_CALL_BEST_PRACTICES") and self.bridge_config.FUNCTION_CALL_BEST_PRACTICES:
+            system_prompt += f"\n\nFunction call best practices:\n{self.bridge_config.FUNCTION_CALL_BEST_PRACTICES}\n"
 
         # Return both prompts as a tuple
         return (system_prompt, user_prompt)
@@ -5553,7 +5373,7 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
         prompt = self._build_review_prompt()
 
         # Query the LLM
-        response = self.chat_engine.query(prompt)
+        response = self.llm_client.query(prompt)
         logging.info(f"Received review response: {response[:100]}...")
 
         # REMOVED: Text-based ARTIFACT parsing (never used)
@@ -5561,22 +5381,6 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
         # self._parse_and_save_artifacts(response)
 
         return [f"\n=== REVIEW ANALYSIS ===\n{response}"]
-
-    def _run_hardcoded_rename_workflow(self, display_name: str):
-        # Instead of: ai_response = self.bridge.process_query(analysis_query)
-        # Do direct calls:
-
-        # 1. Get current function (already done)
-        # 2. Decompile ONCE
-        decompiled_code = self.bridge.execute_command("decompile_function", {"name": function_name})
-
-        # 3. Create analysis prompt with the decompiled code
-        analysis_prompt = f"Analyze this decompiled function and suggest a name:\n{decompiled_code}"
-
-        # 4. Use Ollama directly (no multi-phase workflow)
-        ai_response = self.bridge._ollama_client.generate(analysis_prompt)
-
-        # 5. Extract name and rename
 
     def _get_latest_agent_analysis_text(self) -> str:
         """Retrieve the text analysis from the latest agent dump."""
@@ -5689,7 +5493,7 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
 
         try:
             # Collect function information
-            functions_result = self.ghidra.list_functions()
+            functions_result = self.ghidra_client.list_functions()
             if isinstance(functions_result, list):
                 data["functions"] = functions_result
             elif isinstance(functions_result, str) and not functions_result.startswith("ERROR:"):
@@ -5723,7 +5527,7 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
             data["metadata"]["analyzed_count"] = len(data["function_summaries"])
 
             # Collect imports
-            imports_result = self.ghidra.list_imports()
+            imports_result = self.ghidra_client.list_imports()
             if isinstance(imports_result, (list, str)) and not str(imports_result).startswith("ERROR:"):
                 if isinstance(imports_result, str):
                     data["imports"] = [i.strip() for i in imports_result.split("\n") if i.strip()]
@@ -5731,7 +5535,7 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
                     data["imports"] = imports_result
 
             # Collect exports
-            exports_result = self.ghidra.list_exports()
+            exports_result = self.ghidra_client.list_exports()
             if isinstance(exports_result, (list, str)) and not str(exports_result).startswith("ERROR:"):
                 if isinstance(exports_result, str):
                     data["exports"] = [e.strip() for e in exports_result.split("\n") if e.strip()]
@@ -5739,7 +5543,7 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
                     data["exports"] = exports_result
 
             # Collect memory segments
-            segments_result = self.ghidra.list_segments()
+            segments_result = self.ghidra_client.list_segments()
             if isinstance(segments_result, (list, str)) and not str(segments_result).startswith("ERROR:"):
                 if isinstance(segments_result, str):
                     data["segments"] = [s.strip() for s in segments_result.split("\n") if s.strip()]
@@ -5747,14 +5551,14 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
                     data["segments"] = segments_result
 
             # Collect classes/namespaces
-            classes_result = self.ghidra.list_classes()
+            classes_result = self.ghidra_client.list_classes()
             if isinstance(classes_result, (list, str)) and not str(classes_result).startswith("ERROR:"):
                 if isinstance(classes_result, str):
                     data["classes"] = [c.strip() for c in classes_result.split("\n") if c.strip()]
                 else:
                     data["classes"] = classes_result
 
-            namespaces_result = self.ghidra.list_namespaces()
+            namespaces_result = self.ghidra_client.list_namespaces()
             if isinstance(namespaces_result, (list, str)) and not str(namespaces_result).startswith("ERROR:"):
                 if isinstance(namespaces_result, str):
                     data["namespaces"] = [n.strip() for n in namespaces_result.split("\n") if n.strip()]
@@ -5762,7 +5566,7 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
                     data["namespaces"] = namespaces_result
 
             # Collect data items
-            data_items_result = self.ghidra.list_data_items()
+            data_items_result = self.ghidra_client.list_data_items()
             if isinstance(data_items_result, (list, str)) and not str(data_items_result).startswith("ERROR:"):
                 if isinstance(data_items_result, str):
                     data["data_items"] = [d.strip() for d in data_items_result.split("\n") if d.strip()]
@@ -5771,7 +5575,7 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
 
             # Collect strings with addresses for evidence
             try:
-                strings_result = self.ghidra.list_strings(limit=500)  # Get top 500 strings
+                strings_result = self.ghidra_client.list_strings(limit=500)  # Get top 500 strings
                 if isinstance(strings_result, list):
                     data["strings"] = strings_result  # JSON format likely includes addresses
                 elif isinstance(strings_result, str) and not strings_result.startswith("ERROR:"):
@@ -5787,7 +5591,7 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
 
         # Collect binary name and info
         try:
-            program_info = self.ghidra.get_current_program_info()
+            program_info = self.ghidra_client.get_current_program_info()
             data["metadata"]["binary_name"] = program_info.get("name", "Unknown Binary")
             data["metadata"]["project_name"] = program_info.get("project", "Unknown Project")
             self.logger.info(f"Collected binary info: {data['metadata']['binary_name']}")
@@ -7853,7 +7657,7 @@ Now generate the JSON report based on this data.
         # Call MCP client
         xrefs = []
         try:
-            xrefs = self.ghidra.get_xrefs_to(address, limit=max_funcs)  # type: ignore
+            xrefs = self.ghidra_client.get_xrefs_to(address, limit=max_funcs)  # type: ignore
         except Exception as e:
             self.logger.debug(f"get_xrefs_to failed for {address}: {e}")
             return
@@ -7875,7 +7679,7 @@ Now generate the JSON report based on this data.
             if hasattr(self, "function_summaries") and caller in self.function_summaries:
                 continue
             try:
-                decomp = self.ghidra.decompile_function_by_address(caller)  # type: ignore
+                decomp = self.ghidra_client.decompile_function_by_address(caller)  # type: ignore
                 if isinstance(decomp, str):
                     caller_summary = self._extract_function_summary(decomp)
                     if caller_summary:
