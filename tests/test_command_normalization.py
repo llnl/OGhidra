@@ -112,9 +112,9 @@ class TestCommandNormalization(unittest.TestCase):
         )
         
         # Check that function_address was converted to address
-        self.assertIn("address", corrected_params)
-        self.assertNotIn("function_address", corrected_params)
-        self.assertEqual(corrected_params["address"], "140001000")
+        self.assertIn("function_address", corrected_params)
+        self.assertNotIn("address", corrected_params)
+        self.assertEqual(corrected_params["function_address"], "140001000")
         
         # Test camelCase parameter conversion
         params = {"functionAddress": "140001000", "new_name": "initialize_data"}
@@ -123,9 +123,9 @@ class TestCommandNormalization(unittest.TestCase):
         )
         
         # Check that functionAddress was converted to address
-        self.assertIn("address", corrected_params)
-        self.assertNotIn("functionAddress", corrected_params)
-        self.assertEqual(corrected_params["address"], "140001000")
+        self.assertIn("function_address", corrected_params)
+        self.assertNotIn("address", corrected_params)
+        self.assertEqual(corrected_params["function_address"], "140001000")
         
         # Test FUN_ prefix removal
         params = {"address": "FUN_140001000", "new_name": "initialize_data"}
@@ -134,16 +134,16 @@ class TestCommandNormalization(unittest.TestCase):
         )
         
         # Check that FUN_ prefix was removed
-        self.assertEqual(corrected_params["address"], "140001000")
+        self.assertEqual(corrected_params["function_address"], "140001000")
         
         # Test 0x prefix removal
-        params = {"address": "0x140001000", "new_name": "initialize_data"}
+        params = {"function_address": "0x140001000", "new_name": "initialize_data"}
         corrected_params = CommandParser._validate_and_transform_params(
             "rename_function_by_address", params.copy()
         )
         
         # Check that 0x prefix was removed
-        self.assertEqual(corrected_params["address"], "140001000")
+        self.assertEqual(corrected_params["function_address"], "140001000")
 
     def test_alternate_format_detection(self):
         """Test detection of alternate command formats."""
