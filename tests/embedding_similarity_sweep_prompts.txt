@@ -1,0 +1,14 @@
+# One prompt per line. Keep prompts general (behavior-focused), not string-matchy.
+Find a function that reads or parses the Unix password hash file to extract credentials.
+Identify a function that accesses a sensitive system password file and processes entries with hashed passwords.
+Locate code that constructs a sensitive file path at runtime (string building or obfuscation) and then opens and reads it.
+Find a misleadingly named function that performs credential harvesting by reading a privileged system file.
+Find code that reads a protected authentication file line-by-line and filters entries with password hashes.
+Find functionality that resolves a sensitive system path (like /etc/shadow) in an obfuscated way and then reads it.
+
+# More general security-search style prompts (still behavior oriented).
+Find credential theft behavior: reading sensitive authentication databases and extracting password hashes.
+Locate code that steals credentials by opening a privileged system file and parsing it line-by-line.
+Find suspicious file access indicative of credential stealing (e.g., reading password hashes) and subsequent processing.
+Identify a function that accesses sensitive configuration or credential storage paths and exfiltrates or logs their contents.
+Find malicious behavior that reads sensitive local files for credential harvesting, even if strings are obfuscated.

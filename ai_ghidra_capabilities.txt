@@ -20,7 +20,7 @@ Information Gathering:
 - scan_function_pointer_tables(min_table_entries, pointer_size): Scan the binary for function pointer tables (vtables, dispatch tables, jump tables). Returns structured list of tables with addresses and function entries. Runs algorithmically without LLM intervention. Optional params: min_table_entries (default 3), pointer_size (8 for x64, 4 for x86).
 
 Context Management:
-- get_cached_result(result_id): Retrieve the full content of a previously summarized or truncated result. Result IDs use the format "step_L{loop}_{step}" (e.g., "step_L1_5" = Loop 1, Step 5). When you see "[Already executed in step_L1_3...]" in a skip message, use get_cached_result(result_id="step_L1_3") to get the full content.
+- search_function_summaries(query, search_type, top_k): Search analyzed function summaries (when available). Use search_type="hybrid" (keyword+semantic), "keyword" (grep-style), "semantic" (embeddings-only), or "name" (match function name). Requires function summaries to be present; hybrid search is intended to be enabled via the "Enable Hybrid Search" checkbox.
 
 # --- New discovery helpers ---
 - list_strings(offset, limit, filter): List all defined strings or search by substring when *filter* is provided.  Alias: `string_search(filter="<text>")`.

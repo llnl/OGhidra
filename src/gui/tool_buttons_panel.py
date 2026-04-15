@@ -2549,15 +2549,15 @@ Do you want to proceed with renaming all functions?"""
         # Secondary dialog for enumeration option
         enumeration_dialog = tk.Toplevel(self.frame)
         enumeration_dialog.title("Function Enumeration Options")
-        enumeration_dialog.geometry("800x650")
+        enumeration_dialog.geometry("800x780")
         enumeration_dialog.transient(self.frame.winfo_toplevel())
         enumeration_dialog.grab_set()
 
         # Center the dialog
         enumeration_dialog.update_idletasks()
         x = (enumeration_dialog.winfo_screenwidth() // 2) - (800 // 2)
-        y = (enumeration_dialog.winfo_screenheight() // 2) - (650 // 2)
-        enumeration_dialog.geometry(f"800x650+{x}+{y}")
+        y = (enumeration_dialog.winfo_screenheight() // 2) - (780 // 2)
+        enumeration_dialog.geometry(f"800x780+{x}+{y}")
 
         # Dialog content
         main_frame = ttk.Frame(enumeration_dialog, padding=20)

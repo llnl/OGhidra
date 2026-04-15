@@ -76,53 +76,6 @@ class QueryInputPanel:
         )
         self.query_entry.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0, 10))
 
-        # Task mode controls (simple UI toggle + mode selection)
-        taskmode_frame = ttk.Frame(self.frame)
-        taskmode_frame.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(0, 6))
-        taskmode_frame.grid_columnconfigure(3, weight=1)
-
-        self.task_mode_enabled_var = tk.BooleanVar(value=False)
-        self.task_mode_var = tk.StringVar(value="purpose_id")
-
-        # Initialize from Bridge if available (sticky across restarts)
-        try:
-            if hasattr(self.bridge, "get_task_mode_state"):
-                st = self.bridge.get_task_mode_state()
-                if isinstance(st, dict):
-                    self.task_mode_enabled_var.set(bool(st.get("enabled", False)))
-                    mode = str(st.get("mode", "off") or "off")
-                    if mode in ("purpose_id", "malware", "vuln", "custom"):
-                        self.task_mode_var.set(mode)
-                    else:
-                        self.task_mode_var.set("purpose_id")
-        except Exception:
-            pass
-
-        self.task_mode_check = ttk.Checkbutton(
-            taskmode_frame,
-            text="Task Mode",
-            variable=self.task_mode_enabled_var,
-            command=self._on_task_mode_change,
-        )
-        self.task_mode_check.grid(row=0, column=0, sticky="w")
-
-        ttk.Label(taskmode_frame, text="Mode:").grid(row=0, column=1, sticky="w", padx=(10, 4))
-        self.task_mode_combo = ttk.Combobox(
-            taskmode_frame,
-            textvariable=self.task_mode_var,
-            values=["purpose_id", "malware", "vuln", "custom"],
-            state="readonly",
-            width=12,
-        )
-        self.task_mode_combo.grid(row=0, column=2, sticky="w")
-        self.task_mode_combo.bind("<<ComboboxSelected>>", lambda e: self._on_task_mode_change())
-
-        self.task_mode_status = ttk.Label(taskmode_frame, text="Off", foreground="gray")
-        self.task_mode_status.grid(row=0, column=3, sticky="e")
-
-        # Apply initial status
-        self._on_task_mode_change()
-
         # Grep Layer Frame (NEW) - for hybrid search functionality
         # Note: This should be placed in the grid right after taskmode_frame (row 2, after row 2 which is taskmode)
         grep_container = ttk.Frame(self.frame)
@@ -233,15 +186,7 @@ class QueryInputPanel:
                 monitor_thread = threading.Thread(target=self._monitor_workflow_stage, daemon=True)
                 monitor_thread.start()
 
-                # Process query with full AI agent workflow
-                # Apply task mode (if enabled) to bridge before processing
-                try:
-                    if hasattr(self.bridge, "set_task_mode"):
-                        enabled = bool(self.task_mode_enabled_var.get())
-                        mode = str(self.task_mode_var.get())
-                        self.bridge.set_task_mode(enabled=enabled, mode=mode)
-                except Exception:
-                    pass
+                # Process query with orchestrator
 
                 result = self.bridge.process_query(query)
 
@@ -261,23 +206,6 @@ class QueryInputPanel:
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _on_task_mode_change(self):
-        """Update task mode status label and push state to bridge."""
-        enabled = bool(self.task_mode_enabled_var.get())
-        mode = str(self.task_mode_var.get())
-        if enabled:
-            self.task_mode_status.after(
-                0,
-                lambda: self.task_mode_status.config(text=f"On ({mode})", foreground="#2BC72B"),
-            )
-        else:
-            self.task_mode_status.after(0, lambda: self.task_mode_status.config(text="Off", foreground="gray"))
-
-        try:
-            if hasattr(self.bridge, "set_task_mode"):
-                self.bridge.set_task_mode(enabled=enabled, mode=mode)
-        except Exception:
-            pass
 
     def _on_grep_layer_change(self):
         """Handle grep layer checkbox changes."""

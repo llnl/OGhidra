@@ -37,12 +37,10 @@ class OllamaConfig(BaseModel):
     # Execution loop settings (INNER LOOP - tools per execution phase)
     max_execution_steps: int = Field(
         default=10,
+        ge=1,
+        le=50,
         description="Maximum tool executions per investigation (1-50)",
-        json_schema_extra={
-            "env": "MAX_EXECUTION_STEPS",
-            "minimum": 1,
-            "maximum": 50
-        }
+        env="MAX_EXECUTION_STEPS"
     )
     
     execution_loop_enabled: bool = Field(
@@ -1344,15 +1342,7 @@ class ExternalConfig(BaseModel):
     max_detailed_steps: int = Field(default=5, ge=1, le=50, env="MAX_DETAILED_STEPS")
     current_loop_max_chars: int = Field(default=2000, ge=100, le=50000, env="CURRENT_LOOP_MAX_CHARS")
 
-    prev_loop_max_chars: int = Field(
-        default=800,
-        description="Max chars for previous loop results",
-        json_schema_extra={
-            "env": "PREV_LOOP_MAX_CHARS",
-            "minimum": 50,
-            "maximum": 10000
-        }
-    )
+    prev_loop_max_chars: int = Field(default=800, ge=50, le=10000, env="PREV_LOOP_MAX_CHARS")
     older_loop_max_chars: int = Field(default=200, ge=20, le=2000, env="OLDER_LOOP_MAX_CHARS")
     
     # Logging
@@ -1463,15 +1453,7 @@ class CustomAPIConfig(BaseModel):
     tiered_context_enabled: bool = Field(default=True, env="TIERED_CONTEXT_ENABLED")
     
     # Sliding Window & Tiered Context Limits
-    max_detailed_steps: int = Field(
-        default=5,
-        description="Maximum steps to keep in full detail",
-        json_schema_extra={
-            "env": "MAX_DETAILED_STEPS",
-            "minimum": 1,
-            "maximum": 50
-        }
-    )
+    max_detailed_steps: int = Field(default=5, ge=1, le=50, env="MAX_DETAILED_STEPS")
     current_loop_max_chars: int = Field(default=2000, ge=100, le=50000, json_schema_extra={"env": "CURRENT_LOOP_MAX_CHARS"})
     prev_loop_max_chars: int = Field(default=800, ge=50, le=10000, json_schema_extra={"env": "PREV_LOOP_MAX_CHARS"})
     older_loop_max_chars: int = Field(default=200, ge=20, le=2000, json_schema_extra={"env": "OLDER_LOOP_MAX_CHARS"})

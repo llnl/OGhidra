@@ -24,7 +24,7 @@ class TestBridge(unittest.TestCase):
             self.bridge = Bridge(self.config)
 
         # Mock the GhidraMCP client
-        self.bridge.ghidra = MagicMock()
+        self.bridge.ghidra_client = MagicMock()
 
         # Mock the Ollama client
         self.bridge.llm_client = MagicMock()

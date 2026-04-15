@@ -1,0 +1,6 @@
+# Top-performing prompts from previous test
+Find functionality that resolves a sensitive system path (like /etc/shadow) in an obfuscated way and then reads it.
+Find malicious behavior that reads sensitive local files for credential harvesting, even if strings are obfuscated.
+Find suspicious file access indicative of credential stealing (e.g., reading password hashes) and subsequent processing.
+Locate code that steals credentials by opening a privileged system file and parsing it line-by-line.
+Find a misleadingly named function that performs credential harvesting by reading a privileged system file.

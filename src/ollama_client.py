@@ -167,11 +167,9 @@ class OllamaClient:
         self.temperature = getattr(config, 'temperature', 0.7)
         self.max_tokens = getattr(config, 'max_tokens', 2000)
         self.timeout = getattr(config, 'timeout', 120)  # Default 120 seconds for LLM requests
+        self.auth = (config.username, config.password) if getattr(config, 'username', None) and getattr(config, 'password', None) else None
         self.logger = logging.getLogger("ollama-client")
         self.model_map = config.model_map
-        self.auth = (config.username, config.password)
-        
-        # (getattr(config, "username", "foo"), getattr(config, "password", "bar"))
         
         # LLM Logging setup
         self.llm_logging_enabled = getattr(config, 'llm_logging_enabled', False)

@@ -39,7 +39,9 @@ class CommandParser:
         "get_function_xrefs": ["name"],
         "read_bytes": ["address"],
         "scan_function_pointer_tables": [],  # All params optional
-        "get_cached_result": ["result_id"],  # Retrieve full cached result
+        # NOTE: get_cached_result removed — depends on context_manager.result_cache
+        # which is empty in orchestrator mode (100% failure rate in E2E runs).
+        # The worker's tool execution ledger + hard dedup cache now serve this role.
     }
     
     # List of all supported commands for validation purposes
@@ -71,7 +73,7 @@ class CommandParser:
         "disassemble_function",
         "read_bytes",  # Read raw bytes from memory addresses
         "scan_function_pointer_tables",  # Scan for function pointer tables (vtables, dispatch tables)
-        "get_cached_result",  # Retrieve full content of a cached/summarized result
+        # get_cached_result removed — broken in orchestrator mode (see REQUIRED_PARAMETERS comment)
         "health_check",
         "check_health"
         # Disabled tools:
@@ -113,7 +115,6 @@ class CommandParser:
     def extract_commands(response: str) -> List[Tuple[str, Dict[str, Any]]]:
         """
         Extract commands and their parameters from an AI response.
-        Handles malformed responses gracefully and provides feedback.
         
         Args:
             response: The AI's response text
@@ -123,48 +124,17 @@ class CommandParser:
         """
         commands = []
         seen_commands = set()  # Track unique command signatures for deduplication
-        format_violations = []  # Track format violations for feedback
         
         # Clean up malformed output - sometimes AI outputs "EXECUTE: cmd()REASONING:"
         # Split on known keywords to isolate EXECUTE statements
         cleaned_response = response
-        for keyword in ['REASONING:', 'EXPLANATION:', 'INVESTIGATION', 'GOAL', 'I don\'t', 'I cannot', 'To proceed']:
+        for keyword in ['REASONING:', 'EXPLANATION:', 'INVESTIGATION', 'GOAL']:
             # Ensure newline before keyword if it follows a command
             cleaned_response = re.sub(
                 r'(\))\s*(' + keyword + ')', 
                 r'\1\n\2', 
                 cleaned_response
             )
-        
-        # Detect if there's explanatory text mixed with EXECUTE commands
-        lines = cleaned_response.split('\n')
-        has_mixed_text = False
-        execute_line_indices = []
-        
-        for idx, line in enumerate(lines):
-            if 'EXECUTE:' in line:
-                execute_line_indices.append(idx)
-                # Check if there's non-command text on the same line after the closing paren
-                match = re.match(r'EXECUTE:\s*[\w_]+\([^)]*\)(.*)', line)
-                if match and match.group(1).strip():
-                    trailing_text = match.group(1).strip()
-                    # Ignore if it's just another EXECUTE command
-                    if not trailing_text.startswith('EXECUTE:'):
-                        has_mixed_text = True
-                        format_violations.append(f"Text after EXECUTE on same line: '{trailing_text[:50]}...'")
-        
-        # Check if there's prose text between EXECUTE commands
-        if len(execute_line_indices) > 1:
-            for i in range(len(execute_line_indices) - 1):
-                start_idx = execute_line_indices[i]
-                end_idx = execute_line_indices[i + 1]
-                between_text = '\n'.join(lines[start_idx+1:end_idx]).strip()
-                if between_text and not between_text.startswith('EXECUTE:'):
-                    # Check if it's substantial prose (not just blank lines or short connectors)
-                    if len(between_text) > 30:
-                        has_mixed_text = True
-                        format_violations.append(f"Explanatory text between commands: '{between_text[:50]}...'")
-                        break
         
         # Find all command occurrences in the response using the correct format
         matches = re.finditer(CommandParser.COMMAND_PATTERN, cleaned_response, re.MULTILINE)
@@ -191,23 +161,12 @@ class CommandParser:
             
             # Skip if we've already seen this exact command
             if cmd_signature in seen_commands:
-                logger.info(f"⚠️  Duplicate command detected and removed: {command_name}({params_text[:30]}...)")
-                format_violations.append(f"Duplicate: {command_name}")
+                logger.debug(f"Skipping duplicate command: {command_name}")
                 continue
             
             seen_commands.add(cmd_signature)
             commands.append((command_name, params))
             logger.debug(f"Extracted command: {command_name} with params: {params}")
-        
-        # Log format violations for user feedback
-        if format_violations:
-            logger.warning(f"⚠️  FORMAT VIOLATIONS DETECTED ({len(format_violations)}):")
-            for violation in format_violations[:3]:  # Show first 3
-                logger.warning(f"   - {violation}")
-            logger.warning("📝 Reminder: Use ONLY 'EXECUTE: command()' lines with no additional text")
-            
-        if has_mixed_text and commands:
-            logger.warning("⚠️  LLM mixed explanatory text with EXECUTE commands - commands extracted successfully but format should be improved")
         
         # If no commands found with correct format, check for alternate formats
         if not commands:
@@ -553,64 +512,3 @@ class CommandParser:
                 )
                 
         return enhanced_error 
-    
-    @staticmethod
-    def generate_format_feedback(response: str, commands: List[Tuple[str, Dict[str, Any]]]) -> Optional[str]:
-        """
-        Generate feedback message when format violations are detected.
-        This can be returned to the LLM to help it improve.
-        
-        Args:
-            response: The original AI response
-            commands: The extracted commands
-            
-        Returns:
-            Feedback message if violations detected, None otherwise
-        """
-        issues = []
-        
-        # Check for text after EXECUTE commands
-        lines = response.split('\n')
-        for line in lines:
-            if 'EXECUTE:' in line:
-                match = re.match(r'EXECUTE:\s*[\w_]+\([^)]*\)(.*)', line)
-                if match and match.group(1).strip():
-                    trailing = match.group(1).strip()
-                    if not trailing.startswith('EXECUTE:'):
-                        issues.append(f"❌ Found text after EXECUTE command: '{trailing[:50]}'")
-                        break
-        
-        # Check for duplicate commands
-        if commands:
-            cmd_names = [cmd[0] for cmd in commands]
-            duplicates = [cmd for cmd in set(cmd_names) if cmd_names.count(cmd) > 1]
-            if duplicates:
-                issues.append(f"❌ Duplicate commands detected: {', '.join(duplicates)}")
-        
-        # Check for explanatory text between commands
-        execute_indices = [i for i, line in enumerate(lines) if 'EXECUTE:' in line]
-        if len(execute_indices) > 1:
-            for i in range(len(execute_indices) - 1):
-                between = '\n'.join(lines[execute_indices[i]+1:execute_indices[i+1]]).strip()
-                if between and len(between) > 20:
-                    issues.append(f"❌ Explanatory text found between EXECUTE commands")
-                    break
-        
-        if not issues:
-            return None
-        
-        feedback = ["⚠️  FORMAT VIOLATIONS DETECTED:"]
-        feedback.extend(issues)
-        feedback.append("")
-        feedback.append("📝 CORRECT FORMAT:")
-        feedback.append("EXECUTE: tool_name(param=\"value\")")
-        feedback.append("EXECUTE: another_tool(param=\"value\")")
-        feedback.append("")
-        feedback.append("❌ INCORRECT - Don't add explanatory text:")
-        feedback.append("EXECUTE: tool_name(param=\"value\")")
-        feedback.append("I don't yet have results...  ← WRONG")
-        feedback.append("")
-        feedback.append("Please output ONLY the EXECUTE lines with no additional text.")
-        
-        return "\n".join(feedback)
-

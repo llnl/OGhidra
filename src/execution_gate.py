@@ -7,7 +7,7 @@ events occur — giving the user a chance to review, redirect, or abort.
 
 Integration Points:
     - Bridge._execution_loop: gate checks before/after each tool execution
-    - Bridge.process_query_with_agentic_loop: handles gate-paused results
+    - Orchestrator/WorkerAgent: gate checks via ToolExecutor
     - UI: _ui_gate_callback for surfacing gate events to the user
 """
 

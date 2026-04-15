@@ -7,8 +7,9 @@ import json
 import logging
 import re
 import struct
-import time
-from typing import Any, Dict, List, Optional, Tuple
+import base64
+import threading
+from typing import Dict, Any, List, Optional, Tuple
 from urllib.parse import urlparse
 
 import httpx
@@ -78,6 +79,9 @@ class GhidraMCPClient:
         except Exception:
             self.default_port = 8080
             self.current_instance_port = 8080
+            
+        # Thread-safety: serialize all HTTP requests for future parallel workers
+        self._request_lock = threading.Lock()
 
         self.logger.info(f"Initialized GhidraMCP client at: {config.base_url}")
 
@@ -121,6 +125,9 @@ class GhidraMCPClient:
         """
         Perform a GET request safely and return the response lines.
 
+        Thread-safe: serialized via ``_request_lock`` so parallel workers
+        don't corrupt the underlying httpx session.
+
         Args:
             endpoint: The endpoint to request (without leading slash)
             params: Query parameters
@@ -139,8 +146,9 @@ class GhidraMCPClient:
 
         try:
             self.logger.debug(f"Sending GET request to GhidraMCP: {endpoint} with params: {params}")
-            response = self.client.get(url, params=params, timeout=self.config.timeout)
-            response.encoding = "utf-8"
+            with self._request_lock:
+                response = self.client.get(url, params=params, timeout=self.config.timeout)
+            response.encoding = 'utf-8'
 
             if response.status_code == 200:
                 return response.text.splitlines()
@@ -154,6 +162,8 @@ class GhidraMCPClient:
     def safe_post(self, endpoint: str, data: Dict[str, Any] | str) -> str:
         """
         Perform a POST request with data.
+
+        Thread-safe: serialized via ``_request_lock``.
 
         Args:
             endpoint: The endpoint to request (without leading slash)
@@ -171,12 +181,13 @@ class GhidraMCPClient:
         try:
             self.logger.debug(f"Sending POST request to GhidraMCP: {endpoint} with data: {data}")
 
-            if isinstance(data, dict):
-                response = self.client.post(url, data=data, timeout=self.config.timeout)
-            else:
-                response = self.client.post(url, data=data.encode("utf-8"), timeout=self.config.timeout)
+            with self._request_lock:
+                if isinstance(data, dict):
+                    response = self.client.post(url, data=data, timeout=self.config.timeout)
+                else:
+                    response = self.client.post(url, data=data.encode("utf-8"), timeout=self.config.timeout)
 
-            response.encoding = "utf-8"
+            response.encoding = 'utf-8'
 
             if response.status_code == 200:
                 return response.text.strip()
@@ -410,14 +421,16 @@ class GhidraMCPClient:
         offset = self._coerce_int_param(offset, param_name="offset", default=0)
         limit = self._coerce_int_param(limit, param_name="limit", default=100)
 
-        # Enforce safe limit to prevent context overflow (especially when no filter)
-        if limit > self.MAX_SAFE_LIMIT and not filter:
-            self.logger.warning(
-                self.LIMIT_WARNING_TEMPLATE.format(method="list_strings", limit=limit, max_safe=self.MAX_SAFE_LIMIT)
-                + " Consider using 'filter' parameter for targeted searches."
-            )
-            limit = self.MAX_SAFE_LIMIT
-
+        # Enforce safe limit to prevent context overflow
+        # With filter: allow up to 50 (targeted search returns less noise)
+        # Without filter: cap to MAX_SAFE_LIMIT (20)
+        max_limit = 50 if filter else self.MAX_SAFE_LIMIT
+        if limit > max_limit:
+            self.logger.warning(self.LIMIT_WARNING_TEMPLATE.format(
+                method="list_strings", limit=limit, max_safe=max_limit
+            ) + (" Consider using 'filter' parameter for targeted searches." if not filter else ""))
+            limit = max_limit
+        
         params = {"offset": offset, "limit": limit}
         if filter:
             params["filter"] = filter
