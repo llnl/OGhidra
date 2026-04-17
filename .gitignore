@@ -304,3 +304,6 @@ gradle-app.setting
 *.hprof
 
 # End of https://www.toptal.com/developers/gitignore/api/python,visualstudiocode,java,gradle,macos,windows
+
+# Project-specific artifacts.
+logs/*
