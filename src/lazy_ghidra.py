@@ -8,16 +8,20 @@ Bridge start up even when Ghidra is not yet running.
 import logging
 import threading
 
+from .ghidra_mcp_client import GhidraMCPClient
+
 logger = logging.getLogger(__name__)
 
 # Attributes that belong to the proxy itself — never forwarded.
-_PROXY_ATTRS = frozenset({
-    "_ghidra_cls",
-    "_init_kwargs",
-    "_real_client",
-    "_init_lock",
-    "_initialized",
-})
+_PROXY_ATTRS = frozenset(
+    {
+        "_ghidra_cls",
+        "_init_kwargs",
+        "_real_client",
+        "_init_lock",
+        "_initialized",
+    }
+)
 
 
 class LazyGhidraClient:
@@ -37,7 +41,7 @@ class LazyGhidraClient:
         client.list_functions()  # ← connection established HERE
     """
 
-    def __init__(self, ghidra_cls, **kwargs):
+    def __init__(self, ghidra_cls: GhidraMCPClient, **kwargs):
         object.__setattr__(self, "_ghidra_cls", ghidra_cls)
         object.__setattr__(self, "_init_kwargs", kwargs)
         object.__setattr__(self, "_real_client", None)
@@ -60,12 +64,8 @@ class LazyGhidraClient:
                 object.__setattr__(self, "_initialized", True)
                 logger.info("[LazyGhidraClient] Connection established.")
             except Exception as exc:
-                logger.error(
-                    "[LazyGhidraClient] Failed to connect to Ghidra: %s", exc
-                )
-                raise ConnectionError(
-                    f"Ghidra connection failed on first use: {exc}"
-                ) from exc
+                logger.error("[LazyGhidraClient] Failed to connect to Ghidra: %s", exc)
+                raise ConnectionError(f"Ghidra connection failed on first use: {exc}") from exc
 
     @property
     def is_connected(self) -> bool:

@@ -1350,7 +1350,7 @@ class OGhidraUI:
 
                 # Update Ghidra client configuration (always manual update as it's less complex)
                 if hasattr(self.bridge, "ghidra_client") and self.bridge.ghidra_client:
-                    self.bridge.ghidra_client.config.base_url = str(self.config.ghidra.base_url).rstrip("/")
+                    self.bridge.ghidra_client.config.base_url = str(self.config.ghidra_mcp.base_url).rstrip("/")
 
                 messagebox.showinfo(
                     "Configuration Updated",
@@ -1505,6 +1505,4 @@ def launch_ui(bridge: Bridge, config: BridgeConfig):
         logger.error(f"Error launching UI: {e}")
         print(f"Error launching UI: {e}")
         return False
-
-    return True
     return True

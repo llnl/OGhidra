@@ -54,13 +54,14 @@ def setup_logging(config):
     if config.log_console:
         # Use UTF-8 encoding for console output
         import codecs
+
         # Create a StreamHandler with UTF-8 encoding for Windows compatibility
         class Utf8StreamHandler(logging.StreamHandler):
             def __init__(self, stream=None):
                 super().__init__(stream)
                 if stream is None:
                     # Use UTF-8 encoding for stdout
-                    self.stream = codecs.getwriter('utf-8')(sys.stdout.buffer)
+                    self.stream = codecs.getwriter("utf-8")(sys.stdout.buffer)
 
             def emit(self, record):
                 try:
@@ -74,7 +75,7 @@ def setup_logging(config):
 
     if config.log_file_enabled:
         # Use UTF-8 encoding for file output
-        handlers.append(logging.FileHandler(config.log_file, encoding='utf-8'))
+        handlers.append(logging.FileHandler(config.log_file, encoding="utf-8"))
 
     logging.basicConfig(
         level=getattr(logging, config.log_level),
@@ -130,10 +131,11 @@ class Bridge:
             self.logger.info("Using Ollama as LLM provider")
 
         # Initialize clients
-        self.ghidra_client = LazyGhidraClient(GhidraMCPClient, config=self.bridge_config, ollama_client=self._ollama_client)
+        # Note: self.ollama is used as the generic LLM client name to avoid massive refactoring
+        self.ghidra_client = LazyGhidraClient(GhidraMCPClient, config=self.bridge_config.ghidra_mcp, ollama_client=self.ollama)
 
         # Set Ollama client for embeddings
-        Bridge.set_ollama_client(self.llm_client)
+        Bridge.set_ollama_client(self.ollama)
 
         # Command parser for extracting tool calls
         self.command_parser = CommandParser()
@@ -4531,11 +4533,11 @@ def main():
     if args.ollama_url:
         config.ollama.base_url = args.ollama_url
     if args.ghidra_url:
-        config.ghidra.base_url = args.ghidra_url
+        config.ghidra_mcp.base_url = args.ghidra_url
     if args.model:
         config.ollama.model = args.model
     if args.mock:
-        config.ghidra.mock_mode = True
+        config.ghidra_mcp.mock_mode = True
 
     # Handle model switching - update the model map
     if args.planning_model:
@@ -4547,7 +4549,7 @@ def main():
 
     # Initialize clients
     ollama_client = OllamaClient(config.ollama)
-    ghidra_client = GhidraMCPClient(config.ghidra)
+    ghidra_client = GhidraMCPClient(config.ghidra_mcp)
 
     # List models if requested
     if args.list_models:

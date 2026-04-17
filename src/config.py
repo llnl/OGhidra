@@ -3,11 +3,13 @@ Configuration module for the Ollama-GhidraMCP Bridge.
 """
 
 import os
-from pydantic import BaseModel, Field, AnyHttpUrl, functional_validators
+import re
+from typing import Any, ClassVar, Dict, List, Optional
+
+from pydantic import AnyHttpUrl, BaseModel, Field, functional_validators
 from pydantic.functional_validators import field_validator
 from pydantic_settings import BaseSettings
-from typing import Optional, Dict, Any, List, ClassVar
-import re
+
 
 class ToolParameters(BaseModel):
     type: str = "object"
@@ -1542,7 +1544,7 @@ class BridgeConfig(BaseSettings):
     external: ExternalConfig = Field(default_factory=ExternalConfig)
     custom_api: CustomAPIConfig = Field(default_factory=CustomAPIConfig)
     llm_provider: str = Field(default="ollama", description="LLM provider: 'ollama', 'google' (legacy), 'external', or 'custom_api'", json_schema_extra={"env": "LLM_PROVIDER"})
-    ghidra: GhidraMCPConfig = Field(default_factory=GhidraMCPConfig)
+    ghidra_mcp: GhidraMCPConfig = Field(default_factory=GhidraMCPConfig)
     session_history: SessionHistoryConfig = Field(default_factory=SessionHistoryConfig)
     
     log_level: str = Field(default="INFO", description="Logging level")

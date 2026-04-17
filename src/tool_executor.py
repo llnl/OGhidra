@@ -21,7 +21,12 @@ are injected at construction time.
 
 import logging
 import re
-from typing import Dict, Any, List, Optional, Callable, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
+from .cag import CAGManager
+from .command_parser import CommandParser
+from .context_manager import ContextManager
+from .ghidra_mcp_client import GhidraMCPClient
 
 
 class ToolExecutor:
@@ -36,22 +41,24 @@ class ToolExecutor:
     """
 
     # Commands that should NOT be cached (real-time or state-dependent)
-    NO_CACHE_COMMANDS = frozenset([
-        "list_imports",
-        "list_exports",
-        "list_strings",
-        "list_segments",
-        "get_current_address",
-        "check_health",
-        "health_check",
-    ])
+    NO_CACHE_COMMANDS = frozenset(
+        [
+            "list_imports",
+            "list_exports",
+            "list_strings",
+            "list_segments",
+            "get_current_address",
+            "check_health",
+            "health_check",
+        ]
+    )
 
     def __init__(
         self,
-        ghidra_client,
-        command_parser,
-        context_manager=None,
-        cag_manager=None,
+        ghidra_client: GhidraMCPClient,
+        command_parser: CommandParser,
+        context_manager: ContextManager | None = None,
+        cag_manager: CAGManager | None = None,
         enable_cag: bool = False,
         logger: Optional[logging.Logger] = None,
         on_command_executed: Optional[Callable] = None,
@@ -152,13 +159,9 @@ class ToolExecutor:
                     raise ValueError(enhanced_unknown_command_error)
 
             # ----- 3. Parameter validation -----
-            is_valid, error_message = self.command_parser.validate_command_parameters(
-                normalized_command, params
-            )
+            is_valid, error_message = self.command_parser.validate_command_parameters(normalized_command, params)
             if not is_valid:
-                enhanced_error = self.command_parser.get_enhanced_error_message(
-                    command_name, params, error_message
-                )
+                enhanced_error = self.command_parser.get_enhanced_error_message(command_name, params, error_message)
                 raise ValueError(enhanced_error)
 
             # ----- 4. Semantic string category translation (list_strings) -----
@@ -175,9 +178,7 @@ class ToolExecutor:
                         self.logger.info(f"🎯 Using CAG cached result for {normalized_command}")
                         return {"result": cached_result, "source": "cag_cache"}
                     else:
-                        guidance_msg = (
-                            f"Command '{normalized_command}' skipped due to recent execution. {skip_reason}"
-                        )
+                        guidance_msg = f"Command '{normalized_command}' skipped due to recent execution. {skip_reason}"
                         return {"result": guidance_msg, "source": "cag_skip", "skipped": True}
 
             # ----- 6. Cache lookup -----
@@ -219,9 +220,7 @@ class ToolExecutor:
 
         except Exception as e:
             error_message = str(e)
-            enhanced_error = self.command_parser.get_enhanced_error_message(
-                command_name, params, error_message
-            )
+            enhanced_error = self.command_parser.get_enhanced_error_message(command_name, params, error_message)
             raise ValueError(enhanced_error) from e
 
     # ------------------------------------------------------------------
@@ -251,9 +250,7 @@ class ToolExecutor:
         """
         normalized_command = self._normalize_command_name(command_name)
         available_commands = [
-            name
-            for name in dir(self.ghidra_client)
-            if not name.startswith("_") and callable(getattr(self.ghidra_client, name))
+            name for name in dir(self.ghidra_client) if not name.startswith("_") and callable(getattr(self.ghidra_client, name))
         ]
 
         if normalized_command:
@@ -276,8 +273,7 @@ class ToolExecutor:
             )
         elif command_name == "disassemble":
             suggestion_msg = (
-                "\nThere is no 'disassemble' command. "
-                "Try 'decompile_function_by_address(address=\"1400011a8\")' instead."
+                "\nThere is no 'disassemble' command. " "Try 'decompile_function_by_address(address=\"1400011a8\")' instead."
             )
 
         error_message = f"Unknown command: {command_name}{suggestion_msg}"
@@ -306,9 +302,7 @@ class ToolExecutor:
             for orig_key, new_key in command_specific_mappings[command_name].items():
                 if orig_key in params:
                     normalized_params[new_key] = params[orig_key]
-                    logging.info(
-                        f"Normalized parameter '{orig_key}' to '{new_key}' for command '{command_name}'"
-                    )
+                    logging.info(f"Normalized parameter '{orig_key}' to '{new_key}' for command '{command_name}'")
 
         # General mappings
         for key, value in params.items():
@@ -316,9 +310,7 @@ class ToolExecutor:
                 continue
             norm_key = param_mappings.get(key, key)
             if norm_key != key:
-                logging.info(
-                    f"Normalized parameter '{key}' to '{norm_key}' for command '{command_name}'"
-                )
+                logging.info(f"Normalized parameter '{key}' to '{norm_key}' for command '{command_name}'")
             normalized_params[norm_key] = value
 
         return normalized_params
@@ -364,9 +356,7 @@ class ToolExecutor:
         else:
             return self.decompilation_cache.get(cache_key)
 
-    def _cache_result(
-        self, command_name: str, cache_key: str, params: Dict[str, Any], result: Any
-    ):
+    def _cache_result(self, command_name: str, cache_key: str, params: Dict[str, Any], result: Any):
         """Store a result in the appropriate cache."""
         if command_name in self.NO_CACHE_COMMANDS:
             return
@@ -452,9 +442,7 @@ class ToolExecutor:
             }
             if category in mapping:
                 params["filter"] = mapping[category]
-                self.logger.info(
-                    f"🔄 Converted category='{category}' to filter='{mapping[category]}' (approximate)"
-                )
+                self.logger.info(f"🔄 Converted category='{category}' to filter='{mapping[category]}' (approximate)")
 
         return params
 

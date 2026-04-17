@@ -1,6 +1,6 @@
+import logging
 import threading
 import tkinter as tk
-import logging
 from pathlib import Path
 from queue import Queue
 from tkinter import messagebox, ttk
@@ -18,7 +18,7 @@ class ServerConfigDialog:
         self._logger = logging.getLogger("ollama-ghidra-bridge.ui")
 
         # Queue for thread-safe UI updates
-        self.ui_update_queue: Queue[Tuple[Literal['messagebox'], Any]] = Queue()
+        self.ui_update_queue: Queue[Tuple[Literal["messagebox"], Any]] = Queue()
 
         # Create the dialog window
         self.dialog = tk.Toplevel(parent)
@@ -182,7 +182,7 @@ class ServerConfigDialog:
         ghidra_frame.pack(fill="x", pady=(0, 10))
 
         ttk.Label(ghidra_frame, text="Base URL:").grid(row=0, column=0, sticky="w", pady=5)
-        self.ghidra_url_var = tk.StringVar(value=str(self.config.ghidra.base_url))
+        self.ghidra_url_var = tk.StringVar(value=str(self.config.ghidra_mcp.base_url))
         ghidra_entry = ttk.Entry(ghidra_frame, textvariable=self.ghidra_url_var, width=50)
         ghidra_entry.grid(row=0, column=1, sticky="ew", padx=(10, 0), pady=5)
 
@@ -400,7 +400,7 @@ class ServerConfigDialog:
                 results.append(f"GhidraMCP: ❌ {str(e)}")
 
             # Add results to queue for thread-safe UI update
-            self.ui_update_queue.put(('messagebox', ("Connection Test", "\n".join(results))))
+            self.ui_update_queue.put(("messagebox", ("Connection Test", "\n".join(results))))
 
         threading.Thread(target=test, daemon=True).start()
 
@@ -419,7 +419,7 @@ class ServerConfigDialog:
             self.config.ollama.base_url = ollama_url
             self.config.ollama.model = self.ollama_model_var.get()
             self.config.ollama.embedding_model = self.embedding_model_var.get()
-            self.config.ghidra.base_url = ghidra_url
+            self.config.ghidra_mcp.base_url = ghidra_url
 
             # Google / External Config
             self.config.external.provider = self.ext_provider_var.get()
@@ -522,7 +522,7 @@ class ServerConfigDialog:
             while not self.ui_update_queue.empty():
                 update_type, params = self.ui_update_queue.get_nowait()
 
-                if update_type == 'messagebox':
+                if update_type == "messagebox":
                     title, message = params
                     messagebox.showinfo(title, message)
 
