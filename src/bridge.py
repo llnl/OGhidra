@@ -131,11 +131,11 @@ class Bridge:
             self.logger.info("Using Ollama as LLM provider")
 
         # Initialize clients
-        # Note: self.ollama is used as the generic LLM client name to avoid massive refactoring
-        self.ghidra_client = LazyGhidraClient(GhidraMCPClient, config=self.bridge_config.ghidra_mcp, ollama_client=self.ollama)
+        # Note: self._ollama_client is used as the generic LLM client name to avoid massive refactoring
+        self.ghidra_client = LazyGhidraClient(GhidraMCPClient, config=self.bridge_config.ghidra_mcp, ollama_client=self._ollama_client)
 
         # Set Ollama client for embeddings
-        Bridge.set_ollama_client(self.ollama)
+        Bridge.set_ollama_client(self._ollama_client)
 
         # Command parser for extracting tool calls
         self.command_parser = CommandParser()
@@ -1561,7 +1561,7 @@ You can help analyze binary files by executing commands through GhidraMCP."""
         )
 
         orchestrator = Orchestrator(
-            llm_client=self.ollama,
+            llm_client=self._ollama_client,
             tool_executor=self.tool_executor,
             blackboard=blackboard,
             command_parser=self.command_parser,
@@ -4390,7 +4390,7 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
 
         generator = ReportGenerator(
             ghidra_client=self.ghidra_client,
-            llm_client=self.ollama,
+            llm_client=self._ollama_client,
             session=self.session,
             cag_manager=getattr(self, "cag_manager", None),
             enable_cag=getattr(self, "enable_cag", False),

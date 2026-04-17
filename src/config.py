@@ -4,9 +4,9 @@ Configuration module for the Ollama-GhidraMCP Bridge.
 
 import os
 import re
-from typing import Any, ClassVar, Dict, List, Optional
 
 from pydantic import AnyHttpUrl, BaseModel, Field, functional_validators
+from typing import Any, ClassVar, Dict, List, Optional
 from pydantic.functional_validators import field_validator
 from pydantic_settings import BaseSettings
 
@@ -16,24 +16,41 @@ class ToolParameters(BaseModel):
     properties: Dict[str, Any]
     required: List[str] = []
 
+
 class Function(BaseModel):
     name: str
     description: str
     parameters: ToolParameters
 
+
 class Tool(BaseModel):
     type: str = "function"
     function: Function
 
+
 class OllamaConfig(BaseModel):
     """Configuration for the Ollama client."""
+
     base_url: AnyHttpUrl = Field(default="http://localhost:11434", json_schema_extra={"env": "OLLAMA_BASE_URL"})
     # Default model. This is primarily set by the OLLAMA_MODEL environment variable.
     # llama3.1 is recommended for features like tool calling.
-    model: str = Field(default="gemma3:27b", min_length=1, description="Model name cannot be empty", json_schema_extra={"env": "OLLAMA_MODEL"})
+    model: str = Field(
+        default="gemma3:27b", min_length=1, description="Model name cannot be empty", json_schema_extra={"env": "OLLAMA_MODEL"}
+    )
     # Embedding model for vector operations
-    embedding_model: str = Field(default="nomic-embed-text", min_length=1, description="Embedding model name cannot be empty", json_schema_extra={"env": "OLLAMA_EMBEDDING_MODEL"})
-    timeout: int = Field(ge=1, le=600, default=120, description="Timeout for requests in seconds (1-600)", json_schema_extra={"env": "OLLAMA_TIMEOUT"})
+    embedding_model: str = Field(
+        default="nomic-embed-text",
+        min_length=1,
+        description="Embedding model name cannot be empty",
+        json_schema_extra={"env": "OLLAMA_EMBEDDING_MODEL"},
+    )
+    timeout: int = Field(
+        ge=1,
+        le=600,
+        default=120,
+        description="Timeout for requests in seconds (1-600)",
+        json_schema_extra={"env": "OLLAMA_TIMEOUT"},
+    )
     username: str = Field(default=None, json_schema_extra={"env": "OLLAMA_USERNAME"})
     password: str = Field(default=None, json_schema_extra={"env": "OLLAMA_PASSWORD"})
 
@@ -41,19 +58,15 @@ class OllamaConfig(BaseModel):
     max_execution_steps: int = Field(
         default=10,
         description="Maximum tool executions per investigation (1-50)",
-        json_schema_extra={
-            "env": "MAX_EXECUTION_STEPS",
-            "minimum": 1,
-            "maximum": 50
-        }
+        json_schema_extra={"env": "MAX_EXECUTION_STEPS", "minimum": 1, "maximum": 50},
     )
-    
+
     execution_loop_enabled: bool = Field(
         default=True,
         description="Enable multi-tool execution loop for comprehensive investigations",
-        json_schema_extra={"env": "EXECUTION_LOOP_ENABLED"}
+        json_schema_extra={"env": "EXECUTION_LOOP_ENABLED"},
     )
-    
+
     # Orchestrator settings (sub-agent architecture)
     orchestrator_max_cycles: int = Field(
         default=15,
@@ -119,8 +132,7 @@ class OllamaConfig(BaseModel):
         ge=2,
         le=10,
         description=(
-            "Number of consecutive cycles with zero coverage gain before "
-            "auto-terminating the investigation (2-10)"
+            "Number of consecutive cycles with zero coverage gain before " "auto-terminating the investigation (2-10)"
         ),
         json_schema_extra={"env": "COVERAGE_STALL_THRESHOLD"},
     )
@@ -129,8 +141,7 @@ class OllamaConfig(BaseModel):
         ge=2,
         le=5,
         description=(
-            "Number of consecutive cycles where the LLM produces tasks with "
-            "identical goals before auto-terminating (2-5)"
+            "Number of consecutive cycles where the LLM produces tasks with " "identical goals before auto-terminating (2-5)"
         ),
         json_schema_extra={"env": "ORCHESTRATOR_DOOM_LOOP_THRESHOLD"},
     )
@@ -143,16 +154,30 @@ class OllamaConfig(BaseModel):
     llm_log_tokens: bool = Field(default=True, json_schema_extra={"env": "LLM_LOG_TOKENS"})
     llm_log_timing: bool = Field(default=True, json_schema_extra={"env": "LLM_LOG_TIMING"})
     llm_log_format: str = Field(default="json", json_schema_extra={"env": "LLM_LOG_FORMAT"})  # "json" or "text"
-    
+
     # Live CoT View
-    show_reasoning: bool = Field(default=True, description="Print Chain of Thought reasoning to stdout", json_schema_extra={"env": "OLLAMA_SHOW_REASONING"})
-    
+    show_reasoning: bool = Field(
+        default=True,
+        description="Print Chain of Thought reasoning to stdout",
+        json_schema_extra={"env": "OLLAMA_SHOW_REASONING"},
+    )
+
     # Request Delay
-    request_delay: float = Field(default=0.0, ge=0.0, description="Delay in seconds before each request", json_schema_extra={"env": "OLLAMA_REQUEST_DELAY"})
-    
+    request_delay: float = Field(
+        default=0.0,
+        ge=0.0,
+        description="Delay in seconds before each request",
+        json_schema_extra={"env": "OLLAMA_REQUEST_DELAY"},
+    )
+
     # Request Retries
-    max_retries: int = Field(default=3, ge=0, description="Maximum number of retries for transient errors", json_schema_extra={"env": "OLLAMA_MAX_RETRIES"})
-    
+    max_retries: int = Field(
+        default=3,
+        ge=0,
+        description="Maximum number of retries for transient errors",
+        json_schema_extra={"env": "OLLAMA_MAX_RETRIES"},
+    )
+
     # Context Budget Management
     context_budget: int = Field(
         default=80000,
@@ -161,7 +186,7 @@ class OllamaConfig(BaseModel):
         description="Maximum context tokens for prompts (4000-2000000)",
         json_schema_extra={"env": "CONTEXT_BUDGET"},
     )
-    
+
     context_budget_execution: float = Field(
         default=0.5,
         ge=0.1,
@@ -169,25 +194,25 @@ class OllamaConfig(BaseModel):
         description="Fraction of context budget for execution results (0.1-0.8)",
         json_schema_extra={"env": "CONTEXT_BUDGET_EXECUTION"},
     )
-    
+
     enable_result_summarization: bool = Field(
         default=True,
         description="Use LLM to summarize large results instead of truncating",
         json_schema_extra={"env": "ENABLE_RESULT_SUMMARIZATION"},
     )
-    
+
     result_cache_enabled: bool = Field(
         default=True,
         description="Cache full results and pass references to AI",
         json_schema_extra={"env": "RESULT_CACHE_ENABLED"},
     )
-    
+
     tiered_context_enabled: bool = Field(
         default=True,
         description="Use tiered context (detailed recent, summarized older)",
         json_schema_extra={"env": "TIERED_CONTEXT_ENABLED"},
     )
-    
+
     # Sliding Window & Tiered Context Limits
     # These scale proportionally to CONTEXT_BUDGET (chars ≈ tokens × 4)
     max_detailed_steps: int = Field(
@@ -197,7 +222,7 @@ class OllamaConfig(BaseModel):
         description="Maximum execution steps to keep in full detail (sliding window)",
         json_schema_extra={"env": "MAX_DETAILED_STEPS"},
     )
-    
+
     current_loop_max_chars: int = Field(
         default=4000,
         ge=100,
@@ -205,15 +230,15 @@ class OllamaConfig(BaseModel):
         description="Max chars for current loop results (full details)",
         json_schema_extra={"env": "CURRENT_LOOP_MAX_CHARS"},
     )
-    
+
     prev_loop_max_chars: int = Field(
         default=800,
         ge=50,
         le=10000,
         description="Max chars for previous loop results (bullet summaries)",
-        json_schema_extra={"env": "PREV_LOOP_MAX_CHARS"}
+        json_schema_extra={"env": "PREV_LOOP_MAX_CHARS"},
     )
-    
+
     older_loop_max_chars: int = Field(
         default=200,
         ge=20,
@@ -221,7 +246,7 @@ class OllamaConfig(BaseModel):
         description="Max chars for older loop results (one-line refs)",
         json_schema_extra={"env": "OLDER_LOOP_MAX_CHARS"},
     )
-    
+
     # Hybrid Context Management Settings
     top_n_per_category: int = Field(
         default=10,
@@ -230,13 +255,13 @@ class OllamaConfig(BaseModel):
         description="Maximum items per result category in ranked results",
         json_schema_extra={"env": "TOP_N_PER_CATEGORY"},
     )
-    
+
     enable_correlation_hints: bool = Field(
         default=True,
         description="Build cross-tool address correlations for analysis",
         json_schema_extra={"env": "ENABLE_CORRELATION_HINTS"},
     )
-    
+
     min_correlation_mentions: int = Field(
         default=2,
         ge=2,
@@ -244,26 +269,26 @@ class OllamaConfig(BaseModel):
         description="Minimum tool mentions to surface a correlation",
         json_schema_extra={"env": "MIN_CORRELATION_MENTIONS"},
     )
-    
+
     # Interactive Execution Gate (OpenCode-inspired)
     execution_gate_enabled: bool = Field(
         default=True,
         description="Enable interactive execution gate for pause/review during loops",
         json_schema_extra={"env": "EXECUTION_GATE_ENABLED"},
     )
-    
+
     gate_on_artifact: bool = Field(
         default=True,
         description="Pause when critical artifact found in tool results",
         json_schema_extra={"env": "GATE_ON_ARTIFACT"},
     )
-    
+
     gate_on_repetition: bool = Field(
         default=True,
         description="Pause on N identical tool calls (doom-loop detection)",
         json_schema_extra={"env": "GATE_ON_REPETITION"},
     )
-    
+
     gate_repetition_threshold: int = Field(
         default=3,
         ge=2,
@@ -271,27 +296,27 @@ class OllamaConfig(BaseModel):
         description="How many identical calls before triggering repetition gate",
         json_schema_extra={"env": "GATE_REPETITION_THRESHOLD"},
     )
-    
+
     gate_on_high_risk_tool: bool = Field(
         default=False,
         description="Pause before destructive tools (rename_function, etc.)",
         json_schema_extra={"env": "GATE_ON_HIGH_RISK_TOOL"},
     )
-    
+
     gate_auto_resume_timeout: int = Field(
         default=0,
         ge=0,
         description="Seconds before auto-resuming after gate (0 = wait forever)",
         json_schema_extra={"env": "GATE_AUTO_RESUME_TIMEOUT"},
     )
-    
+
     # Session Compaction (OpenCode-inspired)
     compaction_enabled: bool = Field(
         default=True,
         description="Enable smart context pruning to prevent overflow",
         json_schema_extra={"env": "COMPACTION_ENABLED"},
     )
-    
+
     compaction_threshold: float = Field(
         default=0.75,
         ge=0.3,
@@ -299,405 +324,435 @@ class OllamaConfig(BaseModel):
         description="Context usage fraction that triggers compaction (0.3-0.95)",
         json_schema_extra={"env": "COMPACTION_THRESHOLD"},
     )
-    
+
     compaction_auto: bool = Field(
         default=True,
         description="Auto-compact between agentic cycles when threshold exceeded",
         json_schema_extra={"env": "COMPACTION_AUTO"},
     )
-    
+
     # Enable or disable Context-Augmented Generation
     enable_cag: bool = True
-    
+
     # Review Phase Configuration
     review_thoroughness: str = Field(
         default="standard",
         description="Review depth: 'basic', 'standard', or 'thorough'",
         json_schema_extra={"env": "REVIEW_THOROUGHNESS"},
     )
-    
-    @functional_validators.field_validator('review_thoroughness')
+
+    @functional_validators.field_validator("review_thoroughness")
     def validate_review_thoroughness(cls, v):
         """Validate review thoroughness level."""
-        valid_levels = {'basic', 'standard', 'thorough'}
+        valid_levels = {"basic", "standard", "thorough"}
         v_lower = v.lower()
         if v_lower not in valid_levels:
-            raise ValueError(f'review_thoroughness must be one of {valid_levels}')
+            raise ValueError(f"review_thoroughness must be one of {valid_levels}")
         return v_lower
-    @functional_validators.field_validator('model')
+
+    @functional_validators.field_validator("model")
     def validate_model_name(cls, v):
         """Ensure model name follows expected patterns."""
-        if not re.match(r'^[a-zA-Z0-9][a-zA-Z0-9_\-:.]*$', v):
-            raise ValueError('Model name contains invalid characters. Use only alphanumeric, underscore, dash, colon, and dot.')
+        if not re.match(r"^[a-zA-Z0-9][a-zA-Z0-9_\-:.]*$", v):
+            raise ValueError("Model name contains invalid characters. Use only alphanumeric, underscore, dash, colon, and dot.")
         return v
-    
-    @functional_validators.field_validator('model_map')
+
+    @functional_validators.field_validator("model_map")
     def validate_model_phases(cls, v):
         """Validate that model_map contains valid phase names."""
-        valid_phases = {'planning', 'execution', 'analysis', 'evaluation', 'review', 'orchestrator'}
+        valid_phases = {"planning", "execution", "analysis", "evaluation", "review", "orchestrator"}
         invalid_phases = set(v.keys()) - valid_phases
         if invalid_phases:
-            raise ValueError(f'Invalid phases in model_map: {invalid_phases}. Valid phases are: {valid_phases}')
+            raise ValueError(f"Invalid phases in model_map: {invalid_phases}. Valid phases are: {valid_phases}")
         return v
-    
+
     # Model map for different phases of the simplified agentic loop
     # If a phase is not in the map or the value is empty, the default model will be used
-    model_map: Dict[str, str] = Field(default_factory=lambda: {
-        "planning": "",       # Model for planning phase 
-        "execution": "",      # Model for tool execution phase
-        "analysis": ""        # Model for final analysis phase
-    })
-    
+    model_map: Dict[str, str] = Field(
+        default_factory=lambda: {
+            "planning": "",  # Model for planning phase
+            "execution": "",  # Model for tool execution phase
+            "analysis": "",  # Model for final analysis phase
+        }
+    )
+
     # Simplified system prompt
     default_system_prompt: str = """
     You are an AI assistant specialized in reverse engineering with Ghidra.
     You can help analyze binary files by executing commands through GhidraMCP.
     """
-    
+
     # Define tools for Ollama's tool calling API
-    tools: List[Tool] = Field(default_factory=lambda: [
-        {
-            "type": "function",
-            "function": {
-                "name": "list_methods",
-                "description": "List all function names with pagination",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "offset": {"type": "integer", "description": "Offset to start from"},
-                        "limit": {"type": "integer", "description": "Maximum number of results"}
-                    }
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "list_classes",
-                "description": "List all namespace/class names with pagination",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "offset": {"type": "integer", "description": "Offset to start from"},
-                        "limit": {"type": "integer", "description": "Maximum number of results"}
-                    }
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "decompile_function",
-                "description": "Decompile a specific function by name. Returns lines of code with pagination.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "name": {"type": "string", "description": "Function name"},
-                        "offset": {
-                            "type": "integer",
-                            "description": "Line number offset to start reading from (default: 0)",
-                            "default": 0
+    tools: List[Tool] = Field(
+        default_factory=lambda: [
+            {
+                "type": "function",
+                "function": {
+                    "name": "list_methods",
+                    "description": "List all function names with pagination",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "offset": {"type": "integer", "description": "Offset to start from"},
+                            "limit": {"type": "integer", "description": "Maximum number of results"},
                         },
-                        "limit": {
-                            "type": "integer",
-                            "description": "Maximum number of lines to return (default: 500)",
-                            "default": 500
-                        }
                     },
-                    "required": ["name"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "rename_function",
-                "description": "Rename a function",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "old_name": {"type": "string", "description": "Current function name"},
-                        "new_name": {"type": "string", "description": "New function name"}
-                    },
-                    "required": ["old_name", "new_name"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "rename_function_by_address",
-                "description": "Rename function by address (IMPORTANT: Use numerical addresses only, not function names)",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "function_address": {"type": "string", "description": "Function address (numerical only, like '1800011a8')"},
-                        "new_name": {"type": "string", "description": "New function name"}
-                    },
-                    "required": ["function_address", "new_name"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "list_functions",
-                "description": "List all functions in the database with pagination. Returns function names and addresses. Use offset and limit to navigate through results. Returns pagination metadata showing total count and next page info.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "offset": {
-                            "type": "integer",
-                            "description": "Offset to start from (default: 0)"
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "list_classes",
+                    "description": "List all namespace/class names with pagination",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "offset": {"type": "integer", "description": "Offset to start from"},
+                            "limit": {"type": "integer", "description": "Maximum number of results"},
                         },
-                        "limit": {
-                            "type": "integer",
-                            "description": "Maximum number of results (default: 100, recommended: 50-100)"
-                        }
-                    }
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "decompile_function_by_address",
-                "description": "Decompile function at address. Returns lines of code with pagination.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "address": {"type": "string", "description": "Function address"},
-                        "offset": {
-                            "type": "integer",
-                            "description": "Line number offset to start reading from (default: 0)",
-                            "default": 0
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "decompile_function",
+                    "description": "Decompile a specific function by name. Returns lines of code with pagination.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string", "description": "Function name"},
+                            "offset": {
+                                "type": "integer",
+                                "description": "Line number offset to start reading from (default: 0)",
+                                "default": 0,
+                            },
+                            "limit": {
+                                "type": "integer",
+                                "description": "Maximum number of lines to return (default: 500)",
+                                "default": 500,
+                            },
                         },
-                        "limit": {
-                            "type": "integer",
-                            "description": "Maximum number of lines to return (default: 500)",
-                            "default": 500
-                        }
+                        "required": ["name"],
                     },
-                    "required": ["address"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "disassemble_function",
-                "description": "Get assembly code (address: instruction; comment) for a function. IMPORTANT: Use numerical addresses only (e.g., '140003e50'), not function names.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "address": {"type": "string", "description": "Function address (numerical only, like '140003e50')"}
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "rename_function",
+                    "description": "Rename a function",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "old_name": {"type": "string", "description": "Current function name"},
+                            "new_name": {"type": "string", "description": "New function name"},
+                        },
+                        "required": ["old_name", "new_name"],
                     },
-                    "required": ["address"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "analyze_function",
-                "description": "Analyze a function including its code and all functions it calls",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "address": {"type": "string", "description": "Function address (optional)"}
-                    }
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "list_imports",
-                "description": "List imported symbols in the program. Returns name, address, reference count, and caller names.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "offset": {"type": "integer", "description": "Offset to start from"},
-                        "limit": {"type": "integer", "description": "Maximum number of results"}
-                    }
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "list_exports", 
-                "description": "List exported functions/symbols in the program",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "offset": {"type": "integer", "description": "Offset to start from"},
-                        "limit": {"type": "integer", "description": "Maximum number of results"}
-                    }
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "list_segments",
-                "description": "List all memory segments in the program",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "offset": {"type": "integer", "description": "Offset to start from"},
-                        "limit": {"type": "integer", "description": "Maximum number of results"}
-                    }
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "list_strings",
-                "description": "List defined strings or search by substring (alias: string_search)",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "offset": {"type": "integer", "description": "Pagination offset"},
-                        "limit": {"type": "integer", "description": "Maximum number of results"},
-                        "filter": {"type": "string", "description": "Substring to filter results"}
-                    }
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "search_functions_by_name",
-                "description": "Search for functions by name substring",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "query": {"type": "string", "description": "Search query string"},
-                        "offset": {"type": "integer", "description": "Offset to start from"},
-                        "limit": {"type": "integer", "description": "Maximum number of results"}
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "rename_function_by_address",
+                    "description": "Rename function by address (IMPORTANT: Use numerical addresses only, not function names)",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "function_address": {
+                                "type": "string",
+                                "description": "Function address (numerical only, like '1800011a8')",
+                            },
+                            "new_name": {"type": "string", "description": "New function name"},
+                        },
+                        "required": ["function_address", "new_name"],
                     },
-                    "required": ["query"]
-                }
-            }
-        },
-        # --- Cross-reference helpers (new) ---
-        {
-            "type": "function",
-            "function": {
-                "name": "get_xrefs_to",
-                "description": "List incoming cross-references (callers / data refs TO the given address)",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "address": {"type": "string", "description": "Target address in hexadecimal or numeric format"},
-                        "offset": {"type": "integer", "description": "Pagination offset"},
-                        "limit": {"type": "integer", "description": "Maximum number of results"}
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "list_functions",
+                    "description": "List all functions in the database with pagination. Returns function names and addresses. Use offset and limit to navigate through results. Returns pagination metadata showing total count and next page info.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "offset": {"type": "integer", "description": "Offset to start from (default: 0)"},
+                            "limit": {
+                                "type": "integer",
+                                "description": "Maximum number of results (default: 100, recommended: 50-100)",
+                            },
+                        },
                     },
-                    "required": ["address"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "get_xrefs_from",
-                "description": "List outgoing cross-references (callees / data refs FROM the given address)",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "address": {"type": "string", "description": "Source address in hexadecimal or numeric format"},
-                        "offset": {"type": "integer", "description": "Pagination offset"},
-                        "limit": {"type": "integer", "description": "Maximum number of results"}
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "decompile_function_by_address",
+                    "description": "Decompile function at address. Returns lines of code with pagination.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "address": {"type": "string", "description": "Function address"},
+                            "offset": {
+                                "type": "integer",
+                                "description": "Line number offset to start reading from (default: 0)",
+                                "default": 0,
+                            },
+                            "limit": {
+                                "type": "integer",
+                                "description": "Maximum number of lines to return (default: 500)",
+                                "default": 500,
+                            },
+                        },
+                        "required": ["address"],
                     },
-                    "required": ["address"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "get_function_xrefs",
-                "description": "List cross-references to a function by its name",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "name": {"type": "string", "description": "Function name (e.g., 'FUN_401000')"},
-                        "offset": {"type": "integer", "description": "Pagination offset"},
-                        "limit": {"type": "integer", "description": "Maximum number of results"}
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "disassemble_function",
+                    "description": "Get assembly code (address: instruction; comment) for a function. IMPORTANT: Use numerical addresses only (e.g., '140003e50'), not function names.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "address": {"type": "string", "description": "Function address (numerical only, like '140003e50')"}
+                        },
+                        "required": ["address"],
                     },
-                    "required": ["name"]
-                }
-            }
-        },
-        # --- Raw memory access (new) ---
-        {
-            "type": "function",
-            "function": {
-                "name": "read_bytes",
-                "description": "Read raw bytes from memory at the specified address. Returns hex dump with ASCII representation or base64 encoded data. Useful for examining encrypted data, magic bytes, shellcode, or structure layouts.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "address": {"type": "string", "description": "Starting address in hex format (e.g., '401000')"},
-                        "length": {"type": "integer", "description": "Number of bytes to read (1-4096, default: 16)"},
-                        "format": {"type": "string", "description": "Output format: 'hex' for hex dump (default), 'raw' for base64 encoded"}
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "analyze_function",
+                    "description": "Analyze a function including its code and all functions it calls",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"address": {"type": "string", "description": "Function address (optional)"}},
                     },
-                    "required": ["address"]
-                }
-            }
-        },
-        # --- Smart Analysis Tools (algorithmic, no LLM in loop) ---
-        {
-            "type": "function",
-            "function": {
-                "name": "scan_function_pointer_tables",
-                "description": "Scan the binary for function pointer tables (vtables, dispatch tables, jump tables). Returns structured list of detected tables with addresses and function entries. Runs algorithmically without LLM intervention - useful for reachability analysis.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "min_table_entries": {"type": "integer", "description": "Minimum consecutive function pointers to qualify as a table (default: 3)"},
-                        "pointer_size": {"type": "integer", "description": "Size of pointers in bytes: 8 for x64, 4 for x86 (default: 8)"},
-                        "max_scan_size": {"type": "integer", "description": "Maximum bytes to scan per segment (default: 65536)"}
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "list_imports",
+                    "description": "List imported symbols in the program. Returns name, address, reference count, and caller names.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "offset": {"type": "integer", "description": "Offset to start from"},
+                            "limit": {"type": "integer", "description": "Maximum number of results"},
+                        },
                     },
-                    "required": []
-                }
-            }
-        },
-        # --- Context Management Tools ---
-        {
-            "type": "function",
-            "function": {
-                "name": "get_cached_result",
-                "description": "Retrieve the full content of a previously summarized or truncated result. When large tool results are summarized due to context limits, they are cached with an ID like 'r5_decompile_function_abc123'. Use this to get the complete original content when the summary is not sufficient.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "result_id": {"type": "string", "description": "The cached result ID (e.g., 'r5_decompile_function_abc123')"}
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "list_exports",
+                    "description": "List exported functions/symbols in the program",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "offset": {"type": "integer", "description": "Offset to start from"},
+                            "limit": {"type": "integer", "description": "Maximum number of results"},
+                        },
                     },
-                    "required": ["result_id"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "search_function_summaries",
-                "description": "🔍 PRIMARY DISCOVERY TOOL when Hybrid Search enabled. Search through analyzed function summaries using hybrid keyword + semantic search. USE THIS FIRST for function discovery before list_functions, decompile, or other tools. STRATEGY: Run 2-3 related queries with different keyword combinations. Use top_k=15-20 to get comprehensive results. Focus on top-5 results, scan remaining for relevant keywords. Available when function summaries loaded and 'Hybrid Search' checkbox enabled in UI.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "query": {"type": "string", "description": "Search query with keywords or concepts. Use multiple related terms for better results. Examples: 'network socket connection', 'file read write operation', 'string decode transform', 'memory allocation buffer'"},
-                        "search_type": {"type": "string", "enum": ["hybrid", "keyword", "semantic", "name"], "description": "Search mode: 'hybrid' (keyword+semantic, default), 'keyword' (grep-style), 'semantic' (RAG only), 'name' (exact function name)", "default": "hybrid"},
-                        "top_k": {"type": "integer", "description": "Number of results to return. Use 5-10 for focused searches, 15-20 for comprehensive discovery. Default: 5", "default": 5}
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "list_segments",
+                    "description": "List all memory segments in the program",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "offset": {"type": "integer", "description": "Offset to start from"},
+                            "limit": {"type": "integer", "description": "Maximum number of results"},
+                        },
                     },
-                    "required": ["query"]
-                }
-            }
-        }
-    ])
-    
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "list_strings",
+                    "description": "List defined strings or search by substring (alias: string_search)",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "offset": {"type": "integer", "description": "Pagination offset"},
+                            "limit": {"type": "integer", "description": "Maximum number of results"},
+                            "filter": {"type": "string", "description": "Substring to filter results"},
+                        },
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "search_functions_by_name",
+                    "description": "Search for functions by name substring",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {"type": "string", "description": "Search query string"},
+                            "offset": {"type": "integer", "description": "Offset to start from"},
+                            "limit": {"type": "integer", "description": "Maximum number of results"},
+                        },
+                        "required": ["query"],
+                    },
+                },
+            },
+            # --- Cross-reference helpers (new) ---
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_xrefs_to",
+                    "description": "List incoming cross-references (callers / data refs TO the given address)",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "address": {"type": "string", "description": "Target address in hexadecimal or numeric format"},
+                            "offset": {"type": "integer", "description": "Pagination offset"},
+                            "limit": {"type": "integer", "description": "Maximum number of results"},
+                        },
+                        "required": ["address"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_xrefs_from",
+                    "description": "List outgoing cross-references (callees / data refs FROM the given address)",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "address": {"type": "string", "description": "Source address in hexadecimal or numeric format"},
+                            "offset": {"type": "integer", "description": "Pagination offset"},
+                            "limit": {"type": "integer", "description": "Maximum number of results"},
+                        },
+                        "required": ["address"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_function_xrefs",
+                    "description": "List cross-references to a function by its name",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string", "description": "Function name (e.g., 'FUN_401000')"},
+                            "offset": {"type": "integer", "description": "Pagination offset"},
+                            "limit": {"type": "integer", "description": "Maximum number of results"},
+                        },
+                        "required": ["name"],
+                    },
+                },
+            },
+            # --- Raw memory access (new) ---
+            {
+                "type": "function",
+                "function": {
+                    "name": "read_bytes",
+                    "description": "Read raw bytes from memory at the specified address. Returns hex dump with ASCII representation or base64 encoded data. Useful for examining encrypted data, magic bytes, shellcode, or structure layouts.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "address": {"type": "string", "description": "Starting address in hex format (e.g., '401000')"},
+                            "length": {"type": "integer", "description": "Number of bytes to read (1-4096, default: 16)"},
+                            "format": {
+                                "type": "string",
+                                "description": "Output format: 'hex' for hex dump (default), 'raw' for base64 encoded",
+                            },
+                        },
+                        "required": ["address"],
+                    },
+                },
+            },
+            # --- Smart Analysis Tools (algorithmic, no LLM in loop) ---
+            {
+                "type": "function",
+                "function": {
+                    "name": "scan_function_pointer_tables",
+                    "description": "Scan the binary for function pointer tables (vtables, dispatch tables, jump tables). Returns structured list of detected tables with addresses and function entries. Runs algorithmically without LLM intervention - useful for reachability analysis.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "min_table_entries": {
+                                "type": "integer",
+                                "description": "Minimum consecutive function pointers to qualify as a table (default: 3)",
+                            },
+                            "pointer_size": {
+                                "type": "integer",
+                                "description": "Size of pointers in bytes: 8 for x64, 4 for x86 (default: 8)",
+                            },
+                            "max_scan_size": {
+                                "type": "integer",
+                                "description": "Maximum bytes to scan per segment (default: 65536)",
+                            },
+                        },
+                        "required": [],
+                    },
+                },
+            },
+            # --- Context Management Tools ---
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_cached_result",
+                    "description": "Retrieve the full content of a previously summarized or truncated result. When large tool results are summarized due to context limits, they are cached with an ID like 'r5_decompile_function_abc123'. Use this to get the complete original content when the summary is not sufficient.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "result_id": {
+                                "type": "string",
+                                "description": "The cached result ID (e.g., 'r5_decompile_function_abc123')",
+                            }
+                        },
+                        "required": ["result_id"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "search_function_summaries",
+                    "description": "🔍 PRIMARY DISCOVERY TOOL when Hybrid Search enabled. Search through analyzed function summaries using hybrid keyword + semantic search. USE THIS FIRST for function discovery before list_functions, decompile, or other tools. STRATEGY: Run 2-3 related queries with different keyword combinations. Use top_k=15-20 to get comprehensive results. Focus on top-5 results, scan remaining for relevant keywords. Available when function summaries loaded and 'Hybrid Search' checkbox enabled in UI.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {
+                                "type": "string",
+                                "description": "Search query with keywords or concepts. Use multiple related terms for better results. Examples: 'network socket connection', 'file read write operation', 'string decode transform', 'memory allocation buffer'",
+                            },
+                            "search_type": {
+                                "type": "string",
+                                "enum": ["hybrid", "keyword", "semantic", "name"],
+                                "description": "Search mode: 'hybrid' (keyword+semantic, default), 'keyword' (grep-style), 'semantic' (RAG only), 'name' (exact function name)",
+                                "default": "hybrid",
+                            },
+                            "top_k": {
+                                "type": "integer",
+                                "description": "Number of results to return. Use 5-10 for focused searches, 15-20 for comprehensive discovery. Default: 5",
+                                "default": 5,
+                            },
+                        },
+                        "required": ["query"],
+                    },
+                },
+            },
+        ]
+    )
+
     # System prompts for different model phases
     # NOTE: Deployment vulnerability guidance is intentionally excluded from the default
     # planning prompt and should only be enabled when task_mode is vuln-focused.
@@ -770,7 +825,7 @@ class OllamaConfig(BaseModel):
     
     User Goal: {user_task_description}
     """
-    
+
     # Legacy task mode execution prompt — retained as reference but no longer used.
     # The orchestrator/worker system has its own strategy-specific prompts.
     _legacy_execution_system_prompt_task_mode: str = """
@@ -918,7 +973,7 @@ class OllamaConfig(BaseModel):
 
     {{FUNCTION_CALL_BEST_PRACTICES}}
 """
-    
+
     # Execution system prompt for TASK MODE OFF (simple queries, direct answers)
     # Note: The HYBRID_SEARCH_SECTION will be conditionally inserted by get_execution_system_prompt()
     execution_system_prompt: str = """
@@ -974,9 +1029,11 @@ class OllamaConfig(BaseModel):
 
     {{FUNCTION_CALL_BEST_PRACTICES}}
 """
-    
+
     # Best practices for function calls
-    FUNCTION_CALL_BEST_PRACTICES: ClassVar[str] = """# COMMON ERRORS TO AVOID:
+    FUNCTION_CALL_BEST_PRACTICES: ClassVar[
+        str
+    ] = """# COMMON ERRORS TO AVOID:
 # - DO use snake_case for function names.
 # - DO batch read-only commands (list_*, get_*) together in a single response.
 # - Parameter 'address' for tools like decompile_function_by_address refers to the numerical memory address.
@@ -984,9 +1041,11 @@ class OllamaConfig(BaseModel):
 # - DO NOT use the "0x" prefix for numerical addresses.
 # - DUPLICATE TOOL CALLS: Use get_cached_result(result_id=...) if a result is already available.
 """
-    
+
     # Hybrid search section - conditionally included when grep layer is enabled
-    HYBRID_SEARCH_SECTION: ClassVar[str] = """
+    HYBRID_SEARCH_SECTION: ClassVar[
+        str
+    ] = """
     🔍 FUNCTION SUMMARY SEARCH - PRIMARY DISCOVERY TOOL
     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     
@@ -1018,9 +1077,11 @@ class OllamaConfig(BaseModel):
     
     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
-    
+
     # Hybrid search section for task mode - includes behavioral query examples
-    HYBRID_SEARCH_TASK_MODE_SECTION: ClassVar[str] = """
+    HYBRID_SEARCH_TASK_MODE_SECTION: ClassVar[
+        str
+    ] = """
     🔥 HYBRID SEARCH STRATEGY (When Enabled)
     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     
@@ -1076,14 +1137,14 @@ class OllamaConfig(BaseModel):
     
     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
-    
+
     def get_execution_system_prompt(self, hybrid_search_enabled: bool = False) -> str:
         """
         Get the execution system prompt with conditional hybrid search section.
-        
+
         Args:
             hybrid_search_enabled: Whether hybrid search is enabled (grep layer)
-            
+
         Returns:
             System prompt with or without hybrid search guidance
         """
@@ -1091,7 +1152,7 @@ class OllamaConfig(BaseModel):
         return self.execution_system_prompt.replace("{{HYBRID_SEARCH_SECTION}}", hybrid_section).replace(
             "{{FUNCTION_CALL_BEST_PRACTICES}}", self.FUNCTION_CALL_BEST_PRACTICES
         )
-    
+
     evaluation_system_prompt: str = """
     You are a Goal Evaluation Assistant for Ghidra reverse engineering tasks.
     Your task is to determine if the stated user goal has been achieved based on the tools executed and their results.
@@ -1106,7 +1167,7 @@ class OllamaConfig(BaseModel):
     If the goal has been successfully and completely achieved, respond ONLY with "GOAL ACHIEVED".
     If the final action has not been taken or more steps are clearly needed to satisfy the user's request, respond ONLY with "GOAL NOT ACHIEVED".
     """
-    
+
     analysis_system_prompt: str = """
     You are an analysis assistant specialized in reverse engineering with Ghidra.
     USER GOAL: **{user_task_description}**
@@ -1121,7 +1182,7 @@ class OllamaConfig(BaseModel):
     
     Prefix your final answer with "FINAL RESPONSE:" to mark the conclusion of your analysis.
     """
-    
+
     # HTML Report Generation Prompt
     html_report_generation_prompt: str = """
 You are generating an HTML vulnerability report based on binary analysis findings.
@@ -1241,44 +1302,61 @@ You MUST output ONLY valid JSON (no markdown, no explanation) with this structur
 8. Include key_findings section if ANY security-relevant APIs or patterns were found
 """
 
-    
     # System prompts for different phases
-    phase_system_prompts: Dict[str, str] = Field(default_factory=lambda: {
-        "planning": "",    # If empty, use planning_system_prompt
-        "execution": "",   # If empty, use execution_system_prompt
-        "analysis": "",    # If empty, use analysis_system_prompt
-        "evaluation": "",  # If empty, use evaluation_system_prompt
-        "review": ""       # If empty, use analysis_system_prompt for review
-    })
+    phase_system_prompts: Dict[str, str] = Field(
+        default_factory=lambda: {
+            "planning": "",  # If empty, use planning_system_prompt
+            "execution": "",  # If empty, use execution_system_prompt
+            "analysis": "",  # If empty, use analysis_system_prompt
+            "evaluation": "",  # If empty, use evaluation_system_prompt
+            "review": "",  # If empty, use analysis_system_prompt for review
+        }
+    )
+
 
 class GoogleConfig(BaseModel):
     """Configuration for the Google Gemini client."""
+
     api_key: str = Field(default="", description="Google API Key", json_schema_extra={"env": "GOOGLE_API_KEY"})
     # Default model (e.g., gemini-2.0-flash, gemini-3-flash)
     model: str = Field(default="gemini-3-flash", description="Default Gemini model", json_schema_extra={"env": "GOOGLE_MODEL"})
     # Embedding model
-    embedding_model: str = Field(default="gemini-embedding-1.0", description="Embedding model name", json_schema_extra={"env": "GOOGLE_EMBEDDING_MODEL"})
-    timeout: int = Field(ge=1, le=600, default=120, description="Timeout for requests in seconds (1-600)", json_schema_extra={"env": "GOOGLE_TIMEOUT"})
-    
+    embedding_model: str = Field(
+        default="gemini-embedding-1.0", description="Embedding model name", json_schema_extra={"env": "GOOGLE_EMBEDDING_MODEL"}
+    )
+    timeout: int = Field(
+        ge=1,
+        le=600,
+        default=120,
+        description="Timeout for requests in seconds (1-600)",
+        json_schema_extra={"env": "GOOGLE_TIMEOUT"},
+    )
+
     # Request Delay
-    request_delay: float = Field(default=0.0, ge=0.0, description="Delay in seconds before each request", json_schema_extra={"env": "GOOGLE_REQUEST_DELAY"})
-    
+    request_delay: float = Field(
+        default=0.0,
+        ge=0.0,
+        description="Delay in seconds before each request",
+        json_schema_extra={"env": "GOOGLE_REQUEST_DELAY"},
+    )
+
     # Request Retries
-    max_retries: int = Field(default=3, ge=0, description="Maximum number of retries for transient errors", json_schema_extra={"env": "GOOGLE_MAX_RETRIES"})
-    
+    max_retries: int = Field(
+        default=3,
+        ge=0,
+        description="Maximum number of retries for transient errors",
+        json_schema_extra={"env": "GOOGLE_MAX_RETRIES"},
+    )
+
     # Model map for phases
-    model_map: Dict[str, str] = Field(default_factory=lambda: {
-        "planning": "",
-        "execution": "",
-        "analysis": ""
-    })
-    
+    model_map: Dict[str, str] = Field(default_factory=lambda: {"planning": "", "execution": "", "analysis": ""})
+
     # Defaults handled by the client if empty, but good to have fields
     default_system_prompt: str = """
     You are an AI assistant specialized in reverse engineering with Ghidra.
     You can help analyze binary files by executing commands through GhidraMCP.
     """
-    
+
     # Reuse Ollama tool definitions for now as the internal structure is likely similar for the bridge
     # The client will translate them to Google's format
     tools: List[Tool] = Field(default_factory=lambda: OllamaConfig().tools)
@@ -1299,40 +1377,56 @@ class GoogleConfig(BaseModel):
     llm_log_timing: bool = Field(default=True, json_schema_extra={"env": "LLM_LOG_TIMING"})
     llm_log_format: str = Field(default="json", json_schema_extra={"env": "LLM_LOG_FORMAT"})
 
+
 class ExternalConfig(BaseModel):
     """Configuration for Generic External LLM Providers (Google, OpenAI, etc.)."""
-    provider: str = Field(default="google", description="Provider type: 'google', 'openai', etc.", json_schema_extra={"env": "EXTERNAL_PROVIDER"}) 
+
+    provider: str = Field(
+        default="google", description="Provider type: 'google', 'openai', etc.", json_schema_extra={"env": "EXTERNAL_PROVIDER"}
+    )
     api_key: str = Field(default="", description="API Key", json_schema_extra={"env": "EXTERNAL_API_KEY"})
     base_url: str = Field(default="", description="Base URL for API", json_schema_extra={"env": "EXTERNAL_BASE_URL"})
-    model: str = Field(default="gemini-1.5-flash", description="Default Model Name", json_schema_extra={"env": "EXTERNAL_MODEL"})
-    embedding_model: str = Field(default="", description="Embedding model name", json_schema_extra={"env": "EXTERNAL_EMBEDDING_MODEL"})
-    timeout: int = Field(ge=1, le=600, default=120, description="Timeout in seconds", json_schema_extra={"env": "EXTERNAL_TIMEOUT"})
-    
+    model: str = Field(
+        default="gemini-1.5-flash", description="Default Model Name", json_schema_extra={"env": "EXTERNAL_MODEL"}
+    )
+    embedding_model: str = Field(
+        default="", description="Embedding model name", json_schema_extra={"env": "EXTERNAL_EMBEDDING_MODEL"}
+    )
+    timeout: int = Field(
+        ge=1, le=600, default=120, description="Timeout in seconds", json_schema_extra={"env": "EXTERNAL_TIMEOUT"}
+    )
+
     # Request Delay
-    request_delay: float = Field(default=0.0, ge=0.0, description="Delay in seconds before each request", json_schema_extra={"env": "EXTERNAL_REQUEST_DELAY"})
-    
+    request_delay: float = Field(
+        default=0.0,
+        ge=0.0,
+        description="Delay in seconds before each request",
+        json_schema_extra={"env": "EXTERNAL_REQUEST_DELAY"},
+    )
+
     # Request Retries
-    max_retries: int = Field(default=5, ge=0, description="Maximum number of retries for transient errors", json_schema_extra={"env": "EXTERNAL_MAX_RETRIES"})
-    
+    max_retries: int = Field(
+        default=5,
+        ge=0,
+        description="Maximum number of retries for transient errors",
+        json_schema_extra={"env": "EXTERNAL_MAX_RETRIES"},
+    )
+
     # Generation Config
     temperature: float = Field(default=0.7, ge=0.0, le=2.0, json_schema_extra={"env": "EXTERNAL_TEMPERATURE"})
     max_tokens: int = Field(default=8192, ge=1, json_schema_extra={"env": "EXTERNAL_MAX_TOKENS"})
     top_p: float = Field(default=0.95, ge=0.0, le=1.0, json_schema_extra={"env": "EXTERNAL_TOP_P"})
     top_k: int = Field(default=40, ge=1, json_schema_extra={"env": "EXTERNAL_TOP_K"})
-    
+
     # Model map for phases
-    model_map: Dict[str, str] = Field(default_factory=lambda: {
-        "planning": "",
-        "execution": "",
-        "analysis": ""
-    })
-    
+    model_map: Dict[str, str] = Field(default_factory=lambda: {"planning": "", "execution": "", "analysis": ""})
+
     # Defaults
     default_system_prompt: str = """
     You are an AI assistant specialized in reverse engineering with Ghidra.
     You can help analyze binary files by executing commands through GhidraMCP.
     """
-    
+
     # Tools logic reused from OllamaConfig
     tools: List[Tool] = Field(default_factory=lambda: OllamaConfig().tools)
 
@@ -1342,7 +1436,7 @@ class ExternalConfig(BaseModel):
     enable_result_summarization: bool = Field(default=True, json_schema_extra={"env": "ENABLE_RESULT_SUMMARIZATION"})
     result_cache_enabled: bool = Field(default=True, json_schema_extra={"env": "RESULT_CACHE_ENABLED"})
     tiered_context_enabled: bool = Field(default=True, json_schema_extra={"env": "TIERED_CONTEXT_ENABLED"})
-    
+
     # Sliding Window & Tiered Context Limits
     max_detailed_steps: int = Field(default=5, ge=1, le=50, json_schema_extra={"env": "MAX_DETAILED_STEPS"})
     current_loop_max_chars: int = Field(default=2000, ge=100, le=50000, json_schema_extra={"env": "CURRENT_LOOP_MAX_CHARS"})
@@ -1350,14 +1444,10 @@ class ExternalConfig(BaseModel):
     prev_loop_max_chars: int = Field(
         default=800,
         description="Max chars for previous loop results",
-        json_schema_extra={
-            "env": "PREV_LOOP_MAX_CHARS",
-            "minimum": 50,
-            "maximum": 10000
-        }
+        json_schema_extra={"env": "PREV_LOOP_MAX_CHARS", "minimum": 50, "maximum": 10000},
     )
     older_loop_max_chars: int = Field(default=200, ge=20, le=2000, json_schema_extra={"env": "OLDER_LOOP_MAX_CHARS"})
-    
+
     # Logging
     llm_logging_enabled: bool = Field(default=False, json_schema_extra={"env": "LLM_LOGGING_ENABLED"})
     llm_log_file: str = Field(default="logs/llm_interactions.log", json_schema_extra={"env": "LLM_LOG_FILE"})
@@ -1367,7 +1457,6 @@ class ExternalConfig(BaseModel):
     llm_log_timing: bool = Field(default=True, json_schema_extra={"env": "LLM_LOG_TIMING"})
     llm_log_format: str = Field(default="json", json_schema_extra={"env": "LLM_LOG_FORMAT"})
 
-
     # Execution/Agentic loop settings (reused)
     max_execution_steps: int = Field(default=10, ge=1, le=50, json_schema_extra={"env": "MAX_EXECUTION_STEPS"})
     execution_loop_enabled: bool = Field(default=True, json_schema_extra={"env": "EXECUTION_LOOP_ENABLED"})
@@ -1376,7 +1465,9 @@ class ExternalConfig(BaseModel):
     orchestrator_max_cycles: int = Field(default=15, ge=1, le=50, json_schema_extra={"env": "ORCHESTRATOR_MAX_CYCLES"})
     worker_default_max_steps: int = Field(default=20, ge=1, le=50, json_schema_extra={"env": "WORKER_DEFAULT_MAX_STEPS"})
     coverage_stall_threshold: int = Field(default=3, ge=2, le=10, json_schema_extra={"env": "COVERAGE_STALL_THRESHOLD"})
-    orchestrator_doom_loop_threshold: int = Field(default=2, ge=2, le=5, json_schema_extra={"env": "ORCHESTRATOR_DOOM_LOOP_THRESHOLD"})
+    orchestrator_doom_loop_threshold: int = Field(
+        default=2, ge=2, le=5, json_schema_extra={"env": "ORCHESTRATOR_DOOM_LOOP_THRESHOLD"}
+    )
 
     # System prompts (reused from OllamaConfig default factories usually, but we need to define them here)
     # We can copy them from OllamaConfig to ensure consistency
@@ -1389,9 +1480,9 @@ class ExternalConfig(BaseModel):
 
 class CustomAPIConfig(BaseModel):
     """Configuration for Custom API (OpenAI-compatible) client."""
+
     api_url: AnyHttpUrl = Field(
-        default="https://api.example.com/v1/chat/completions",
-        json_schema_extra={"env": "CUSTOM_API_URL"}
+        default="https://api.example.com/v1/chat/completions", json_schema_extra={"env": "CUSTOM_API_URL"}
     )
     api_key: str = Field(default="", json_schema_extra={"env": "CUSTOM_API_KEY"})
     model: str = Field(
@@ -1413,24 +1504,20 @@ class CustomAPIConfig(BaseModel):
         description="Timeout for requests in seconds (1-600)",
         json_schema_extra={"env": "CUSTOM_API_TIMEOUT"},
     )
-    
+
     # Generation parameters
     temperature: float = Field(default=0.7, ge=0.0, le=2.0, json_schema_extra={"env": "CUSTOM_API_TEMPERATURE"})
     max_tokens: int = Field(default=4096, ge=1, json_schema_extra={"env": "CUSTOM_API_MAX_TOKENS"})
-    
+
     # SSL verification (may need to disable for custom certs)
     verify_ssl: bool = Field(default=False, json_schema_extra={"env": "CUSTOM_API_VERIFY_SSL"})
-    
+
     # Default system prompt
     default_system_prompt: str = Field(default="", json_schema_extra={"env": "CUSTOM_API_SYSTEM_PROMPT"})
-    
+
     # Model map for different phases
-    model_map: Dict[str, str] = Field(default_factory=lambda: {
-        "planning": "",
-        "execution": "",
-        "analysis": ""
-    })
-    
+    model_map: Dict[str, str] = Field(default_factory=lambda: {"planning": "", "execution": "", "analysis": ""})
+
     # LLM Logging (inherited from main config)
     llm_logging_enabled: bool = Field(default=True, json_schema_extra={"env": "LLM_LOGGING_ENABLED"})
     llm_log_file: str = Field(default="logs/llm_interactions_custom.log", json_schema_extra={"env": "CUSTOM_API_LOG_FILE"})
@@ -1439,7 +1526,7 @@ class CustomAPIConfig(BaseModel):
     llm_log_tokens: bool = Field(default=True, json_schema_extra={"env": "LLM_LOG_TOKENS"})
     llm_log_timing: bool = Field(default=True, json_schema_extra={"env": "LLM_LOG_TIMING"})
     llm_log_format: str = Field(default="json", json_schema_extra={"env": "LLM_LOG_FORMAT"})
-    
+
     # Request settings
     request_delay: float = Field(default=0.0, ge=0.0, json_schema_extra={"env": "CUSTOM_API_REQUEST_DELAY"})
     max_retries: int = Field(default=3, ge=0, json_schema_extra={"env": "CUSTOM_API_MAX_RETRIES"})
@@ -1453,32 +1540,36 @@ class CustomAPIConfig(BaseModel):
     # Adaptive throttling (advanced)
     adaptive_throttle_enabled: bool = Field(default=True, json_schema_extra={"env": "CUSTOM_API_ADAPTIVE_THROTTLE_ENABLED"})
     adaptive_max_interval: float = Field(default=10.0, ge=0.0, json_schema_extra={"env": "CUSTOM_API_ADAPTIVE_MAX_INTERVAL"})
-    adaptive_increase_factor: float = Field(default=1.5, ge=1.0, json_schema_extra={"env": "CUSTOM_API_ADAPTIVE_INCREASE_FACTOR"})
-    adaptive_decrease_factor: float = Field(default=0.9, gt=0.0, le=1.0, json_schema_extra={"env": "CUSTOM_API_ADAPTIVE_DECREASE_FACTOR"})
-    adaptive_success_streak_threshold: int = Field(default=10, ge=1, json_schema_extra={"env": "CUSTOM_API_ADAPTIVE_SUCCESS_STREAK_THRESHOLD"})
-    adaptive_jitter_seconds: float = Field(default=0.25, ge=0.0, json_schema_extra={"env": "CUSTOM_API_ADAPTIVE_JITTER_SECONDS"})
-    
+    adaptive_increase_factor: float = Field(
+        default=1.5, ge=1.0, json_schema_extra={"env": "CUSTOM_API_ADAPTIVE_INCREASE_FACTOR"}
+    )
+    adaptive_decrease_factor: float = Field(
+        default=0.9, gt=0.0, le=1.0, json_schema_extra={"env": "CUSTOM_API_ADAPTIVE_DECREASE_FACTOR"}
+    )
+    adaptive_success_streak_threshold: int = Field(
+        default=10, ge=1, json_schema_extra={"env": "CUSTOM_API_ADAPTIVE_SUCCESS_STREAK_THRESHOLD"}
+    )
+    adaptive_jitter_seconds: float = Field(
+        default=0.25, ge=0.0, json_schema_extra={"env": "CUSTOM_API_ADAPTIVE_JITTER_SECONDS"}
+    )
+
     # Context Budget (reused logic)
     context_budget: int = Field(default=20000, ge=4000, le=2000000, json_schema_extra={"env": "CONTEXT_BUDGET"})
     context_budget_execution: float = Field(default=0.5, ge=0.1, le=0.8, json_schema_extra={"env": "CONTEXT_BUDGET_EXECUTION"})
     enable_result_summarization: bool = Field(default=True, json_schema_extra={"env": "ENABLE_RESULT_SUMMARIZATION"})
     result_cache_enabled: bool = Field(default=True, json_schema_extra={"env": "RESULT_CACHE_ENABLED"})
     tiered_context_enabled: bool = Field(default=True, json_schema_extra={"env": "TIERED_CONTEXT_ENABLED"})
-    
+
     # Sliding Window & Tiered Context Limits
     max_detailed_steps: int = Field(
         default=5,
         description="Maximum steps to keep in full detail",
-        json_schema_extra={
-            "env": "MAX_DETAILED_STEPS",
-            "minimum": 1,
-            "maximum": 50
-        }
+        json_schema_extra={"env": "MAX_DETAILED_STEPS", "minimum": 1, "maximum": 50},
     )
     current_loop_max_chars: int = Field(default=2000, ge=100, le=50000, json_schema_extra={"env": "CURRENT_LOOP_MAX_CHARS"})
     prev_loop_max_chars: int = Field(default=800, ge=50, le=10000, json_schema_extra={"env": "PREV_LOOP_MAX_CHARS"})
     older_loop_max_chars: int = Field(default=200, ge=20, le=2000, json_schema_extra={"env": "OLDER_LOOP_MAX_CHARS"})
-    
+
     # Execution loop settings (reused)
     max_execution_steps: int = Field(default=10, ge=1, le=50, json_schema_extra={"env": "MAX_EXECUTION_STEPS"})
     execution_loop_enabled: bool = Field(default=True, json_schema_extra={"env": "EXECUTION_LOOP_ENABLED"})
@@ -1487,7 +1578,9 @@ class CustomAPIConfig(BaseModel):
     orchestrator_max_cycles: int = Field(default=15, ge=1, le=50, json_schema_extra={"env": "ORCHESTRATOR_MAX_CYCLES"})
     worker_default_max_steps: int = Field(default=20, ge=1, le=50, json_schema_extra={"env": "WORKER_DEFAULT_MAX_STEPS"})
     coverage_stall_threshold: int = Field(default=3, ge=2, le=10, json_schema_extra={"env": "COVERAGE_STALL_THRESHOLD"})
-    orchestrator_doom_loop_threshold: int = Field(default=2, ge=2, le=5, json_schema_extra={"env": "ORCHESTRATOR_DOOM_LOOP_THRESHOLD"})
+    orchestrator_doom_loop_threshold: int = Field(
+        default=2, ge=2, le=5, json_schema_extra={"env": "ORCHESTRATOR_DOOM_LOOP_THRESHOLD"}
+    )
 
     # Reuse tools and system prompts from OllamaConfig
     tools: List[Tool] = Field(default_factory=lambda: OllamaConfig().tools)
@@ -1500,60 +1593,71 @@ class CustomAPIConfig(BaseModel):
 
 class GhidraMCPConfig(BaseModel):
     """Configuration for the GhidraMCP client."""
+
     base_url: AnyHttpUrl = Field(default="http://localhost:8080", json_schema_extra={"env": "GHIDRA_BASE_URL"})
-    timeout: int = Field(ge=1, le=300, default=30, description="Timeout in seconds (1-300)", json_schema_extra={"env": "GHIDRA_TIMEOUT"})
+    timeout: int = Field(
+        ge=1, le=300, default=30, description="Timeout in seconds (1-300)", json_schema_extra={"env": "GHIDRA_TIMEOUT"}
+    )
     mock_mode: bool = Field(default=False, json_schema_extra={"env": "GHIDRA_MOCK_MODE"})
     api_path: str = Field(default="", description="API path for GhidraMCP", json_schema_extra={"env": "GHIDRA_API_PATH"})
-    
-    @field_validator('api_path')
+
+    @field_validator("api_path")
     def validate_api_path(cls, v):
         """Validate API path format."""
-        if v and not v.startswith('/'):
+        if v and not v.startswith("/"):
             raise ValueError('API path must start with "/" or be empty')
         return v
 
+
 class SessionHistoryConfig(BaseModel):
     """Configuration for session history."""
+
     enabled: bool = True
     storage_path: str = Field(default="data/ollama_ghidra_session_history.jsonl", description="Path to session history file")
     max_sessions: int = Field(ge=1, le=100000, default=1000, description="Maximum number of sessions to store (1-100000)")
     auto_summarize: bool = True
     use_vector_embeddings: bool = False
     vector_db_path: str = Field(default="data/vector_db", description="Path to vector database directory")
-    
-    @field_validator('storage_path')
+
+    @field_validator("storage_path")
     def validate_storage_path(cls, v):
         """Validate storage path format."""
         if not v.strip():
-            raise ValueError('Storage path cannot be empty')
-        if not v.endswith('.jsonl'):
-            raise ValueError('Storage path must end with .jsonl extension')
+            raise ValueError("Storage path cannot be empty")
+        if not v.endswith(".jsonl"):
+            raise ValueError("Storage path must end with .jsonl extension")
         return v.strip()
-    
-    @field_validator('vector_db_path')
+
+    @field_validator("vector_db_path")
     def validate_vector_db_path(cls, v):
         """Validate vector database path."""
         if not v.strip():
-            raise ValueError('Vector database path cannot be empty')
+            raise ValueError("Vector database path cannot be empty")
         return v.strip()
+
 
 class BridgeConfig(BaseSettings):
     """Root configuration model, loading from environment variables."""
+
     ollama: OllamaConfig = Field(default_factory=OllamaConfig)
-    google: GoogleConfig = Field(default_factory=GoogleConfig) # Deprecated, keep for compat
+    google: GoogleConfig = Field(default_factory=GoogleConfig)  # Deprecated, keep for compat
     external: ExternalConfig = Field(default_factory=ExternalConfig)
     custom_api: CustomAPIConfig = Field(default_factory=CustomAPIConfig)
-    llm_provider: str = Field(default="ollama", description="LLM provider: 'ollama', 'google' (legacy), 'external', or 'custom_api'", json_schema_extra={"env": "LLM_PROVIDER"})
+    llm_provider: str = Field(
+        default="ollama",
+        description="LLM provider: 'ollama', 'google' (legacy), 'external', or 'custom_api'",
+        json_schema_extra={"env": "LLM_PROVIDER"},
+    )
     ghidra_mcp: GhidraMCPConfig = Field(default_factory=GhidraMCPConfig)
     session_history: SessionHistoryConfig = Field(default_factory=SessionHistoryConfig)
-    
+
     log_level: str = Field(default="INFO", description="Logging level")
     log_file: str = Field(default="bridge.log", description="Log file path")
     log_console: bool = True
     log_file_enabled: bool = True
     context_limit: int = Field(ge=1, le=50, default=25, description="Context limit for conversations (1-50)")
     max_steps: int = Field(ge=1, le=100, default=5, description="Maximum steps for task execution (1-100)")
-    
+
     # CAG Configuration
     cag_enabled: bool = True
     cag_knowledge_cache_enabled: bool = True
@@ -1561,54 +1665,56 @@ class BridgeConfig(BaseSettings):
 
     # Enable or disable Context-Augmented Generation
     enable_cag: bool = True
-    
+
     # Enable or disable Knowledge Base
     enable_knowledge_base: bool = True
-    
+
     # Knowledge Base directory
     knowledge_base_dir: str = Field(default="knowledge_base", description="Knowledge base directory path")
-    
+
     # Enable or disable review phase
     enable_review: bool = True
-    
-    @field_validator('log_level')
+
+    @field_validator("log_level")
     def validate_log_level(cls, v):
         """Validate log level."""
-        valid_levels = {'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'}
+        valid_levels = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
         v_upper = v.upper()
         if v_upper not in valid_levels:
-            raise ValueError(f'log_level must be one of {valid_levels}')
+            raise ValueError(f"log_level must be one of {valid_levels}")
         return v_upper
-    
-    @field_validator('log_file')
+
+    @field_validator("log_file")
     def validate_log_file(cls, v):
         """Validate log file path."""
         if not v.strip():
-            raise ValueError('Log file path cannot be empty')
-        if not v.endswith('.log'):
-            raise ValueError('Log file must have .log extension')
+            raise ValueError("Log file path cannot be empty")
+        if not v.endswith(".log"):
+            raise ValueError("Log file must have .log extension")
         return v.strip()
-    
-    @field_validator('knowledge_base_dir')
+
+    @field_validator("knowledge_base_dir")
     def validate_knowledge_base_dir(cls, v):
         """Validate knowledge base directory."""
         if not v.strip():
-            raise ValueError('Knowledge base directory cannot be empty')
+            raise ValueError("Knowledge base directory cannot be empty")
         return v.strip()
 
     model_config = {
-        'env_prefix': '', # No prefix for env vars
-        'case_sensitive': False,
+        "env_prefix": "",  # No prefix for env vars
+        "case_sensitive": False,
         # Nested models will also be populated from env vars
         # e.g. OLLAMA_BASE_URL will populate ollama.base_url
-        'env_nested_delimiter': '_',
-        'env_file': '.env',
-        'env_file_encoding': 'utf-8',
-        'extra': 'ignore'
+        "env_nested_delimiter": "_",
+        "env_file": ".env",
+        "env_file_encoding": "utf-8",
+        "extra": "ignore",
     }
+
 
 # Helper function to get the config instance
 _config_instance: Optional[BridgeConfig] = None
+
 
 def get_config() -> BridgeConfig:
     """Returns a singleton instance of the BridgeConfig."""
@@ -1617,93 +1723,95 @@ def get_config() -> BridgeConfig:
         # Explicitly load .env file before creating config
         try:
             from dotenv import load_dotenv
-            load_dotenv('.env', override=True)
+
+            load_dotenv(".env", override=True)
         except ImportError:
             # python-dotenv not available, try to continue without it
             pass
-        
+
         # Create config with explicit environment loading
         import os
+
         config_data = {}
-        
+
         # Manually map environment variables to config structure
-        if os.getenv('OLLAMA_BASE_URL'):
+        if os.getenv("OLLAMA_BASE_URL"):
             # Ensure base URL doesn't have trailing slash
-            base_url = os.getenv('OLLAMA_BASE_URL').rstrip('/')
-            config_data['ollama'] = {'base_url': base_url}
-        if os.getenv('OLLAMA_MODEL'):
-            if 'ollama' not in config_data:
-                config_data['ollama'] = {}
-            config_data['ollama']['model'] = os.getenv('OLLAMA_MODEL')
-        
+            base_url = os.getenv("OLLAMA_BASE_URL").rstrip("/")
+            config_data["ollama"] = {"base_url": base_url}
+        if os.getenv("OLLAMA_MODEL"):
+            if "ollama" not in config_data:
+                config_data["ollama"] = {}
+            config_data["ollama"]["model"] = os.getenv("OLLAMA_MODEL")
+
         # Load LLM logging configuration
-        if os.getenv('LLM_LOGGING_ENABLED'):
-            if 'ollama' not in config_data:
-                config_data['ollama'] = {}
-            config_data['ollama']['llm_logging_enabled'] = os.getenv('LLM_LOGGING_ENABLED').lower() == 'true'
-        if os.getenv('LLM_LOG_FILE'):
-            if 'ollama' not in config_data:
-                config_data['ollama'] = {}
-            config_data['ollama']['llm_log_file'] = os.getenv('LLM_LOG_FILE')
-        if os.getenv('LLM_LOG_FORMAT'):
-            if 'ollama' not in config_data:
-                config_data['ollama'] = {}
-            config_data['ollama']['llm_log_format'] = os.getenv('LLM_LOG_FORMAT')
-        if os.getenv('LLM_LOG_PROMPTS'):
-            if 'ollama' not in config_data:
-                config_data['ollama'] = {}
-            config_data['ollama']['llm_log_prompts'] = os.getenv('LLM_LOG_PROMPTS').lower() == 'true'
-        if os.getenv('LLM_LOG_RESPONSES'):
-            if 'ollama' not in config_data:
-                config_data['ollama'] = {}
-            config_data['ollama']['llm_log_responses'] = os.getenv('LLM_LOG_RESPONSES').lower() == 'true'
-        if os.getenv('LLM_LOG_TOKENS'):
-            if 'ollama' not in config_data:
-                config_data['ollama'] = {}
-            config_data['ollama']['llm_log_tokens'] = os.getenv('LLM_LOG_TOKENS').lower() == 'true'
-        if os.getenv('LLM_LOG_TIMING'):
-            if 'ollama' not in config_data:
-                config_data['ollama'] = {}
-            config_data['ollama']['llm_log_timing'] = os.getenv('LLM_LOG_TIMING').lower() == 'true'
-        
+        if os.getenv("LLM_LOGGING_ENABLED"):
+            if "ollama" not in config_data:
+                config_data["ollama"] = {}
+            config_data["ollama"]["llm_logging_enabled"] = os.getenv("LLM_LOGGING_ENABLED").lower() == "true"
+        if os.getenv("LLM_LOG_FILE"):
+            if "ollama" not in config_data:
+                config_data["ollama"] = {}
+            config_data["ollama"]["llm_log_file"] = os.getenv("LLM_LOG_FILE")
+        if os.getenv("LLM_LOG_FORMAT"):
+            if "ollama" not in config_data:
+                config_data["ollama"] = {}
+            config_data["ollama"]["llm_log_format"] = os.getenv("LLM_LOG_FORMAT")
+        if os.getenv("LLM_LOG_PROMPTS"):
+            if "ollama" not in config_data:
+                config_data["ollama"] = {}
+            config_data["ollama"]["llm_log_prompts"] = os.getenv("LLM_LOG_PROMPTS").lower() == "true"
+        if os.getenv("LLM_LOG_RESPONSES"):
+            if "ollama" not in config_data:
+                config_data["ollama"] = {}
+            config_data["ollama"]["llm_log_responses"] = os.getenv("LLM_LOG_RESPONSES").lower() == "true"
+        if os.getenv("LLM_LOG_TOKENS"):
+            if "ollama" not in config_data:
+                config_data["ollama"] = {}
+            config_data["ollama"]["llm_log_tokens"] = os.getenv("LLM_LOG_TOKENS").lower() == "true"
+        if os.getenv("LLM_LOG_TIMING"):
+            if "ollama" not in config_data:
+                config_data["ollama"] = {}
+            config_data["ollama"]["llm_log_timing"] = os.getenv("LLM_LOG_TIMING").lower() == "true"
+
         # Load phase-specific models into model_map
         model_map = {}
-        if os.getenv('OLLAMA_MODEL_PLANNING'):
-            model_map['planning'] = os.getenv('OLLAMA_MODEL_PLANNING')
-        if os.getenv('OLLAMA_MODEL_EXECUTION'):
-            model_map['execution'] = os.getenv('OLLAMA_MODEL_EXECUTION')
-        if os.getenv('OLLAMA_MODEL_ANALYSIS'):
-            model_map['analysis'] = os.getenv('OLLAMA_MODEL_ANALYSIS')
-        if os.getenv('OLLAMA_MODEL_EVALUATION'):
-            model_map['evaluation'] = os.getenv('OLLAMA_MODEL_EVALUATION')
-        if os.getenv('OLLAMA_MODEL_REVIEW'):
-            model_map['review'] = os.getenv('OLLAMA_MODEL_REVIEW')
-            
+        if os.getenv("OLLAMA_MODEL_PLANNING"):
+            model_map["planning"] = os.getenv("OLLAMA_MODEL_PLANNING")
+        if os.getenv("OLLAMA_MODEL_EXECUTION"):
+            model_map["execution"] = os.getenv("OLLAMA_MODEL_EXECUTION")
+        if os.getenv("OLLAMA_MODEL_ANALYSIS"):
+            model_map["analysis"] = os.getenv("OLLAMA_MODEL_ANALYSIS")
+        if os.getenv("OLLAMA_MODEL_EVALUATION"):
+            model_map["evaluation"] = os.getenv("OLLAMA_MODEL_EVALUATION")
+        if os.getenv("OLLAMA_MODEL_REVIEW"):
+            model_map["review"] = os.getenv("OLLAMA_MODEL_REVIEW")
+
         if model_map:
-            if 'ollama' not in config_data:
-                config_data['ollama'] = {}
-            config_data['ollama']['model_map'] = model_map
-        
+            if "ollama" not in config_data:
+                config_data["ollama"] = {}
+            config_data["ollama"]["model_map"] = model_map
+
         # Load execution loop settings
-        if os.getenv('MAX_EXECUTION_STEPS'):
-            if 'ollama' not in config_data:
-                config_data['ollama'] = {}
+        if os.getenv("MAX_EXECUTION_STEPS"):
+            if "ollama" not in config_data:
+                config_data["ollama"] = {}
             try:
-                config_data['ollama']['max_execution_steps'] = int(os.getenv('MAX_EXECUTION_STEPS'))
+                config_data["ollama"]["max_execution_steps"] = int(os.getenv("MAX_EXECUTION_STEPS"))
             except ValueError:
                 pass  # Use default if invalid value
-        
-        if os.getenv('EXECUTION_LOOP_ENABLED'):
-            if 'ollama' not in config_data:
-                config_data['ollama'] = {}
-            config_data['ollama']['execution_loop_enabled'] = os.getenv('EXECUTION_LOOP_ENABLED').lower() == 'true'
-        
+
+        if os.getenv("EXECUTION_LOOP_ENABLED"):
+            if "ollama" not in config_data:
+                config_data["ollama"] = {}
+            config_data["ollama"]["execution_loop_enabled"] = os.getenv("EXECUTION_LOOP_ENABLED").lower() == "true"
+
         # ── Orchestrator settings (applied to ALL provider configs) ──
         _orch_env_map = {
-            'ORCHESTRATOR_MAX_CYCLES':          ('orchestrator_max_cycles', int),
-            'WORKER_DEFAULT_MAX_STEPS':         ('worker_default_max_steps', int),
-            'COVERAGE_STALL_THRESHOLD':         ('coverage_stall_threshold', int),
-            'ORCHESTRATOR_DOOM_LOOP_THRESHOLD': ('orchestrator_doom_loop_threshold', int),
+            "ORCHESTRATOR_MAX_CYCLES": ("orchestrator_max_cycles", int),
+            "WORKER_DEFAULT_MAX_STEPS": ("worker_default_max_steps", int),
+            "COVERAGE_STALL_THRESHOLD": ("coverage_stall_threshold", int),
+            "ORCHESTRATOR_DOOM_LOOP_THRESHOLD": ("orchestrator_doom_loop_threshold", int),
         }
         for env_key, (field_name, converter) in _orch_env_map.items():
             raw = os.getenv(env_key)
@@ -1712,347 +1820,352 @@ def get_config() -> BridgeConfig:
                     value = converter(raw)
                 except (ValueError, TypeError):
                     continue
-                for section in ('ollama', 'external', 'custom_api'):
+                for section in ("ollama", "external", "custom_api"):
                     if section not in config_data:
                         config_data[section] = {}
                     config_data[section][field_name] = value
-        
+
         # Apply MAX_EXECUTION_STEPS to external config
-        if os.getenv('MAX_EXECUTION_STEPS'):
-            if 'external' not in config_data:
-                config_data['external'] = {}
+        if os.getenv("MAX_EXECUTION_STEPS"):
+            if "external" not in config_data:
+                config_data["external"] = {}
             try:
-                config_data['external']['max_execution_steps'] = int(os.getenv('MAX_EXECUTION_STEPS'))
+                config_data["external"]["max_execution_steps"] = int(os.getenv("MAX_EXECUTION_STEPS"))
             except ValueError:
                 pass
-        
+
         # Load Ollama timeout setting
-        if os.getenv('OLLAMA_TIMEOUT'):
-            if 'ollama' not in config_data:
-                config_data['ollama'] = {}
+        if os.getenv("OLLAMA_TIMEOUT"):
+            if "ollama" not in config_data:
+                config_data["ollama"] = {}
             try:
-                config_data['ollama']['timeout'] = int(os.getenv('OLLAMA_TIMEOUT'))
+                config_data["ollama"]["timeout"] = int(os.getenv("OLLAMA_TIMEOUT"))
             except ValueError:
                 pass  # Use default if invalid value
-        
+
         # Load Ollama request delay setting
-        if os.getenv('OLLAMA_REQUEST_DELAY'):
-            if 'ollama' not in config_data:
-                config_data['ollama'] = {}
+        if os.getenv("OLLAMA_REQUEST_DELAY"):
+            if "ollama" not in config_data:
+                config_data["ollama"] = {}
             try:
-                config_data['ollama']['request_delay'] = float(os.getenv('OLLAMA_REQUEST_DELAY'))
+                config_data["ollama"]["request_delay"] = float(os.getenv("OLLAMA_REQUEST_DELAY"))
             except ValueError:
                 pass  # Use default if invalid value
-        
+
         # Load Ollama embedding model
-        if os.getenv('OLLAMA_EMBEDDING_MODEL'):
-            if 'ollama' not in config_data:
-                config_data['ollama'] = {}
-            config_data['ollama']['embedding_model'] = os.getenv('OLLAMA_EMBEDDING_MODEL')
+        if os.getenv("OLLAMA_EMBEDDING_MODEL"):
+            if "ollama" not in config_data:
+                config_data["ollama"] = {}
+            config_data["ollama"]["embedding_model"] = os.getenv("OLLAMA_EMBEDDING_MODEL")
 
         # Load Ollama retry setting
-        if os.getenv('OLLAMA_MAX_RETRIES'):
-            if 'ollama' not in config_data:
-                config_data['ollama'] = {}
+        if os.getenv("OLLAMA_MAX_RETRIES"):
+            if "ollama" not in config_data:
+                config_data["ollama"] = {}
             try:
-                config_data['ollama']['max_retries'] = int(os.getenv('OLLAMA_MAX_RETRIES'))
+                config_data["ollama"]["max_retries"] = int(os.getenv("OLLAMA_MAX_RETRIES"))
             except ValueError:
                 pass
-        
+
         # Load show reasoning setting
-        if os.getenv('OLLAMA_SHOW_REASONING'):
-            if 'ollama' not in config_data:
-                config_data['ollama'] = {}
-            config_data['ollama']['show_reasoning'] = os.getenv('OLLAMA_SHOW_REASONING').lower() == 'true'
-        
+        if os.getenv("OLLAMA_SHOW_REASONING"):
+            if "ollama" not in config_data:
+                config_data["ollama"] = {}
+            config_data["ollama"]["show_reasoning"] = os.getenv("OLLAMA_SHOW_REASONING").lower() == "true"
+
         # Load context budget settings
-        if os.getenv('CONTEXT_BUDGET'):
-            if 'ollama' not in config_data:
-                config_data['ollama'] = {}
+        if os.getenv("CONTEXT_BUDGET"):
+            if "ollama" not in config_data:
+                config_data["ollama"] = {}
             try:
-                config_data['ollama']['context_budget'] = int(os.getenv('CONTEXT_BUDGET'))
+                config_data["ollama"]["context_budget"] = int(os.getenv("CONTEXT_BUDGET"))
             except ValueError:
                 pass  # Use default if invalid value
-        
-        if os.getenv('CONTEXT_BUDGET_EXECUTION'):
-            if 'ollama' not in config_data:
-                config_data['ollama'] = {}
+
+        if os.getenv("CONTEXT_BUDGET_EXECUTION"):
+            if "ollama" not in config_data:
+                config_data["ollama"] = {}
             try:
-                config_data['ollama']['context_budget_execution'] = float(os.getenv('CONTEXT_BUDGET_EXECUTION'))
+                config_data["ollama"]["context_budget_execution"] = float(os.getenv("CONTEXT_BUDGET_EXECUTION"))
             except ValueError:
                 pass  # Use default if invalid value
-        
+
         # Load result handling settings
-        if os.getenv('ENABLE_RESULT_SUMMARIZATION'):
-            if 'ollama' not in config_data:
-                config_data['ollama'] = {}
-            config_data['ollama']['enable_result_summarization'] = os.getenv('ENABLE_RESULT_SUMMARIZATION').lower() == 'true'
-        
-        if os.getenv('RESULT_CACHE_ENABLED'):
-            if 'ollama' not in config_data:
-                config_data['ollama'] = {}
-            config_data['ollama']['result_cache_enabled'] = os.getenv('RESULT_CACHE_ENABLED').lower() == 'true'
-        
-        if os.getenv('TIERED_CONTEXT_ENABLED'):
-            if 'ollama' not in config_data:
-                config_data['ollama'] = {}
-            config_data['ollama']['tiered_context_enabled'] = os.getenv('TIERED_CONTEXT_ENABLED').lower() == 'true'
-            
+        if os.getenv("ENABLE_RESULT_SUMMARIZATION"):
+            if "ollama" not in config_data:
+                config_data["ollama"] = {}
+            config_data["ollama"]["enable_result_summarization"] = os.getenv("ENABLE_RESULT_SUMMARIZATION").lower() == "true"
+
+        if os.getenv("RESULT_CACHE_ENABLED"):
+            if "ollama" not in config_data:
+                config_data["ollama"] = {}
+            config_data["ollama"]["result_cache_enabled"] = os.getenv("RESULT_CACHE_ENABLED").lower() == "true"
+
+        if os.getenv("TIERED_CONTEXT_ENABLED"):
+            if "ollama" not in config_data:
+                config_data["ollama"] = {}
+            config_data["ollama"]["tiered_context_enabled"] = os.getenv("TIERED_CONTEXT_ENABLED").lower() == "true"
+
         # Load Ghidra configuration
-        if os.getenv('GHIDRA_BASE_URL'):
-            config_data['ghidra'] = {'base_url': os.getenv('GHIDRA_BASE_URL')}
-        
-        if os.getenv('GHIDRA_TIMEOUT'):
-            if 'ghidra' not in config_data:
-                config_data['ghidra'] = {}
+        if os.getenv("GHIDRA_BASE_URL"):
+            config_data["ghidra"] = {"base_url": os.getenv("GHIDRA_BASE_URL")}
+
+        if os.getenv("GHIDRA_TIMEOUT"):
+            if "ghidra" not in config_data:
+                config_data["ghidra"] = {}
             try:
-                config_data['ghidra']['timeout'] = int(os.getenv('GHIDRA_TIMEOUT'))
+                config_data["ghidra"]["timeout"] = int(os.getenv("GHIDRA_TIMEOUT"))
             except ValueError:
                 pass  # Use default if invalid value
-        
-        if os.getenv('GHIDRA_MOCK_MODE'):
-            if 'ghidra' not in config_data:
-                config_data['ghidra'] = {}
-            config_data['ghidra']['mock_mode'] = os.getenv('GHIDRA_MOCK_MODE').lower() == 'true'
-        
-        if os.getenv('GHIDRA_API_PATH'):
-            if 'ghidra' not in config_data:
-                config_data['ghidra'] = {}
-            config_data['ghidra']['api_path'] = os.getenv('GHIDRA_API_PATH')
+
+        if os.getenv("GHIDRA_MOCK_MODE"):
+            if "ghidra" not in config_data:
+                config_data["ghidra"] = {}
+            config_data["ghidra"]["mock_mode"] = os.getenv("GHIDRA_MOCK_MODE").lower() == "true"
+
+        if os.getenv("GHIDRA_API_PATH"):
+            if "ghidra" not in config_data:
+                config_data["ghidra"] = {}
+            config_data["ghidra"]["api_path"] = os.getenv("GHIDRA_API_PATH")
 
         # Load LLM Provider
-        if os.getenv('LLM_PROVIDER'):
-            config_data['llm_provider'] = os.getenv('LLM_PROVIDER').lower()
+        if os.getenv("LLM_PROVIDER"):
+            config_data["llm_provider"] = os.getenv("LLM_PROVIDER").lower()
 
         # Load Google Configuration
-        if os.getenv('GOOGLE_API_KEY'):
-            if 'google' not in config_data:
-                config_data['google'] = {}
-            config_data['google']['api_key'] = os.getenv('GOOGLE_API_KEY')
-        
-        if os.getenv('GOOGLE_MODEL'):
-            if 'google' not in config_data:
-                config_data['google'] = {}
-            config_data['google']['model'] = os.getenv('GOOGLE_MODEL')
+        if os.getenv("GOOGLE_API_KEY"):
+            if "google" not in config_data:
+                config_data["google"] = {}
+            config_data["google"]["api_key"] = os.getenv("GOOGLE_API_KEY")
 
-        if os.getenv('GOOGLE_EMBEDDING_MODEL'):
-            if 'google' not in config_data:
-                config_data['google'] = {}
-            config_data['google']['embedding_model'] = os.getenv('GOOGLE_EMBEDDING_MODEL')
+        if os.getenv("GOOGLE_MODEL"):
+            if "google" not in config_data:
+                config_data["google"] = {}
+            config_data["google"]["model"] = os.getenv("GOOGLE_MODEL")
 
-        if os.getenv('GOOGLE_TIMEOUT'):
-            if 'google' not in config_data:
-                config_data['google'] = {}
+        if os.getenv("GOOGLE_EMBEDDING_MODEL"):
+            if "google" not in config_data:
+                config_data["google"] = {}
+            config_data["google"]["embedding_model"] = os.getenv("GOOGLE_EMBEDDING_MODEL")
+
+        if os.getenv("GOOGLE_TIMEOUT"):
+            if "google" not in config_data:
+                config_data["google"] = {}
             try:
-                config_data['google']['timeout'] = int(os.getenv('GOOGLE_TIMEOUT'))
+                config_data["google"]["timeout"] = int(os.getenv("GOOGLE_TIMEOUT"))
             except ValueError:
                 pass
 
-        if os.getenv('GOOGLE_REQUEST_DELAY'):
-            if 'google' not in config_data:
-                config_data['google'] = {}
+        if os.getenv("GOOGLE_REQUEST_DELAY"):
+            if "google" not in config_data:
+                config_data["google"] = {}
             try:
-                config_data['google']['request_delay'] = float(os.getenv('GOOGLE_REQUEST_DELAY'))
+                config_data["google"]["request_delay"] = float(os.getenv("GOOGLE_REQUEST_DELAY"))
             except ValueError:
                 pass
 
-        if os.getenv('GOOGLE_MAX_RETRIES'):
-            if 'google' not in config_data:
-                config_data['google'] = {}
+        if os.getenv("GOOGLE_MAX_RETRIES"):
+            if "google" not in config_data:
+                config_data["google"] = {}
             try:
-                config_data['google']['max_retries'] = int(os.getenv('GOOGLE_MAX_RETRIES'))
+                config_data["google"]["max_retries"] = int(os.getenv("GOOGLE_MAX_RETRIES"))
             except ValueError:
                 pass
 
         # Load External Configuration
-        if 'external' not in config_data:
-            config_data['external'] = {}
-            
-        if os.getenv('EXTERNAL_PROVIDER'):
-            config_data['external']['provider'] = os.getenv('EXTERNAL_PROVIDER')
-        if os.getenv('EXTERNAL_API_KEY'):
-            config_data['external']['api_key'] = os.getenv('EXTERNAL_API_KEY')
-        if os.getenv('EXTERNAL_MODEL'):
-            config_data['external']['model'] = os.getenv('EXTERNAL_MODEL')
-        if os.getenv('EXTERNAL_EMBEDDING_MODEL'):
-            config_data['external']['embedding_model'] = os.getenv('EXTERNAL_EMBEDDING_MODEL')
-        if os.getenv('EXTERNAL_TIMEOUT'):
+        if "external" not in config_data:
+            config_data["external"] = {}
+
+        if os.getenv("EXTERNAL_PROVIDER"):
+            config_data["external"]["provider"] = os.getenv("EXTERNAL_PROVIDER")
+        if os.getenv("EXTERNAL_API_KEY"):
+            config_data["external"]["api_key"] = os.getenv("EXTERNAL_API_KEY")
+        if os.getenv("EXTERNAL_MODEL"):
+            config_data["external"]["model"] = os.getenv("EXTERNAL_MODEL")
+        if os.getenv("EXTERNAL_EMBEDDING_MODEL"):
+            config_data["external"]["embedding_model"] = os.getenv("EXTERNAL_EMBEDDING_MODEL")
+        if os.getenv("EXTERNAL_TIMEOUT"):
             try:
-                config_data['external']['timeout'] = int(os.getenv('EXTERNAL_TIMEOUT'))
+                config_data["external"]["timeout"] = int(os.getenv("EXTERNAL_TIMEOUT"))
             except ValueError:
                 pass
-        if os.getenv('EXTERNAL_TEMPERATURE'):
+        if os.getenv("EXTERNAL_TEMPERATURE"):
             try:
-                config_data['external']['temperature'] = float(os.getenv('EXTERNAL_TEMPERATURE'))
+                config_data["external"]["temperature"] = float(os.getenv("EXTERNAL_TEMPERATURE"))
             except ValueError:
                 pass
-        if os.getenv('EXTERNAL_MAX_TOKENS'):
+        if os.getenv("EXTERNAL_MAX_TOKENS"):
             try:
-                config_data['external']['max_tokens'] = int(os.getenv('EXTERNAL_MAX_TOKENS'))
+                config_data["external"]["max_tokens"] = int(os.getenv("EXTERNAL_MAX_TOKENS"))
             except ValueError:
                 pass
 
-        if os.getenv('EXTERNAL_REQUEST_DELAY'):
+        if os.getenv("EXTERNAL_REQUEST_DELAY"):
             try:
-                config_data['external']['request_delay'] = float(os.getenv('EXTERNAL_REQUEST_DELAY'))
+                config_data["external"]["request_delay"] = float(os.getenv("EXTERNAL_REQUEST_DELAY"))
             except ValueError:
                 pass
 
-        if os.getenv('EXTERNAL_MAX_RETRIES'):
+        if os.getenv("EXTERNAL_MAX_RETRIES"):
             try:
-                config_data['external']['max_retries'] = int(os.getenv('EXTERNAL_MAX_RETRIES'))
+                config_data["external"]["max_retries"] = int(os.getenv("EXTERNAL_MAX_RETRIES"))
             except ValueError:
                 pass
-        
+
         # Load Shared Fields for External (Context, Logging)
-        if os.getenv('CONTEXT_BUDGET'):
+        if os.getenv("CONTEXT_BUDGET"):
             try:
-                config_data['external']['context_budget'] = int(os.getenv('CONTEXT_BUDGET'))
+                config_data["external"]["context_budget"] = int(os.getenv("CONTEXT_BUDGET"))
             except ValueError:
                 pass
-                
+
         # Logging settings
-        if os.getenv('LLM_LOGGING_ENABLED'):
-            config_data['external']['llm_logging_enabled'] = os.getenv('LLM_LOGGING_ENABLED').lower() == 'true'
-        if os.getenv('LLM_LOG_FILE'):
-            config_data['external']['llm_log_file'] = os.getenv('LLM_LOG_FILE')
-        
+        if os.getenv("LLM_LOGGING_ENABLED"):
+            config_data["external"]["llm_logging_enabled"] = os.getenv("LLM_LOGGING_ENABLED").lower() == "true"
+        if os.getenv("LLM_LOG_FILE"):
+            config_data["external"]["llm_log_file"] = os.getenv("LLM_LOG_FILE")
+
         # Ensure model_map is explicitly empty to prevent pollution from Ollama models
-        config_data['external']['model_map'] = {}
-        
+        config_data["external"]["model_map"] = {}
+
         # DEBUG: Print final config structure for external to verify isolation
         # print(f"DEBUG: External Config Loaded: {config_data.get('external')}")
-        
-        # Ensure model_map is clean
-        config_data['external']['model_map'] = {}
 
+        # Ensure model_map is clean
+        config_data["external"]["model_map"] = {}
 
         # Ensure model_map for Google is initialized but empty to prevent pollution
-        if 'google' in config_data:
+        if "google" in config_data:
             # We explicitly don't want to copy Ollama's model_map to Google
             # unless we implement GOOGLE_MODEL_PLANNING etc. later.
-            config_data['google']['model_map'] = {}
+            config_data["google"]["model_map"] = {}
 
         # Load Custom API Configuration
-        if 'custom_api' not in config_data:
-            config_data['custom_api'] = {}
-            
-        if os.getenv('CUSTOM_API_URL'):
-            config_data['custom_api']['api_url'] = os.getenv('CUSTOM_API_URL')
-        if os.getenv('CUSTOM_API_KEY'):
-            config_data['custom_api']['api_key'] = os.getenv('CUSTOM_API_KEY')
-        if os.getenv('CUSTOM_API_MODEL'):
-            config_data['custom_api']['model'] = os.getenv('CUSTOM_API_MODEL')
-        if os.getenv('CUSTOM_API_EMBEDDING_MODEL'):
-            config_data['custom_api']['embedding_model'] = os.getenv('CUSTOM_API_EMBEDDING_MODEL')
-        if os.getenv('CUSTOM_API_TIMEOUT'):
+        if "custom_api" not in config_data:
+            config_data["custom_api"] = {}
+
+        if os.getenv("CUSTOM_API_URL"):
+            config_data["custom_api"]["api_url"] = os.getenv("CUSTOM_API_URL")
+        if os.getenv("CUSTOM_API_KEY"):
+            config_data["custom_api"]["api_key"] = os.getenv("CUSTOM_API_KEY")
+        if os.getenv("CUSTOM_API_MODEL"):
+            config_data["custom_api"]["model"] = os.getenv("CUSTOM_API_MODEL")
+        if os.getenv("CUSTOM_API_EMBEDDING_MODEL"):
+            config_data["custom_api"]["embedding_model"] = os.getenv("CUSTOM_API_EMBEDDING_MODEL")
+        if os.getenv("CUSTOM_API_TIMEOUT"):
             try:
-                config_data['custom_api']['timeout'] = int(os.getenv('CUSTOM_API_TIMEOUT'))
+                config_data["custom_api"]["timeout"] = int(os.getenv("CUSTOM_API_TIMEOUT"))
             except ValueError:
                 pass
-        if os.getenv('CUSTOM_API_TEMPERATURE'):
+        if os.getenv("CUSTOM_API_TEMPERATURE"):
             try:
-                config_data['custom_api']['temperature'] = float(os.getenv('CUSTOM_API_TEMPERATURE'))
+                config_data["custom_api"]["temperature"] = float(os.getenv("CUSTOM_API_TEMPERATURE"))
             except ValueError:
                 pass
-        if os.getenv('CUSTOM_API_MAX_TOKENS'):
+        if os.getenv("CUSTOM_API_MAX_TOKENS"):
             try:
-                config_data['custom_api']['max_tokens'] = int(os.getenv('CUSTOM_API_MAX_TOKENS'))
+                config_data["custom_api"]["max_tokens"] = int(os.getenv("CUSTOM_API_MAX_TOKENS"))
             except ValueError:
                 pass
-        if os.getenv('CUSTOM_API_VERIFY_SSL'):
-            config_data['custom_api']['verify_ssl'] = os.getenv('CUSTOM_API_VERIFY_SSL').lower() == 'true'
-        if os.getenv('CUSTOM_API_REQUEST_DELAY'):
+        if os.getenv("CUSTOM_API_VERIFY_SSL"):
+            config_data["custom_api"]["verify_ssl"] = os.getenv("CUSTOM_API_VERIFY_SSL").lower() == "true"
+        if os.getenv("CUSTOM_API_REQUEST_DELAY"):
             try:
-                config_data['custom_api']['request_delay'] = float(os.getenv('CUSTOM_API_REQUEST_DELAY'))
+                config_data["custom_api"]["request_delay"] = float(os.getenv("CUSTOM_API_REQUEST_DELAY"))
             except ValueError:
                 pass
-        if os.getenv('CUSTOM_API_MAX_RETRIES'):
+        if os.getenv("CUSTOM_API_MAX_RETRIES"):
             try:
-                config_data['custom_api']['max_retries'] = int(os.getenv('CUSTOM_API_MAX_RETRIES'))
+                config_data["custom_api"]["max_retries"] = int(os.getenv("CUSTOM_API_MAX_RETRIES"))
             except ValueError:
                 pass
-        
+
         # Advanced throttling settings
-        if os.getenv('CUSTOM_API_MAX_CONCURRENCY'):
+        if os.getenv("CUSTOM_API_MAX_CONCURRENCY"):
             try:
-                config_data['custom_api']['max_concurrency'] = int(os.getenv('CUSTOM_API_MAX_CONCURRENCY'))
+                config_data["custom_api"]["max_concurrency"] = int(os.getenv("CUSTOM_API_MAX_CONCURRENCY"))
             except ValueError:
                 pass
-        if os.getenv('CUSTOM_API_GLOBAL_MIN_INTERVAL'):
+        if os.getenv("CUSTOM_API_GLOBAL_MIN_INTERVAL"):
             try:
-                config_data['custom_api']['global_min_interval'] = float(os.getenv('CUSTOM_API_GLOBAL_MIN_INTERVAL'))
+                config_data["custom_api"]["global_min_interval"] = float(os.getenv("CUSTOM_API_GLOBAL_MIN_INTERVAL"))
             except ValueError:
                 pass
-        if os.getenv('CUSTOM_API_RESPECT_RETRY_AFTER'):
-            config_data['custom_api']['respect_retry_after'] = os.getenv('CUSTOM_API_RESPECT_RETRY_AFTER').lower() == 'true'
-        if os.getenv('CUSTOM_API_RETRY_AFTER_MAX_SECONDS'):
+        if os.getenv("CUSTOM_API_RESPECT_RETRY_AFTER"):
+            config_data["custom_api"]["respect_retry_after"] = os.getenv("CUSTOM_API_RESPECT_RETRY_AFTER").lower() == "true"
+        if os.getenv("CUSTOM_API_RETRY_AFTER_MAX_SECONDS"):
             try:
-                config_data['custom_api']['retry_after_max_seconds'] = int(os.getenv('CUSTOM_API_RETRY_AFTER_MAX_SECONDS'))
+                config_data["custom_api"]["retry_after_max_seconds"] = int(os.getenv("CUSTOM_API_RETRY_AFTER_MAX_SECONDS"))
             except ValueError:
                 pass
-        
+
         # Adaptive throttling
-        if os.getenv('CUSTOM_API_ADAPTIVE_THROTTLE_ENABLED'):
-            config_data['custom_api']['adaptive_throttle_enabled'] = os.getenv('CUSTOM_API_ADAPTIVE_THROTTLE_ENABLED').lower() == 'true'
-        if os.getenv('CUSTOM_API_ADAPTIVE_MAX_INTERVAL'):
+        if os.getenv("CUSTOM_API_ADAPTIVE_THROTTLE_ENABLED"):
+            config_data["custom_api"]["adaptive_throttle_enabled"] = (
+                os.getenv("CUSTOM_API_ADAPTIVE_THROTTLE_ENABLED").lower() == "true"
+            )
+        if os.getenv("CUSTOM_API_ADAPTIVE_MAX_INTERVAL"):
             try:
-                config_data['custom_api']['adaptive_max_interval'] = float(os.getenv('CUSTOM_API_ADAPTIVE_MAX_INTERVAL'))
+                config_data["custom_api"]["adaptive_max_interval"] = float(os.getenv("CUSTOM_API_ADAPTIVE_MAX_INTERVAL"))
             except ValueError:
                 pass
-        if os.getenv('CUSTOM_API_ADAPTIVE_INCREASE_FACTOR'):
+        if os.getenv("CUSTOM_API_ADAPTIVE_INCREASE_FACTOR"):
             try:
-                config_data['custom_api']['adaptive_increase_factor'] = float(os.getenv('CUSTOM_API_ADAPTIVE_INCREASE_FACTOR'))
+                config_data["custom_api"]["adaptive_increase_factor"] = float(os.getenv("CUSTOM_API_ADAPTIVE_INCREASE_FACTOR"))
             except ValueError:
                 pass
-        if os.getenv('CUSTOM_API_ADAPTIVE_DECREASE_FACTOR'):
+        if os.getenv("CUSTOM_API_ADAPTIVE_DECREASE_FACTOR"):
             try:
-                config_data['custom_api']['adaptive_decrease_factor'] = float(os.getenv('CUSTOM_API_ADAPTIVE_DECREASE_FACTOR'))
+                config_data["custom_api"]["adaptive_decrease_factor"] = float(os.getenv("CUSTOM_API_ADAPTIVE_DECREASE_FACTOR"))
             except ValueError:
                 pass
-        if os.getenv('CUSTOM_API_ADAPTIVE_SUCCESS_STREAK_THRESHOLD'):
+        if os.getenv("CUSTOM_API_ADAPTIVE_SUCCESS_STREAK_THRESHOLD"):
             try:
-                config_data['custom_api']['adaptive_success_streak_threshold'] = int(os.getenv('CUSTOM_API_ADAPTIVE_SUCCESS_STREAK_THRESHOLD'))
+                config_data["custom_api"]["adaptive_success_streak_threshold"] = int(
+                    os.getenv("CUSTOM_API_ADAPTIVE_SUCCESS_STREAK_THRESHOLD")
+                )
             except ValueError:
                 pass
-        if os.getenv('CUSTOM_API_ADAPTIVE_JITTER_SECONDS'):
+        if os.getenv("CUSTOM_API_ADAPTIVE_JITTER_SECONDS"):
             try:
-                config_data['custom_api']['adaptive_jitter_seconds'] = float(os.getenv('CUSTOM_API_ADAPTIVE_JITTER_SECONDS'))
+                config_data["custom_api"]["adaptive_jitter_seconds"] = float(os.getenv("CUSTOM_API_ADAPTIVE_JITTER_SECONDS"))
             except ValueError:
                 pass
-        
+
         # Context budget and execution loop settings
-        if os.getenv('CONTEXT_BUDGET'):
+        if os.getenv("CONTEXT_BUDGET"):
             try:
-                config_data['custom_api']['context_budget'] = int(os.getenv('CONTEXT_BUDGET'))
+                config_data["custom_api"]["context_budget"] = int(os.getenv("CONTEXT_BUDGET"))
             except ValueError:
                 pass
-        if os.getenv('MAX_EXECUTION_STEPS'):
+        if os.getenv("MAX_EXECUTION_STEPS"):
             try:
-                config_data['custom_api']['max_execution_steps'] = int(os.getenv('MAX_EXECUTION_STEPS'))
+                config_data["custom_api"]["max_execution_steps"] = int(os.getenv("MAX_EXECUTION_STEPS"))
             except ValueError:
                 pass
         # Logging settings
-        if os.getenv('LLM_LOGGING_ENABLED'):
-            config_data['custom_api']['llm_logging_enabled'] = os.getenv('LLM_LOGGING_ENABLED').lower() == 'true'
-        if os.getenv('LLM_LOG_FILE'):
-            config_data['custom_api']['llm_log_file'] = os.getenv('LLM_LOG_FILE')
-        
+        if os.getenv("LLM_LOGGING_ENABLED"):
+            config_data["custom_api"]["llm_logging_enabled"] = os.getenv("LLM_LOGGING_ENABLED").lower() == "true"
+        if os.getenv("LLM_LOG_FILE"):
+            config_data["custom_api"]["llm_log_file"] = os.getenv("LLM_LOG_FILE")
+
         # Ensure model_map is explicitly empty to prevent pollution
-        config_data['custom_api']['model_map'] = {}
+        config_data["custom_api"]["model_map"] = {}
 
         # Layer in config-file overrides (user → project) before env-var
         # overrides that are already in config_data.  Env vars win because
         # they are applied AFTER the file-based defaults.
         try:
             from src.config_loader import ConfigLoader
+
             file_overrides = ConfigLoader().load_merged_overrides()
             if file_overrides:
                 # Deep-merge: file overrides first, then env-var overrides on top
                 from src.config_loader import _deep_merge
+
                 config_data = _deep_merge(file_overrides, config_data)
         except Exception:
             pass  # Config files are optional — never block startup
 
         _config_instance = BridgeConfig(**config_data)
-    return _config_instance 
+    return _config_instance
