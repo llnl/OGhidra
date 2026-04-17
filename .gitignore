@@ -307,3 +307,4 @@ gradle-app.setting
 
 # Project-specific artifacts.
 logs/*
+uv.lock
