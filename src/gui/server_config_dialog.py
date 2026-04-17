@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 from queue import Queue
 from tkinter import messagebox, ttk
-from typing import Any, List, Literal, Optional, Tuple, Union
+from typing import Any, Literal, Tuple
 
 from ..bridge import BridgeConfig
 

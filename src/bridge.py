@@ -52,10 +52,29 @@ def setup_logging(config):
     handlers = []
 
     if config.log_console:
-        handlers.append(logging.StreamHandler(sys.stdout))
+        # Use UTF-8 encoding for console output
+        import codecs
+        # Create a StreamHandler with UTF-8 encoding for Windows compatibility
+        class Utf8StreamHandler(logging.StreamHandler):
+            def __init__(self, stream=None):
+                super().__init__(stream)
+                if stream is None:
+                    # Use UTF-8 encoding for stdout
+                    self.stream = codecs.getwriter('utf-8')(sys.stdout.buffer)
+
+            def emit(self, record):
+                try:
+                    msg = self.format(record)
+                    self.stream.write(msg + self.terminator)
+                    self.flush()
+                except Exception:
+                    self.handleError(record)
+
+        handlers.append(Utf8StreamHandler())
 
     if config.log_file_enabled:
-        handlers.append(logging.FileHandler(config.log_file))
+        # Use UTF-8 encoding for file output
+        handlers.append(logging.FileHandler(config.log_file, encoding='utf-8'))
 
     logging.basicConfig(
         level=getattr(logging, config.log_level),
@@ -206,7 +225,7 @@ class Bridge:
             from src.function_graph import FunctionGraph
 
             self.function_graph = FunctionGraph()
-            self.logger.info("✅ Knowledge Graph initialized for architectural analysis")
+            self.logger.info("[OK] Knowledge Graph initialized for architectural analysis")
         except Exception as e:
             self.logger.warning(f"⚠️  Knowledge Graph initialization failed: {e}. Graph features disabled.")
 

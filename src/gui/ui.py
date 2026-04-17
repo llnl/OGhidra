@@ -12,7 +12,7 @@ from tkinter import messagebox, scrolledtext, ttk
 from typing import Any, Dict
 
 import ttkbootstrap as tb
-from .sub_agent_tree_panel import SubAgentTreePanel
+
 from ..bridge import Bridge
 from ..config import BridgeConfig
 from .memory_info_panel import MemoryInfoPanel
@@ -20,6 +20,7 @@ from .query_input_panel import AIResponsePanel, QueryInputPanel
 from .renamed_functions_panel import RenamedFunctionsPanel
 from .server_config_dialog import ServerConfigDialog
 from .status_panel import StatusPanel
+from .sub_agent_tree_panel import SubAgentTreePanel
 from .theme_colors import ThemeColors
 from .tool_buttons_panel import ToolButtonsPanel
 from .workflow_diagram import WorkflowDiagram
@@ -148,12 +149,13 @@ class OGhidraUI:
         # System Health Status panel
         self.status_panel = StatusPanel(parent)
         self.status_panel.get_widget().after(0, lambda: self.status_panel.get_widget().pack(fill="x", pady=(0, 10)))
-        
+
         # Sub-Agent Tree panel
         from src.agents.base import SubAgentRegistry
+
         self.sub_agent_registry = SubAgentRegistry()
-        self.sub_agent_tree = SubAgentTreePanel(parent, self.sub_agent_registry)
-        self.sub_agent_tree.get_widget().pack(fill='both', expand=True, pady=(0, 10))
+        self.sub_agent_tree = SubAgentTreePanel(parent, self.sub_agent_registry, self._theme_colors)
+        self.sub_agent_tree.get_widget().pack(fill="both", expand=True, pady=(0, 10))
 
         # Analyzed Functions panel
         self.renamed_functions_panel = RenamedFunctionsPanel(parent, self.bridge, theme_colors=self._theme_colors)
@@ -195,39 +197,49 @@ class OGhidraUI:
             """Route structured agent events to the SubAgentRegistry."""
             if event_type == "orchestrator_start":
                 self.sub_agent_registry.on_orchestrator_start(
-                    data["max_cycles"], data["soft_limit"], data["strategy"],
+                    data["max_cycles"],
+                    data["soft_limit"],
+                    data["strategy"],
                 )
             elif event_type == "cycle_start":
                 self.sub_agent_registry.on_cycle_start(
-                    data["cycle"], data["coverage_ratio"],
+                    data["cycle"],
+                    data["coverage_ratio"],
                     data.get("functions_analyzed", 0),
                     data.get("functions_total", 0),
                 )
             elif event_type == "worker_dispatch":
                 self.sub_agent_registry.on_worker_dispatch(
-                    data["task_id"], data["goal"],
-                    data["max_steps"], data["soft_limit"],
+                    data["task_id"],
+                    data["goal"],
+                    data["max_steps"],
+                    data["soft_limit"],
                     recipe=data.get("recipe", ""),
                 )
             elif event_type == "worker_step":
                 self.sub_agent_registry.on_worker_step(
-                    data["task_id"], data["step"], data["tool_count"],
+                    data["task_id"],
+                    data["step"],
+                    data["tool_count"],
                     data.get("real_tool_count", 0),
                     phase=data.get("phase", ""),
                 )
             elif event_type == "worker_complete":
                 self.sub_agent_registry.on_worker_complete(
-                    data["task_id"], data["exit_reason"], data["tool_count"],
+                    data["task_id"],
+                    data["exit_reason"],
+                    data["tool_count"],
                     data.get("real_tool_count", 0),
                 )
             elif event_type == "orchestrator_complete":
                 self.sub_agent_registry.on_orchestrator_complete(
-                    data["exit_reason"], data["coverage_ratio"],
+                    data["exit_reason"],
+                    data["coverage_ratio"],
                     data.get("functions_analyzed", 0),
                     data.get("functions_total", 0),
                 )
-        self.bridge._ui_agent_callback = _on_agent_event
 
+        self.bridge._ui_agent_callback = _on_agent_event
 
         # Tool panel (hidden - accessed via Analysis menu)
         self.tool_panel = ToolButtonsPanel(parent, self.bridge, None, self.workflow_diagram, self.renamed_functions_panel)
@@ -1494,4 +1506,5 @@ def launch_ui(bridge: Bridge, config: BridgeConfig):
         print(f"Error launching UI: {e}")
         return False
 
+    return True
     return True

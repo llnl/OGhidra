@@ -1,3 +1,10 @@
+import logging
+from tkinter import ttk
+from typing import Optional
+
+from .theme_colors import ThemeColors
+
+
 class SubAgentTreePanel:
     """Live sidebar panel showing orchestrator/worker hierarchy as a tree.
 
@@ -5,61 +12,78 @@ class SubAgentTreePanel:
     ttk.Treeview.  Supports collapsing to save sidebar space.
     """
 
-    POLL_ACTIVE_MS = 200     # Fast refresh while orchestrator is running
-    POLL_IDLE_MS = 2000      # Slow refresh when idle
+    POLL_ACTIVE_MS = 200  # Fast refresh while orchestrator is running
+    POLL_IDLE_MS = 2000  # Slow refresh when idle
 
     # Unicode status icons
     _ICONS = {
-        "complete": "\u2713",    # ✓
-        "running":  "\u27F3",    # ⟳
-        "error":    "\u2717",    # ✗
-        "pending":  "\u25CB",    # ○
+        "complete": "\u2713",  # ✓
+        "running": "\u27f3",  # ⟳
+        "error": "\u2717",  # ✗
+        "pending": "\u25cb",  # ○
     }
 
-    def __init__(self, parent, registry):
+    def __init__(
+        self,
+        parent,
+        registry,
+        theme_colors: ThemeColors,
+        logger: Optional[logging.Logger] = None,
+    ):
         from src.agents.base import SubAgentRegistry  # noqa: F811
+
         self.registry: SubAgentRegistry = registry
         self._collapsed = False
 
-        colors = _theme_colors
+        self._theme_colors = theme_colors
+        self.logger = logger or logging.getLogger(__name__)
 
         # Outer frame
         self.frame = ttk.LabelFrame(parent, text="Sub-Agents", padding=8)
 
         # Header row: collapse toggle + summary
         header = ttk.Frame(self.frame)
-        header.pack(fill='x')
+        header.pack(fill="x")
 
         self.toggle_btn = ttk.Button(
-            header, text="\u25BC", width=3,
+            header,
+            text="\u25bc",
+            width=3,
             command=self._toggle_collapse,
         )
-        self.toggle_btn.pack(side='left')
+        self.toggle_btn.pack(side="left")
 
         self.summary_label = ttk.Label(
-            header, text="Idle", font=('Segoe UI', 9),
+            header,
+            text="Idle",
+            font=("Segoe UI", 9),
         )
-        self.summary_label.pack(side='left', padx=(6, 0))
+        self.summary_label.pack(side="left", padx=(6, 0))
 
         # Collapsible content
         self.content_frame = ttk.Frame(self.frame)
-        self.content_frame.pack(fill='both', expand=True, pady=(4, 0))
+        self.content_frame.pack(fill="both", expand=True, pady=(4, 0))
 
         # Treeview (tree-only, no column headers)
         tree_container = ttk.Frame(self.content_frame)
-        tree_container.pack(fill='both', expand=True)
+        tree_container.pack(fill="both", expand=True)
         tree_container.grid_rowconfigure(0, weight=1)
         tree_container.grid_columnconfigure(0, weight=1)
 
         self.tree = ttk.Treeview(
-            tree_container, show='tree', height=12, selectmode='none',
+            tree_container,
+            show="tree",
+            height=12,
+            selectmode="none",
         )
         scrollbar = ttk.Scrollbar(
-            tree_container, orient='vertical', command=self.tree.yview,
+            tree_container,
+            orient="vertical",
+            command=self.tree.yview,
         )
         self.tree.configure(yscrollcommand=scrollbar.set)
-        self.tree.grid(row=0, column=0, sticky='nsew')
-        scrollbar.grid(row=0, column=1, sticky='ns')
+        self.tree.grid(row=0, column=0, sticky="nsew")
+        scrollbar.grid(row=0, column=1, sticky="ns")
 
         # Start polling
         self._poll()
@@ -74,10 +98,10 @@ class SubAgentTreePanel:
         self._collapsed = not self._collapsed
         if self._collapsed:
             self.content_frame.pack_forget()
-            self.toggle_btn.config(text="\u25B6")
+            self.toggle_btn.config(text="\u25b6")
         else:
-            self.content_frame.pack(fill='both', expand=True, pady=(4, 0))
-            self.toggle_btn.config(text="\u25BC")
+            self.content_frame.pack(fill="both", expand=True, pady=(4, 0))
+            self.toggle_btn.config(text="\u25bc")
 
     # ── Polling loop ──
 
@@ -87,12 +111,9 @@ class SubAgentTreePanel:
                 state = self.registry.get_state()
                 self._render(state)
         except Exception as e:
-            logger.error(f"SubAgentTreePanel poll error: {e}")
+            self.logger.error(f"SubAgentTreePanel poll error: {e}")
 
-        interval = (
-            self.POLL_ACTIVE_MS if self.registry.is_active
-            else self.POLL_IDLE_MS
-        )
+        interval = self.POLL_ACTIVE_MS if self.registry.is_active else self.POLL_IDLE_MS
         self.frame.after(interval, self._poll)
 
     # ── Rendering ──
@@ -110,34 +131,28 @@ class SubAgentTreePanel:
         area_pct = int(state.coverage_ratio * 100)
 
         # Build function coverage string
-        func_cov_str = self._format_func_coverage(
-            state.functions_analyzed, state.functions_total
-        )
+        func_cov_str = self._format_func_coverage(state.functions_analyzed, state.functions_total)
 
         # Summary label — show area coverage clearly
         if state.active:
             self.summary_label.config(
-                text=f"Cycle {state.cycle}/{state.max_cycles}, "
-                     f"areas {area_pct}%",
+                text=f"Cycle {state.cycle}/{state.max_cycles}, " f"areas {area_pct}%",
             )
         else:
             self.summary_label.config(
-                text=f"Done ({state.exit_reason}, "
-                     f"areas {area_pct}%)",
+                text=f"Done ({state.exit_reason}, " f"areas {area_pct}%)",
             )
 
         # Root: Orchestrator — label the metric clearly as "area coverage"
-        orch_text = (
-            f"Orchestrator [cycle {state.cycle}/{state.max_cycles}, "
-            f"area coverage {area_pct}%]"
-        )
+        orch_text = f"Orchestrator [cycle {state.cycle}/{state.max_cycles}, " f"area coverage {area_pct}%]"
         orch_item = self.tree.insert("", "end", text=orch_text, open=True)
 
         # Function coverage row (child of orchestrator) — separate metric
         if func_cov_str:
             self.tree.insert(
-                orch_item, "end",
-                text=f"\U0001F4CA Func analysis: {func_cov_str}",
+                orch_item,
+                "end",
+                text=f"\U0001f4ca Func analysis: {func_cov_str}",
             )
 
         # Children: Workers
