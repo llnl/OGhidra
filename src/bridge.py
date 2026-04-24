@@ -92,7 +92,7 @@ class Bridge:
     # Class-level singleton for SentenceTransformer model
     _sentence_transformer_model = None
     _model_load_lock = None
-    _ollama_client: OllamaClient | None = None
+    _llm_embedding_client: OllamaClient | None = None
 
     def __init__(
         self, bridge_config: BridgeConfig, include_capabilities: bool = False, max_agent_steps: int = 5, enable_cag: bool = True
@@ -131,11 +131,10 @@ class Bridge:
             self.logger.info("Using Ollama as LLM provider")
 
         # Initialize clients
-        # Note: self._ollama_client is used as the generic LLM client name to avoid massive refactoring
-        self.ghidra_client = LazyGhidraClient(GhidraMCPClient, config=self.bridge_config.ghidra_mcp, ollama_client=self._ollama_client)
+        self.ghidra_client = LazyGhidraClient(GhidraMCPClient, config=self.bridge_config.ghidra_mcp, llm_client=self.llm_client)
 
-        # Set Ollama client for embeddings
-        Bridge.set_ollama_client(self._ollama_client)
+        # Set the LLM client for embeddings
+        Bridge.set_llm_embedding_client(self.llm_client)
 
         # Command parser for extracting tool calls
         self.command_parser = CommandParser()
@@ -163,7 +162,7 @@ class Bridge:
         # Context manager for intelligent result handling
         # All size limits come from config (scales with CONTEXT_BUDGET)
         self.context_manager = ContextManager(
-            ollama_client=self.llm_client,
+            llm_client=self.llm_client,
             context_budget=self.llm_config.context_budget,
             execution_fraction=self.llm_config.context_budget_execution,
             enable_summarization=self.llm_config.enable_result_summarization,
@@ -251,11 +250,7 @@ class Bridge:
 
         # Persistent investigation state across queries
         # These survive between queries so follow-up questions retain context
-        from src.models.memory import (
-            DiscoveryCache,
-            FunctionRegistry,
-            InvestigationNotebook,
-        )
+        from src.models.memory import DiscoveryCache, FunctionRegistry, InvestigationNotebook
 
         self._persistent_function_registry = FunctionRegistry()
         self._persistent_notebook = InvestigationNotebook()
@@ -417,12 +412,12 @@ class Bridge:
             self.ghidra_client.ollama_client = self.llm_client
 
         if hasattr(self, "context_manager"):
-            self.context_manager.ollama_client = self.llm_client
+            self.context_manager.llm_client = self.llm_client
             # Update generic context settings if they changed
             self.context_manager.context_budget = self.llm_config.context_budget
             self.context_manager.execution_fraction = self.llm_config.context_budget_execution
 
-        Bridge.set_ollama_client(self.llm_client)
+        Bridge.set_llm_embedding_client(self.llm_client)
         print(f"[Bridge] Client reloaded. Provider: {self.provider}")
 
     def set_grep_layer_enabled(self, enabled: bool) -> None:
@@ -659,7 +654,7 @@ Do NOT skip to tool execution. Provide concrete details from the data above.
         """Get embeddings using the configured LLM client's embedding service (Ollama or External)."""
         logger = logging.getLogger("ollama-ghidra-bridge")
 
-        if not hasattr(cls, "_ollama_client") or cls._ollama_client is None:
+        if not hasattr(cls, "_llm_embedding_client") or cls._llm_embedding_client is None:
             logger.debug("LLM client not initialized. Embeddings unavailable.")
             return []
 
@@ -677,20 +672,20 @@ Do NOT skip to tool execution. Provide concrete details from the data above.
 
         # Use provided model or default from client config
         # Use nomic-embed-text as default if config doesn't have it
-        client_config = getattr(cls._ollama_client, "config", None)
+        client_config = getattr(cls._llm_embedding_client, "config", None)
         embedding_model = model or getattr(client_config, "embedding_model", "nomic-embed-text")
 
         try:
             embeddings = []
             for text in valid_texts:
-                embedding = cls._ollama_client.embed(text, model=embedding_model)
+                embedding = cls._llm_embedding_client.embed(text, model=embedding_model)
                 if embedding:
                     embeddings.append(embedding)
                 else:
                     logger.debug(f"Failed to generate embedding for text: {text[:50]}...")
                     return []  # Return empty if any embedding fails
 
-            provider_name = getattr(cls._ollama_client, "provider", "Ollama")
+            provider_name = getattr(cls._llm_embedding_client, "provider", "Ollama")
             logger.debug(f"✅ Generated {len(embeddings)} embeddings using {provider_name} {embedding_model}")
             return embeddings
         except Exception as e:
@@ -703,9 +698,9 @@ Do NOT skip to tool execution. Provide concrete details from the data above.
         return cls.get_embeddings(texts, model)
 
     @classmethod
-    def set_ollama_client(cls, ollama_client: OllamaClient):
+    def set_llm_embedding_client(cls, ollama_client: OllamaClient):
         """Set the Ollama client for embeddings."""
-        cls._ollama_client = ollama_client
+        cls._llm_embedding_client = ollama_client
 
     def _init_caches(self):
         """Initialize decompilation and function caches."""
@@ -1561,7 +1556,7 @@ You can help analyze binary files by executing commands through GhidraMCP."""
         )
 
         orchestrator = Orchestrator(
-            llm_client=self._ollama_client,
+            llm_client=self.llm_client,
             tool_executor=self.tool_executor,
             blackboard=blackboard,
             command_parser=self.command_parser,
@@ -1731,7 +1726,7 @@ You can help analyze binary files by executing commands through GhidraMCP."""
 
             # Generate execution step with properly separated prompts
             response = self.llm_client.generate_with_phase(user_prompt, phase="execution", system_prompt=system_prompt)
-            logging.info(f"Received response from Ollama: {response[:100]}...")
+            logging.info(f"Received response from the LLM: {response[:100]}...")
 
             # REMOVED: Text-based ARTIFACT parsing (never used)
             # Artifacts now auto-populated from execution gate triggers
@@ -4390,13 +4385,13 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
 
         generator = ReportGenerator(
             ghidra_client=self.ghidra_client,
-            llm_client=self._ollama_client,
+            llm_client=self.llm_client,
             session=self.session,
             cag_manager=getattr(self, "cag_manager", None),
             enable_cag=getattr(self, "enable_cag", False),
             logger=self.logger,
             logs_dir=self.analysis_dumper.logs_dir if hasattr(self, "analysis_dumper") else "logs",
-            html_report_prompt=getattr(self.config.ollama, "html_report_generation_prompt", ""),
+            html_report_prompt=getattr(self.llm_config, "html_report_generation_prompt", ""),
             function_summaries=getattr(self, "function_summaries", {}),
         )
         return generator.generate_software_report(report_format)

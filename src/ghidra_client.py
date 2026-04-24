@@ -46,7 +46,7 @@ class GhidraMCPClient:
         self.logger.warning(f"Invalid {param_name} type={type(value).__name__}; using default={default}")
         return default
 
-    def __init__(self, config: GhidraMCPConfig, ollama_client=None):
+    def __init__(self, config: GhidraMCPConfig, llm_client=None):
         """
         Initialize the GhidraMCP client.
 
@@ -57,7 +57,7 @@ class GhidraMCPClient:
         self.config = config
         self.client = httpx.Client(timeout=config.timeout)
         self.api_version = None
-        self.ollama_client = ollama_client
+        self.llm_client = llm_client
 
         self.logger = logging.getLogger("ollama-ghidra-bridge.ghidra")
 
@@ -631,7 +631,7 @@ class GhidraMCPClient:
         function_calls = list(set(function_calls))
 
         # If AI analysis is available, generate semantic summary
-        if self.ollama_client:
+        if self.llm_client:
             try:
                 # Prepare analysis prompt for AI
                 analysis_prompt = (
@@ -651,7 +651,7 @@ class GhidraMCPClient:
                     f"DECOMPILED CODE:\n{decompiled_code[:4000]}\n"  # Limit to avoid context overflow
                 )
 
-                ai_summary = self.ollama_client.generate(prompt=analysis_prompt, temperature=0.3)
+                ai_summary = self.llm_client.generate(prompt=analysis_prompt, temperature=0.3)
 
                 # Build result with AI analysis first
                 result = [

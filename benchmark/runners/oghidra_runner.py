@@ -101,7 +101,7 @@ class OGhidraRunner:
         )
 
         # Generate AI summary
-        ai_response = self.bridge._ollama_client.generate(prompt=analysis_prompt)
+        ai_response = self.bridge.llm_client.generate(prompt=analysis_prompt)
 
         # Parse response
         summary, suggested_name = self._parse_response(ai_response)

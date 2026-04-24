@@ -405,7 +405,7 @@ class ToolButtonsPanel:
                         analysis_prompt = self._get_analysis_prompt(tool_name, formatted_tool_data + extra_context)
 
                         try:
-                            ai_analysis = self.bridge._ollama_client.generate(prompt=analysis_prompt)
+                            ai_analysis = self.bridge.llm_client.generate(prompt=analysis_prompt)
 
                             if ai_analysis and ai_analysis.strip():
                                 self.agent_ui_queue.put(("response", ("AI Analysis", ai_analysis)))
@@ -547,7 +547,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
 
                     # Use direct ollama.generate instead of bridge.process_query to avoid infinite loops
                     # This follows the same fix pattern as the "Analyze Current Function" tool
-                    ai_response = self.bridge._ollama_client.generate(prompt=analysis_query)
+                    ai_response = self.bridge.llm_client.generate(prompt=analysis_query)
 
                     if ai_response and ai_response.strip():
                         # Send AI analysis to response panel via queue
@@ -1115,7 +1115,7 @@ EXAMPLES of good names:
 
 CRITICAL: You MUST include all four sections with the exact headers shown above. Focus on making the suggested name as specific and descriptive as possible."""
 
-                ai_response = self.bridge._ollama_client.generate(prompt=analysis_query)
+                ai_response = self.bridge.llm_client.generate(prompt=analysis_query)
 
                 if ai_response and ai_response.strip():
                     function_summary = ai_response.strip()
@@ -1252,9 +1252,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                     # ============ ENHANCED METADATA EXTRACTION ============
                     # Extract structured metadata from decompiled code
                     try:
-                        from src.function_metadata_extractor import (
-                            FunctionMetadataExtractor,
-                        )
+                        from src.function_metadata_extractor import FunctionMetadataExtractor
 
                         metadata_extractor = FunctionMetadataExtractor()
 
@@ -2134,9 +2132,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
 
                         # Initialize session manager if not exists
                         if not hasattr(self, "session_manager"):
-                            from src.enhanced_session_manager import (
-                                EnhancedSessionManager,
-                            )
+                            from src.enhanced_session_manager import EnhancedSessionManager
 
                             self.session_manager = EnhancedSessionManager()
 
@@ -2446,7 +2442,7 @@ Check the tab to see detailed analysis results and manage function information.
                     )
 
                     # Generate AI analysis
-                    ai_analysis = self.bridge._ollama_client.generate(prompt=analysis_prompt)
+                    ai_analysis = self.bridge.llm_client.generate(prompt=analysis_prompt)
 
                     if ai_analysis and ai_analysis.strip():
                         # Send AI analysis to response panel via queue
@@ -3112,7 +3108,7 @@ Please provide:
 
                     # Instead of directly streaming to the UI, collect the response
                     # The bridge doesn't have a streaming method, so we'll use a non-streaming approach
-                    full_response = self.bridge._ollama_client.generate(
+                    full_response = self.bridge.llm_client.generate(
                         prompt=analysis_prompt,
                         temperature=0.7,
                     )

@@ -1,6 +1,6 @@
 from queue import Queue
 from tkinter import ttk
-from typing import Any, Literal, Tuple, Union
+from typing import Any, Literal, Tuple
 
 
 class StatusPanel:
@@ -12,30 +12,36 @@ class StatusPanel:
         # Create queue for thread-safe UI updates
         self.ui_update_queue: Queue[Tuple[Literal["llm", "ghidra", "cag"], Any]] = Queue()
 
-        # Status indicators - initialize with "Down" status
+        self.frame = ttk.LabelFrame(parent, text="System Health", padding=8)
+
+        # Status indicators container - grid layout for side-by-side alignment
+        self.status_container = ttk.Frame(self.frame)
+        self.status_container.pack(fill="x", pady=2)
+
+        # Status indicators - initialize with "Down" status and place them side by side
         self.llm_status = ttk.Label(
-            self.frame,
+            self.status_container,
             text="LLM API: NOT OK ✗",
             foreground="#FF0000",
             font=("Arial", 9),
         )
-        self.llm_status.pack(fill="x", pady=2, anchor="w")
+        self.llm_status.grid(row=0, column=0, padx=5, sticky="w")
 
         self.ghidra_status = ttk.Label(
-            self.frame,
+            self.status_container,
             text="GhidraMCP API: NOT OK ✗",
             foreground="#FF0000",
             font=("Arial", 9),
         )
-        self.ghidra_status.pack(fill="x", pady=2, anchor="w")
+        self.ghidra_status.grid(row=0, column=1, padx=5, sticky="w")
 
         self.cag_status = ttk.Label(
-            self.frame,
+            self.status_container,
             text="CAG System: Disabled",
             foreground="#FFA500",
             font=("Arial", 9),
         )
-        self.cag_status.pack(fill="x", pady=2, anchor="w")
+        self.cag_status.grid(row=0, column=2, padx=5, sticky="w")
 
         # Start queue checking process on the main thread
         self._check_ui_update_queue()
@@ -89,7 +95,7 @@ class StatusPanel:
         else:
             color = "#2BC72B" if llm_status else "#FF0000"
             text = "OK ✓" if llm_status else "NOT OK ✗"
-            self.llm_status.config(text=f"Llm API: {text}", foreground=color)
+            self.llm_status.config(text=f"LLM API: {text}", foreground=color)
 
     def _update_ghidra_status_main_thread(self, ghidra_status):
         """Update the Ghidra status indicator on the main thread."""

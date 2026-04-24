@@ -2,7 +2,7 @@
 Data structures for session memory and tool call tracking.
 """
 
-import datetime
+from datetime import datetime, UTC, timedelta
 import uuid
 from typing import Any, Dict, List, Literal, Optional
 
@@ -14,7 +14,7 @@ class ToolCallRecord(BaseModel):
 
     tool_name: str = Field(min_length=1, description="Tool name cannot be empty")
     parameters: Dict[str, Any]
-    timestamp: datetime.datetime = Field(default_factory=datetime.datetime.utcnow)
+    timestamp: datetime = Field(default_factory=datetime.now(tz=UTC))
     status: Optional[Literal["success", "error"]] = None
     result_preview: Optional[str] = Field(default=None, max_length=1000, description="Brief summary of the tool's output")
 
@@ -35,8 +35,8 @@ class SessionRecord(BaseModel):
     """Represents a single conversation session with the user."""
 
     session_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    start_time: datetime.datetime = Field(default_factory=datetime.datetime.utcnow)
-    end_time: Optional[datetime.datetime] = None
+    start_time: datetime = Field(default_factory=datetime.now(tz=UTC))
+    end_time: Optional[datetime] = None
 
     user_task_description: str = Field(
         min_length=1, max_length=2000, description="The core task, problem, or question from the user"
@@ -71,7 +71,7 @@ class SessionRecord(BaseModel):
         return v
 
     @property
-    def duration(self) -> Optional[datetime.timedelta]:
+    def duration(self) -> Optional[timedelta]:
         """Calculate session duration."""
         if self.end_time and self.start_time:
             return self.end_time - self.start_time

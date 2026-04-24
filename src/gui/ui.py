@@ -146,10 +146,6 @@ class OGhidraUI:
         self.workflow_diagram = WorkflowDiagram(workflow_frame, width=500, height=100, theme_colors=self._theme_colors)
         self.workflow_diagram.get_widget().after(0, lambda: self.workflow_diagram.get_widget().pack())
 
-        # System Health Status panel
-        self.status_panel = StatusPanel(parent)
-        self.status_panel.get_widget().after(0, lambda: self.status_panel.get_widget().pack(fill="x", pady=(0, 10)))
-
         # Sub-Agent Tree panel
         from src.agents.base import SubAgentRegistry
 
@@ -165,6 +161,10 @@ class OGhidraUI:
         )
         # Start auto-refresh for renamed functions
         self.renamed_functions_panel._start_auto_refresh()
+
+        # System Health Status panel
+        self.status_panel = StatusPanel(parent)
+        self.status_panel.get_widget().after(0, lambda: self.status_panel.get_widget().pack(fill="x", pady=(0, 10)))
 
         # Initial health check and setup periodic updates
         self._query_and_update_health_status()

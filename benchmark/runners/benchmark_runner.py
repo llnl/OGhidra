@@ -139,7 +139,7 @@ class BenchmarkRunner:
         self.evaluator = SemanticEvaluator(
             use_gpu=self.config.use_gpu,
             include_llm_judge=self.config.include_llm_judge,
-            ollama_client=bridge.ollama if self.config.include_llm_judge else None,
+            llm_client=bridge.llm_client if self.config.include_llm_judge else None,
         )
 
         logger.info(f"BenchmarkRunner initialized: {self.config.name}")

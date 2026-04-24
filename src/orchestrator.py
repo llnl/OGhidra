@@ -29,7 +29,9 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional, List, Dict, Any, Set
-
+from src.ollama_client import OllamaClient
+from src.external_client import ExternalClient
+from src.custom_api_client import CustomAPIClient
 from src.agents.base import WorkerTask, AgentResult
 from src.agents.worker_agent import WorkerAgent
 from src.coverage_tracker import CoverageTracker, DEPTH_ENCOUNTERED, DEPTH_ANALYZED
@@ -45,23 +47,93 @@ from src.orchestrator_logger import OrchestratorLogger
 
 # ── Doom loop detection ───────────────────────────────────────────────────
 
-_GOAL_STOP_WORDS = frozenset({
-    # Common English stop words
-    "the", "a", "an", "and", "or", "to", "for", "in", "of", "on", "with",
-    "from", "by", "is", "are", "that", "this", "it", "its", "be", "was",
-    "were", "been", "being", "have", "has", "had", "do", "does", "did",
-    # RE-specific filler verbs (add no semantic meaning to goals)
-    "investigate", "analyze", "examine", "check", "verify", "confirm",
-    "trace", "review", "inspect", "assess", "evaluate", "determine",
-    "look", "find", "search", "identify", "explore", "study",
-    # Common filler nouns/adjectives in RE investigation goals
-    "function", "functions", "binary", "code", "operations", "operation",
-    "call", "calls", "calling", "called", "callers", "sites",
-    "using", "used", "whether", "if",
-    "any", "all", "each", "more", "further", "also", "specific",
-    "data", "flow", "potential", "possible", "vulnerabilities",
-    "vulnerability", "issues", "flaws", "problems",
-})
+_GOAL_STOP_WORDS = frozenset(
+    {
+        # Common English stop words
+        "the",
+        "a",
+        "an",
+        "and",
+        "or",
+        "to",
+        "for",
+        "in",
+        "of",
+        "on",
+        "with",
+        "from",
+        "by",
+        "is",
+        "are",
+        "that",
+        "this",
+        "it",
+        "its",
+        "be",
+        "was",
+        "were",
+        "been",
+        "being",
+        "have",
+        "has",
+        "had",
+        "do",
+        "does",
+        "did",
+        # RE-specific filler verbs (add no semantic meaning to goals)
+        "investigate",
+        "analyze",
+        "examine",
+        "check",
+        "verify",
+        "confirm",
+        "trace",
+        "review",
+        "inspect",
+        "assess",
+        "evaluate",
+        "determine",
+        "look",
+        "find",
+        "search",
+        "identify",
+        "explore",
+        "study",
+        # Common filler nouns/adjectives in RE investigation goals
+        "function",
+        "functions",
+        "binary",
+        "code",
+        "operations",
+        "operation",
+        "call",
+        "calls",
+        "calling",
+        "called",
+        "callers",
+        "sites",
+        "using",
+        "used",
+        "whether",
+        "if",
+        "any",
+        "all",
+        "each",
+        "more",
+        "further",
+        "also",
+        "specific",
+        "data",
+        "flow",
+        "potential",
+        "possible",
+        "vulnerabilities",
+        "vulnerability",
+        "issues",
+        "flaws",
+        "problems",
+    }
+)
 
 
 # ── Strategy constants ─────────────────────────────────────────────────────
@@ -73,6 +145,7 @@ VALID_STRATEGIES = {STRATEGY_BINARY_UNDERSTANDING, STRATEGY_MALWARE_HUNTING, STR
 
 # ── Worker result memory ──────────────────────────────────────────────────
 
+
 @dataclass
 class WorkerResultSummary:
     """Compact summary of what a worker accomplished, for orchestrator memory.
@@ -80,6 +153,7 @@ class WorkerResultSummary:
     The orchestrator accumulates these across cycles so the task-creation LLM
     can see exactly what each previous worker did — preventing duplicate work.
     """
+
     cycle: int
     goal: str
     functions_decompiled: List[str] = field(default_factory=list)
@@ -353,9 +427,13 @@ For investigation: {"tier": "investigation"}"""
 TRIAGE_USER_PROMPT = 'Classify this query: "{query}"'
 
 # Action tools that modify the binary (no LLM summary needed after execution)
-_ACTION_TOOLS = frozenset({
-    "rename_function", "rename_function_by_address", "set_comment",
-})
+_ACTION_TOOLS = frozenset(
+    {
+        "rename_function",
+        "rename_function_by_address",
+        "set_comment",
+    }
+)
 
 
 class Orchestrator:
@@ -365,7 +443,7 @@ class Orchestrator:
     Usage::
 
         orchestrator = Orchestrator(
-            llm_client=ollama,
+            llm_client=llm_client,
             tool_executor=tool_executor,
             blackboard=blackboard,
             command_parser=parser,
@@ -379,7 +457,7 @@ class Orchestrator:
 
     def __init__(
         self,
-        llm_client,
+        llm_client: OllamaClient | ExternalClient | CustomAPIClient,
         tool_executor,
         blackboard,
         command_parser,
@@ -427,11 +505,10 @@ class Orchestrator:
 
         # Vulnerability correlation hooks (extensible rule system)
         from src.correlation_hooks import CorrelationHookRegistry
+
         self._hook_registry = CorrelationHookRegistry()
         if getattr(config, "correlation_hooks_enabled", True):
-            self._hook_registry.register_builtin_hooks(
-                self.worker_max_steps, self.worker_max_steps
-            )
+            self._hook_registry.register_builtin_hooks(self.worker_max_steps, self.worker_max_steps)
             custom_dir = getattr(config, "custom_hooks_dir", "")
             if custom_dir:
                 self._hook_registry.load_custom_hooks(custom_dir)
@@ -490,10 +567,7 @@ class Orchestrator:
         if self.conversation_history:
             lines = []
             for turn in self.conversation_history[-3:]:
-                lines.append(
-                    f"User: {turn['query']}\n"
-                    f"Assistant: {turn['response_summary'][:200]}"
-                )
+                lines.append(f"User: {turn['query']}\n" f"Assistant: {turn['response_summary'][:200]}")
             history_ctx = "\n## Recent Conversation\n" + "\n---\n".join(lines)
 
         state_ctx = ""
@@ -524,14 +598,15 @@ class Orchestrator:
             f"Examples: 'map the complete architecture', 'what does this binary do "
             f"end to end?', 'rename all functions based on behavior'\n\n"
             f"{history_ctx}{state_ctx}\n\n"
-            f"Query: \"{query}\"\n\n"
+            f'Query: "{query}"\n\n'
             f"Respond with ONLY the classification (e.g., 'conversational' or "
             f"'investigation:vuln_hunting'). Nothing else."
         )
 
         try:
             response = self.llm.generate_with_phase(
-                prompt, phase="planning",
+                prompt,
+                phase="planning",
                 system_prompt="You are a query router. Classify concisely.",
             )
             cleaned = response.strip().lower().replace("'", "").replace('"', "")
@@ -564,23 +639,23 @@ class Orchestrator:
         strategy classification, task creation, or synthesis LLM calls.
         """
         self.emitter.emit_cot("Orchestrator", "Conversational mode")
-        self.emitter.emit_agent_event("orchestrator_start", {
-            "max_cycles": 1, "soft_limit": 1, "strategy": "conversational",
-        })
+        self.emitter.emit_agent_event(
+            "orchestrator_start",
+            {
+                "max_cycles": 1,
+                "soft_limit": 1,
+                "strategy": "conversational",
+            },
+        )
 
         # Build conversation context for the worker
         conv_context = ""
         if self.conversation_history:
             lines = []
             for turn in self.conversation_history[-5:]:
-                lines.append(
-                    f"User: {turn['query']}\n"
-                    f"Assistant: {turn['response_summary'][:400]}"
-                )
+                lines.append(f"User: {turn['query']}\n" f"Assistant: {turn['response_summary'][:400]}")
             conv_context = (
-                "## Prior Conversation\n"
-                + "\n---\n".join(lines)
-                + "\n\nUse this context to understand follow-up references."
+                "## Prior Conversation\n" + "\n---\n".join(lines) + "\n\nUse this context to understand follow-up references."
             )
 
         task = WorkerTask(
@@ -588,42 +663,51 @@ class Orchestrator:
             strategy_hint=conv_context or "Answer the user's question using the available tools.",
             max_steps=20,
             include_sections=[
-                "scope", "function_registry", "discovery",
-                "notebook", "tool_health",
+                "scope",
+                "function_registry",
+                "discovery",
+                "notebook",
+                "tool_health",
             ],
         )
 
-        self.emitter.emit_agent_event("worker_dispatch", {
-            "task_id": task.task_id,
-            "goal": query[:100],
-            "max_steps": task.max_steps,
-            "soft_limit": task.max_steps,
-            "recipe": "",
-        })
+        self.emitter.emit_agent_event(
+            "worker_dispatch",
+            {
+                "task_id": task.task_id,
+                "goal": query[:100],
+                "max_steps": task.max_steps,
+                "soft_limit": task.max_steps,
+                "recipe": "",
+            },
+        )
 
         worker = self._spawn_worker()
         result = worker.run(task)
 
         real_tools = 0
         if result.exec_results:
-            real_tools = sum(
-                1 for te in result.exec_results.tool_executions
-                if te.tool_name != "<no_command>"
-            )
-        self.emitter.emit_agent_event("worker_complete", {
-            "task_id": task.task_id,
-            "exit_reason": result.exit_reason,
-            "tool_count": result.tool_executions_count,
-            "real_tool_count": real_tools,
-            "is_complete": result.is_complete,
-        })
-        self.emitter.emit_agent_event("orchestrator_complete", {
-            "exit_reason": f"conversational_{result.exit_reason}",
-            "cycles_used": 1,
-            "coverage_ratio": 0,
-            "functions_analyzed": real_tools,
-            "functions_total": 0,
-        })
+            real_tools = sum(1 for te in result.exec_results.tool_executions if te.tool_name != "<no_command>")
+        self.emitter.emit_agent_event(
+            "worker_complete",
+            {
+                "task_id": task.task_id,
+                "exit_reason": result.exit_reason,
+                "tool_count": result.tool_executions_count,
+                "real_tool_count": real_tools,
+                "is_complete": result.is_complete,
+            },
+        )
+        self.emitter.emit_agent_event(
+            "orchestrator_complete",
+            {
+                "exit_reason": f"conversational_{result.exit_reason}",
+                "cycles_used": 1,
+                "coverage_ratio": 0,
+                "functions_analyzed": real_tools,
+                "functions_total": 0,
+            },
+        )
 
         # Return the worker's response directly — no synthesis LLM call
         response = result.final_response or ""
@@ -648,10 +732,7 @@ class Orchestrator:
                         "Based on the data above, answer the user's question. "
                         "Be specific and reference actual code/data.",
                         phase="analysis",
-                        system_prompt=(
-                            "You are an expert reverse engineer. Provide a "
-                            "direct, informative answer."
-                        ),
+                        system_prompt=("You are an expert reverse engineer. Provide a " "direct, informative answer."),
                     )
             except Exception:
                 pass
@@ -674,11 +755,14 @@ class Orchestrator:
         if not strategy:
             strategy = self._classify_strategy(query)
         self.emitter.emit_cot("Orchestrator", f"Strategy: {strategy}")
-        self.emitter.emit_agent_event("orchestrator_start", {
-            "max_cycles": self.max_cycles,
-            "soft_limit": self.max_cycles,
-            "strategy": strategy,
-        })
+        self.emitter.emit_agent_event(
+            "orchestrator_start",
+            {
+                "max_cycles": self.max_cycles,
+                "soft_limit": self.max_cycles,
+                "strategy": strategy,
+            },
+        )
 
         # ── 2. Initialize blackboard ──
         self._initialize_investigation(query, strategy)
@@ -721,29 +805,33 @@ class Orchestrator:
                     "Orchestrator",
                     f"Correlation hook fired: {rule_name} — running targeted worker",
                 )
-                self.emitter.emit_agent_event("worker_dispatch", {
-                    "task_id": corr_task.task_id,
-                    "goal": corr_task.goal[:100],
-                    "max_steps": corr_task.max_steps,
-                    "soft_limit": corr_task.max_steps,
-                    "recipe": corr_task.recipe or "",
-                })
+                self.emitter.emit_agent_event(
+                    "worker_dispatch",
+                    {
+                        "task_id": corr_task.task_id,
+                        "goal": corr_task.goal[:100],
+                        "max_steps": corr_task.max_steps,
+                        "soft_limit": corr_task.max_steps,
+                        "recipe": corr_task.recipe or "",
+                    },
+                )
                 corr_worker = self._spawn_worker()
                 corr_result = corr_worker.run(corr_task)
                 real_tools = corr_result.tool_executions_count or 0
-                self.emitter.emit_agent_event("worker_complete", {
-                    "task_id": corr_task.task_id,
-                    "exit_reason": corr_result.exit_reason,
-                    "tool_count": corr_result.tool_executions_count,
-                    "real_tool_count": real_tools,
-                    "is_complete": corr_result.is_complete,
-                })
+                self.emitter.emit_agent_event(
+                    "worker_complete",
+                    {
+                        "task_id": corr_task.task_id,
+                        "exit_reason": corr_result.exit_reason,
+                        "tool_count": corr_result.tool_executions_count,
+                        "real_tool_count": real_tools,
+                        "is_complete": corr_result.is_complete,
+                    },
+                )
                 self._update_notebook(corr_result, cycle=0)
                 self._merge_results(corr_result)
             except Exception as e:
-                self.logger.warning(
-                    f"Correlation worker failed for {corr_task.metadata}: {e}"
-                )
+                self.logger.warning(f"Correlation worker failed for {corr_task.metadata}: {e}")
                 self.emitter.emit_cot(
                     "Orchestrator",
                     f"Correlation worker ERROR: {e}",
@@ -775,12 +863,15 @@ class Orchestrator:
             findings_history.append(len(self.blackboard.notebook.entries))
             func_analyzed = self.blackboard.function_registry.analyzed_count
             func_total = self.blackboard.total_binary_functions
-            self.emitter.emit_agent_event("cycle_start", {
-                "cycle": cycle,
-                "coverage_ratio": current_coverage,
-                "functions_analyzed": func_analyzed,
-                "functions_total": func_total,
-            })
+            self.emitter.emit_agent_event(
+                "cycle_start",
+                {
+                    "cycle": cycle,
+                    "coverage_ratio": current_coverage,
+                    "functions_analyzed": func_analyzed,
+                    "functions_total": func_total,
+                },
+            )
             self._inv_logger.log_cycle_start(
                 cycle=cycle,
                 coverage_ratio=current_coverage,
@@ -802,15 +893,17 @@ class Orchestrator:
             if self._is_diminishing_returns(findings_history):
                 self.emitter.emit_cot(
                     "Orchestrator",
-                    "Diminishing returns: no new findings for 3 consecutive "
-                    "cycles. Stopping.",
+                    "Diminishing returns: no new findings for 3 consecutive " "cycles. Stopping.",
                 )
                 exit_reason = "diminishing_returns"
                 break
 
             # 3a. Ask LLM for next task
             task = self._create_next_task(
-                query, strategy, cycle, coverage_history,
+                query,
+                strategy,
+                cycle,
+                coverage_history,
                 worker_summaries=worker_summaries,
             )
 
@@ -837,8 +930,7 @@ class Orchestrator:
             if self._is_orchestrator_doom_loop(task.goal, recent_goals):
                 self.emitter.emit_cot(
                     "Orchestrator",
-                    f"Doom loop detected: same task goal repeated "
-                    f"{self.doom_loop_threshold} times. Stopping.",
+                    f"Doom loop detected: same task goal repeated " f"{self.doom_loop_threshold} times. Stopping.",
                 )
                 exit_reason = "doom_loop"
                 break
@@ -849,31 +941,34 @@ class Orchestrator:
                 "Orchestrator",
                 f"Dispatching worker: {task.goal[:80]}...",
             )
-            self.emitter.emit_agent_event("worker_dispatch", {
-                "task_id": task.task_id,
-                "goal": task.goal,
-                "max_steps": task.max_steps,
-                "soft_limit": task.max_steps,
-                "recipe": task.recipe or "",
-            })
+            self.emitter.emit_agent_event(
+                "worker_dispatch",
+                {
+                    "task_id": task.task_id,
+                    "goal": task.goal,
+                    "max_steps": task.max_steps,
+                    "soft_limit": task.max_steps,
+                    "recipe": task.recipe or "",
+                },
+            )
             worker = self._spawn_worker()
             result = worker.run(task)
             real_tools = 0
             if result.exec_results:
-                real_tools = sum(
-                    1 for te in result.exec_results.tool_executions
-                    if te.tool_name != "<no_command>"
-                )
+                real_tools = sum(1 for te in result.exec_results.tool_executions if te.tool_name != "<no_command>")
             # Recipe mode doesn't populate exec_results — use tool_executions_count
             if real_tools == 0 and result.tool_executions_count > 0:
                 real_tools = result.tool_executions_count
-            self.emitter.emit_agent_event("worker_complete", {
-                "task_id": task.task_id,
-                "exit_reason": result.exit_reason,
-                "tool_count": result.tool_executions_count,
-                "real_tool_count": real_tools,
-                "is_complete": result.is_complete,
-            })
+            self.emitter.emit_agent_event(
+                "worker_complete",
+                {
+                    "task_id": task.task_id,
+                    "exit_reason": result.exit_reason,
+                    "tool_count": result.tool_executions_count,
+                    "real_tool_count": real_tools,
+                    "is_complete": result.is_complete,
+                },
+            )
 
             # ── Log worker result ──
             tool_exec_log = None
@@ -941,10 +1036,7 @@ class Orchestrator:
                 "functions_analyzed": func_count,
                 "functions_total": func_total,
                 "notebook_entries": len(self.blackboard.notebook.entries),
-                "confirmed_count": sum(
-                    1 for e in self.blackboard.notebook.entries
-                    if e.status == "confirmed"
-                ),
+                "confirmed_count": sum(1 for e in self.blackboard.notebook.entries if e.status == "confirmed"),
             },
         )
 
@@ -954,14 +1046,17 @@ class Orchestrator:
             f"{len(self.blackboard.notebook.entries)} findings in {cycle} cycles, "
             f"area coverage {area_ratio:.0%}, {func_count} functions analyzed",
         )
-        self.emitter.emit_agent_event("orchestrator_complete", {
-            "exit_reason": exit_reason,
-            "cycles_used": cycle,
-            "coverage_ratio": area_ratio,
-            "functions_analyzed": func_count,
-            "functions_total": func_total,
-            "log_file": self._inv_logger.filepath,
-        })
+        self.emitter.emit_agent_event(
+            "orchestrator_complete",
+            {
+                "exit_reason": exit_reason,
+                "cycles_used": cycle,
+                "coverage_ratio": area_ratio,
+                "functions_analyzed": func_count,
+                "functions_total": func_total,
+                "log_file": self._inv_logger.filepath,
+            },
+        )
         self.emitter.emit_cot(
             "Orchestrator",
             f"Investigation log saved to: {self._inv_logger.filepath}",
@@ -992,7 +1087,7 @@ class Orchestrator:
             "escalation, code injection, unquoted paths, DLL hijacking.\n"
             "  Examples: 'Find vulnerabilities', 'Check for privilege escalation', "
             "'Look for DLL hijacking', 'Security audit', 'Find CVEs'\n\n"
-            f"User request: \"{query}\"\n\n"
+            f'User request: "{query}"\n\n'
             "Respond with ONLY the category name (e.g., 'vuln_hunting'). Nothing else."
         )
 
@@ -1066,8 +1161,11 @@ class Orchestrator:
                 "Call list_exports. This data will be cached for all future workers."
             ),
             suggested_tools=[
-                "list_imports", "list_exports", "list_strings",
-                "search_strings_in_binary", "list_functions",
+                "list_imports",
+                "list_exports",
+                "list_strings",
+                "search_strings_in_binary",
+                "list_functions",
             ],
             focus_areas=[],
             max_steps=self.worker_max_steps,
@@ -1076,16 +1174,21 @@ class Orchestrator:
         )
 
         self.emitter.emit_cot("Orchestrator", "Reconnaissance phase — mapping binary surface")
-        self.emitter.emit_agent_event("worker_dispatch", {
-            "task_id": recon_task.task_id,
-            "goal": recon_task.goal,
-            "max_steps": recon_task.max_steps,
-            "soft_limit": recon_task.max_steps,
-            "recipe": recon_task.recipe or "",
-        })
+        self.emitter.emit_agent_event(
+            "worker_dispatch",
+            {
+                "task_id": recon_task.task_id,
+                "goal": recon_task.goal,
+                "max_steps": recon_task.max_steps,
+                "soft_limit": recon_task.max_steps,
+                "recipe": recon_task.recipe or "",
+            },
+        )
         self._inv_logger.log_cycle_start(
-            cycle=0, coverage_ratio=0.0,
-            functions_analyzed=0, functions_total=0,
+            cycle=0,
+            coverage_ratio=0.0,
+            functions_analyzed=0,
+            functions_total=0,
         )
         self._inv_logger.log_task_created(
             task_goal=recon_task.goal,
@@ -1096,41 +1199,39 @@ class Orchestrator:
         recon_result = recon_worker.run(recon_task)
         recon_real_tools = 0
         if recon_result.exec_results:
-            recon_real_tools = sum(
-                1 for te in recon_result.exec_results.tool_executions
-                if te.tool_name != "<no_command>"
-            )
+            recon_real_tools = sum(1 for te in recon_result.exec_results.tool_executions if te.tool_name != "<no_command>")
         if recon_real_tools == 0 and recon_result.tool_executions_count > 0:
             recon_real_tools = recon_result.tool_executions_count
-        self.emitter.emit_agent_event("worker_complete", {
-            "task_id": recon_task.task_id,
-            "exit_reason": recon_result.exit_reason,
-            "tool_count": recon_result.tool_executions_count,
-            "real_tool_count": recon_real_tools,
-            "is_complete": recon_result.is_complete,
-        })
+        self.emitter.emit_agent_event(
+            "worker_complete",
+            {
+                "task_id": recon_task.task_id,
+                "exit_reason": recon_result.exit_reason,
+                "tool_count": recon_result.tool_executions_count,
+                "real_tool_count": recon_real_tools,
+                "is_complete": recon_result.is_complete,
+            },
+        )
         recon_tool_log = None
         if recon_result.exec_results:
             recon_tool_log = [
-                {"tool_name": te.tool_name, "parameters": te.parameters,
-                 "success": te.success, "result": te.result}
+                {"tool_name": te.tool_name, "parameters": te.parameters, "success": te.success, "result": te.result}
                 for te in recon_result.exec_results.tool_executions
             ]
         self._inv_logger.log_worker_result(
-            task_id=recon_task.task_id, exit_reason=recon_result.exit_reason,
-            real_tool_count=recon_real_tools, is_complete=recon_result.is_complete,
+            task_id=recon_task.task_id,
+            exit_reason=recon_result.exit_reason,
+            real_tool_count=recon_real_tools,
+            is_complete=recon_result.is_complete,
             findings_summary=recon_result.findings_summary or "",
             tool_executions=recon_tool_log,
         )
         self._merge_results(recon_result)
         self.blackboard.add_task_completed(
             recon_task.task_id,
-            f"[Recon] Surface mapping -> {recon_real_tools} tool calls, "
-            f"exit={recon_result.exit_reason}",
+            f"[Recon] Surface mapping -> {recon_real_tools} tool calls, " f"exit={recon_result.exit_reason}",
         )
-        self._inv_logger.log_cycle_end(
-            cycle=0, coverage_ratio=self.blackboard.coverage_ratio()
-        )
+        self._inv_logger.log_cycle_end(cycle=0, coverage_ratio=self.blackboard.coverage_ratio())
         self.emitter.emit_cot(
             "Orchestrator",
             f"Recon complete: {recon_real_tools} tool calls, "
@@ -1185,24 +1286,14 @@ class Orchestrator:
 
         # No cycle counter — let LLM decide based on investigation state alone
         momentum_line = f"\n{coverage_momentum}" if coverage_momentum else ""
-        user_prompt = (
-            f"## Investigation Request\n{query}\n\n"
-            f"## Strategy: {strategy}"
-            f"{momentum_line}\n\n"
-        )
+        user_prompt = f"## Investigation Request\n{query}\n\n" f"## Strategy: {strategy}" f"{momentum_line}\n\n"
 
         # Inject conversation history so follow-up queries have context
         if self.conversation_history:
             history_lines = []
             for turn in self.conversation_history[-3:]:
-                history_lines.append(
-                    f"**User:** {turn['query']}\n"
-                    f"**Result:** {turn['response_summary'][:300]}"
-                )
-            user_prompt += (
-                "## Prior Conversation Context\n"
-                + "\n---\n".join(history_lines) + "\n\n"
-            )
+                history_lines.append(f"**User:** {turn['query']}\n" f"**Result:** {turn['response_summary'][:300]}")
+            user_prompt += "## Prior Conversation Context\n" + "\n---\n".join(history_lines) + "\n\n"
 
         if notebook_prompt:
             user_prompt += f"{notebook_prompt}\n\n"
@@ -1214,9 +1305,7 @@ class Orchestrator:
             user_prompt += f"{registry_prompt}\n\n"
 
         # Inject worker history so the LLM knows what was already done
-        worker_history_prompt = self._format_worker_history_prompt(
-            worker_summaries or []
-        )
+        worker_history_prompt = self._format_worker_history_prompt(worker_summaries or [])
         if worker_history_prompt:
             user_prompt += f"{worker_history_prompt}\n\n"
 
@@ -1256,7 +1345,7 @@ class Orchestrator:
                 goal=f"Investigate: {query[:100]}",
                 strategy_hint=f"Strategy: {strategy}. Cycle {cycle}.",
                 max_steps=self.worker_max_steps,
-                )
+            )
 
         # Check for completion
         if "INVESTIGATION COMPLETE" in response.upper():
@@ -1265,9 +1354,7 @@ class Orchestrator:
         # Parse JSON task specification
         return self._parse_task_from_response(response, query, strategy, cycle)
 
-    def _parse_task_from_response(
-        self, response: str, query: str, strategy: str, cycle: int
-    ) -> WorkerTask:
+    def _parse_task_from_response(self, response: str, query: str, strategy: str, cycle: int) -> WorkerTask:
         """Parse a WorkerTask from the LLM's JSON response.
 
         Falls back to a reasonable default task if parsing fails.
@@ -1290,10 +1377,9 @@ class Orchestrator:
                     "suggested_tools": task_dict.get("suggested_tools", []),
                     "max_steps": self.worker_max_steps,  # Safety ceiling
                     "include_sections": self._ensure_discovery_section(
-                        task_dict.get("include_sections", [
-                            "scope", "knowledge", "analysis_state",
-                            "function_registry", "discovery"
-                        ])
+                        task_dict.get(
+                            "include_sections", ["scope", "knowledge", "analysis_state", "function_registry", "discovery"]
+                        )
                     ),
                     "metadata": {"cycle": cycle, "strategy": strategy},
                 }
@@ -1352,24 +1438,23 @@ class Orchestrator:
             200-char tool result excerpts (legacy behavior).
         """
         # Early branch: recipe-mode results bypass the blind synthesis LLM
-        if (
-            result.exit_reason == "recipe_complete"
-            and result.notebook_entries
-        ):
+        if result.exit_reason == "recipe_complete" and result.notebook_entries:
             self._apply_direct_notebook_entries(result, cycle)
             return
 
         if not result.findings_summary and result.error:
             # Worker failed — just log the error
-            self.blackboard.add_notebook_entry(NotebookEntry(
-                category="error",
-                severity="info",
-                title=f"Worker error in cycle {cycle}",
-                detail=result.error[:300],
-                evidence=[],
-                addresses=[],
-                status="confirmed",
-            ))
+            self.blackboard.add_notebook_entry(
+                NotebookEntry(
+                    category="error",
+                    severity="info",
+                    title=f"Worker error in cycle {cycle}",
+                    detail=result.error[:300],
+                    evidence=[],
+                    addresses=[],
+                    status="confirmed",
+                )
+            )
             return
 
         # Build context for the notebook update LLM call
@@ -1379,10 +1464,13 @@ class Orchestrator:
         # Decompile results need enough code for the LLM to spot
         # vulnerabilities — function signatures alone are useless.
         _DECOMPILE_TOOLS = {
-            "decompile_function", "decompile_function_by_address",
+            "decompile_function",
+            "decompile_function_by_address",
         }
         _RICH_EXCERPT_TOOLS = _DECOMPILE_TOOLS | {
-            "get_xrefs_to", "get_xrefs_from", "get_function_xrefs",
+            "get_xrefs_to",
+            "get_xrefs_from",
+            "get_function_xrefs",
         }
         exec_summary_parts = []
         if result.exec_results:
@@ -1411,9 +1499,7 @@ class Orchestrator:
         )
 
         try:
-            response = self.llm.generate_with_phase(
-                user_prompt, phase="analysis", system_prompt=system_prompt
-            )
+            response = self.llm.generate_with_phase(user_prompt, phase="analysis", system_prompt=system_prompt)
             entries = self._parse_notebook_entries(response)
 
             # Programmatic quality filter — reject noise entries that the
@@ -1423,24 +1509,24 @@ class Orchestrator:
             for entry in entries:
                 rejection = self._validate_notebook_entry(entry, strategy)
                 if rejection:
-                    self.logger.info(
-                        f"Notebook entry rejected: {entry.title!r} — {rejection}"
+                    self.logger.info(f"Notebook entry rejected: {entry.title!r} — {rejection}")
+                    rejected.append(
+                        {
+                            "severity": entry.severity,
+                            "title": entry.title,
+                            "reason": rejection,
+                        }
                     )
-                    rejected.append({
-                        "severity": entry.severity,
-                        "title": entry.title,
-                        "reason": rejection,
-                    })
                     continue
                 if self._is_duplicate_entry(entry):
-                    self.logger.info(
-                        f"Notebook entry deduplicated: {entry.title!r}"
+                    self.logger.info(f"Notebook entry deduplicated: {entry.title!r}")
+                    rejected.append(
+                        {
+                            "severity": entry.severity,
+                            "title": entry.title,
+                            "reason": "duplicate",
+                        }
                     )
-                    rejected.append({
-                        "severity": entry.severity,
-                        "title": entry.title,
-                        "reason": "duplicate",
-                    })
                     continue
                 accepted.append(entry)
 
@@ -1464,25 +1550,24 @@ class Orchestrator:
             if accepted:
                 self.emitter.emit_cot(
                     "Orchestrator",
-                    f"Notebook updated: +{len(accepted)} entries "
-                    f"({len(entries) - len(accepted)} filtered)",
+                    f"Notebook updated: +{len(accepted)} entries " f"({len(entries) - len(accepted)} filtered)",
                 )
         except Exception as e:
             self.logger.warning(f"Notebook update failed: {e}")
             # Fallback: add a raw finding entry
-            self.blackboard.add_notebook_entry(NotebookEntry(
-                category="info",
-                severity="info",
-                title=f"Worker findings from cycle {cycle}",
-                detail=result.findings_summary[:500],
-                evidence=[],
-                addresses=[],
-                status="needs_investigation",
-            ))
+            self.blackboard.add_notebook_entry(
+                NotebookEntry(
+                    category="info",
+                    severity="info",
+                    title=f"Worker findings from cycle {cycle}",
+                    detail=result.findings_summary[:500],
+                    evidence=[],
+                    addresses=[],
+                    status="needs_investigation",
+                )
+            )
 
-    def _apply_direct_notebook_entries(
-        self, result: AgentResult, cycle: int
-    ):
+    def _apply_direct_notebook_entries(self, result: AgentResult, cycle: int):
         """Apply notebook entries produced directly by recipe-mode workers.
 
         These entries came from an LLM that saw FULL decompiled code (not
@@ -1505,33 +1590,31 @@ class Orchestrator:
                     status=entry_dict.get("status", "needs_investigation"),
                 )
             except Exception as e:
-                self.logger.warning(
-                    f"Invalid notebook entry from recipe: {e}"
-                )
+                self.logger.warning(f"Invalid notebook entry from recipe: {e}")
                 continue
 
             # Apply the same quality filter as the LLM synthesis path
             rejection = self._validate_notebook_entry(entry, strategy)
             if rejection:
-                self.logger.info(
-                    f"Recipe notebook entry rejected: {entry.title!r} — {rejection}"
+                self.logger.info(f"Recipe notebook entry rejected: {entry.title!r} — {rejection}")
+                rejected.append(
+                    {
+                        "severity": entry.severity,
+                        "title": entry.title,
+                        "reason": rejection,
+                    }
                 )
-                rejected.append({
-                    "severity": entry.severity,
-                    "title": entry.title,
-                    "reason": rejection,
-                })
                 continue
 
             if self._is_duplicate_entry(entry):
-                self.logger.info(
-                    f"Recipe notebook entry deduplicated: {entry.title!r}"
+                self.logger.info(f"Recipe notebook entry deduplicated: {entry.title!r}")
+                rejected.append(
+                    {
+                        "severity": entry.severity,
+                        "title": entry.title,
+                        "reason": "duplicate",
+                    }
                 )
-                rejected.append({
-                    "severity": entry.severity,
-                    "title": entry.title,
-                    "reason": "duplicate",
-                })
                 continue
 
             accepted.append(entry)
@@ -1590,15 +1673,17 @@ class Orchestrator:
             if not isinstance(item, dict):
                 continue
             try:
-                entries.append(NotebookEntry(
-                    category=item.get("category", "info"),
-                    severity=item.get("severity", "info"),
-                    title=item.get("title", "Untitled finding"),
-                    detail=item.get("detail", ""),
-                    evidence=item.get("evidence", []),
-                    addresses=item.get("addresses", []),
-                    status=item.get("status", "needs_investigation"),
-                ))
+                entries.append(
+                    NotebookEntry(
+                        category=item.get("category", "info"),
+                        severity=item.get("severity", "info"),
+                        title=item.get("title", "Untitled finding"),
+                        detail=item.get("detail", ""),
+                        evidence=item.get("evidence", []),
+                        addresses=item.get("addresses", []),
+                        status=item.get("status", "needs_investigation"),
+                    )
+                )
             except Exception as e:
                 self.logger.debug(f"Skipping malformed notebook entry: {e}")
 
@@ -1629,9 +1714,7 @@ class Orchestrator:
         "import summary",
     ]
 
-    def _validate_notebook_entry(
-        self, entry: NotebookEntry, strategy: str
-    ) -> Optional[str]:
+    def _validate_notebook_entry(self, entry: NotebookEntry, strategy: str) -> Optional[str]:
         """Validate a notebook entry before adding it. Returns rejection reason or None.
 
         This is a programmatic quality gate that catches noise entries the LLM
@@ -1665,10 +1748,7 @@ class Orchestrator:
         current_count = len(self.blackboard.notebook.entries)
         if current_count >= self.MAX_NOTEBOOK_ENTRIES:
             if entry.severity not in ("critical", "high"):
-                return (
-                    f"notebook full ({current_count} entries), "
-                    f"only accepting critical/high severity"
-                )
+                return f"notebook full ({current_count} entries), " f"only accepting critical/high severity"
 
         # ── Strategy-specific rules ──
 
@@ -1678,10 +1758,7 @@ class Orchestrator:
                 return f"severity '{entry.severity}' too low for vuln_hunting"
 
             # Reject entries without any address evidence
-            if not entry.addresses and not any(
-                re.search(r'(?:0x)?[0-9a-fA-F]{6,}', ev)
-                for ev in entry.evidence
-            ):
+            if not entry.addresses and not any(re.search(r"(?:0x)?[0-9a-fA-F]{6,}", ev) for ev in entry.evidence):
                 return "vuln_hunting entry has no address evidence"
 
             # Reject entries that are just "API found in code" observations
@@ -1754,14 +1831,11 @@ class Orchestrator:
             "NO MALICIOUS BEHAVIOR CONFIRMED (with what was checked)."
         ),
         STRATEGY_BINARY_UNDERSTANDING: (
-            "What does this binary do? State its purpose and key "
-            "capabilities in 2-3 sentences."
+            "What does this binary do? State its purpose and key " "capabilities in 2-3 sentences."
         ),
     }
 
-    def _synthesize_final_report(
-        self, query: str, exit_reason: str, cycles_used: int
-    ) -> str:
+    def _synthesize_final_report(self, query: str, exit_reason: str, cycles_used: int) -> str:
         """Synthesize a clean, human-readable final report.
 
         Makes ONE final LLM call that sees the full investigation picture —
@@ -1775,18 +1849,9 @@ class Orchestrator:
 
         # ── Gather data (all cheap blackboard reads) ──
 
-        confirmed = [
-            e for e in self.blackboard.notebook.entries
-            if e.status == "confirmed"
-        ]
-        suspected = [
-            e for e in self.blackboard.notebook.entries
-            if e.status == "suspected"
-        ]
-        needs_inv = [
-            e for e in self.blackboard.notebook.entries
-            if e.status == "needs_investigation"
-        ]
+        confirmed = [e for e in self.blackboard.notebook.entries if e.status == "confirmed"]
+        suspected = [e for e in self.blackboard.notebook.entries if e.status == "suspected"]
+        needs_inv = [e for e in self.blackboard.notebook.entries if e.status == "needs_investigation"]
 
         # Confirmed findings: full detail (these are the signal)
         if confirmed:
@@ -1797,17 +1862,14 @@ class Orchestrator:
                 parts.append(
                     f"- [{e.severity.upper()}] {e.title}\n"
                     f"  Detail: {e.detail[:300]}\n"
-                    f"  Evidence: {ev_str}"
-                    + (f"\n  Addresses: {addr_str}" if addr_str else "")
+                    f"  Evidence: {ev_str}" + (f"\n  Addresses: {addr_str}" if addr_str else "")
                 )
             confirmed_text = "\n".join(parts)
         else:
             confirmed_text = "None."
 
         # Suspected findings: titles only (context, not featured)
-        suspected_text = "\n".join(
-            f"- [{e.severity.upper()}] {e.title}" for e in suspected[:5]
-        ) or "None."
+        suspected_text = "\n".join(f"- [{e.severity.upper()}] {e.title}" for e in suspected[:5]) or "None."
 
         # Coverage metrics
         analyzed_areas = self.blackboard.coverage.get_covered()
@@ -1830,28 +1892,19 @@ class Orchestrator:
 
         # Needs-investigation entries (previously dropped entirely)
         if needs_inv:
-            needs_inv_text = "\n".join(
-                f"- [{e.severity.upper()}] {e.title}: {e.detail[:150]}"
-                for e in needs_inv[:5]
-            )
+            needs_inv_text = "\n".join(f"- [{e.severity.upper()}] {e.title}: {e.detail[:150]}" for e in needs_inv[:5])
         else:
             needs_inv_text = "None."
 
         # Key imports from discovery cache (security-relevant context)
-        discovery_summary = self.blackboard.get_discovery_prompt(
-            max_imports=30, max_strings=10
-        )
+        discovery_summary = self.blackboard.get_discovery_prompt(max_imports=30, max_strings=10)
 
         # Decompiled code for finding-referenced functions (from code cache)
-        code_evidence = self.blackboard.get_code_cache_summary(
-            max_functions=5, max_lines_per_func=40
-        )
+        code_evidence = self.blackboard.get_code_cache_summary(max_functions=5, max_lines_per_func=40)
 
         # ── Build synthesis prompt ──
 
-        verdict_question = self._VERDICT_QUESTIONS.get(
-            strategy, self._VERDICT_QUESTIONS[STRATEGY_BINARY_UNDERSTANDING]
-        )
+        verdict_question = self._VERDICT_QUESTIONS.get(strategy, self._VERDICT_QUESTIONS[STRATEGY_BINARY_UNDERSTANDING])
 
         system_prompt = (
             "You are writing the final report for a binary analysis investigation. "
@@ -1862,43 +1915,30 @@ class Orchestrator:
 
         area_names = ", ".join(a.name for a in analyzed_areas) if analyzed_areas else "none"
         gap_names = ", ".join(a.name for a in uncovered) if uncovered else "none"
-        func_str = (
-            f"{func_count}/{func_total}" if func_total > 0
-            else f"{func_count} (total unknown)"
-        )
+        func_str = f"{func_count}/{func_total}" if func_total > 0 else f"{func_count} (total unknown)"
 
         # Build optional enrichment sections
         enrichment_parts = []
         if needs_inv_text and needs_inv_text != "None.":
-            enrichment_parts.append(
-                f"## Needs Investigation\n{needs_inv_text}"
-            )
+            enrichment_parts.append(f"## Needs Investigation\n{needs_inv_text}")
         if code_evidence:
-            enrichment_parts.append(
-                f"## Decompiled Code Evidence\n{code_evidence}"
-            )
+            enrichment_parts.append(f"## Decompiled Code Evidence\n{code_evidence}")
         if discovery_summary:
-            enrichment_parts.append(
-                f"## Key Imports & Strings\n{discovery_summary}"
-            )
+            enrichment_parts.append(f"## Key Imports & Strings\n{discovery_summary}")
         enrichment_section = "\n\n".join(enrichment_parts)
 
         user_prompt = (
             f"## Investigation: {query[:120]}\n"
             f"**Strategy:** {strategy} | **Cycles:** {cycles_used} | "
             f"**Exit:** {exit_reason}\n\n"
-
             f"## Confirmed Findings\n{confirmed_text}\n\n"
             f"## Suspected (Unverified)\n{suspected_text}\n\n"
             f"## Functions with Security Notes\n{sec_funcs_text}\n\n"
-
             + (f"{enrichment_section}\n\n" if enrichment_section else "")
-
             + f"## Coverage\n"
             f"- Areas analyzed: {area_names} ({len(analyzed_areas)}/{total_areas})\n"
             f"- Functions deeply analyzed: {func_str}\n"
             f"- Gaps: {gap_names}\n\n"
-
             f"## Your Task\n"
             f"Write the final report with EXACTLY this structure (use markdown):\n"
             f"1. **Executive Summary** (2-3 sentences: what is this binary, "
@@ -1926,9 +1966,17 @@ class Orchestrator:
         except Exception as e:
             self.logger.warning(f"Final synthesis LLM call failed: {e}")
             return self._build_structured_fallback_report(
-                query, strategy, exit_reason, cycles_used,
-                confirmed, suspected, needs_inv,
-                analyzed_areas, uncovered, func_count, func_total,
+                query,
+                strategy,
+                exit_reason,
+                cycles_used,
+                confirmed,
+                suspected,
+                needs_inv,
+                analyzed_areas,
+                uncovered,
+                func_count,
+                func_total,
             )
 
     def _build_structured_fallback_report(
@@ -1955,10 +2003,7 @@ class Orchestrator:
         total_areas = len(self.blackboard.coverage.areas)
         binary_name = self.blackboard.notebook.binary_name or "Unknown binary"
         lines = [f"# Analysis Report: {binary_name}"]
-        lines.append(
-            f"**Strategy:** {strategy} | **Cycles:** {cycles_used} | "
-            f"**Exit:** {exit_reason}\n"
-        )
+        lines.append(f"**Strategy:** {strategy} | **Cycles:** {cycles_used} | " f"**Exit:** {exit_reason}\n")
 
         # 1. Executive Summary
         lines.append("## Executive Summary")
@@ -1973,9 +2018,7 @@ class Orchestrator:
         if strategy == STRATEGY_VULN_HUNTING:
             if confirmed:
                 vuln_titles = "; ".join(e.title for e in confirmed[:3])
-                lines.append(
-                    f"**VULNERABLE** — {len(confirmed)} confirmed: {vuln_titles}"
-                )
+                lines.append(f"**VULNERABLE** — {len(confirmed)} confirmed: {vuln_titles}")
             else:
                 lines.append(
                     "**No confirmed vulnerabilities.** See suspected items below "
@@ -1983,18 +2026,12 @@ class Orchestrator:
                 )
         elif strategy == STRATEGY_MALWARE_HUNTING:
             if any(e.severity in ("critical", "high") for e in confirmed):
-                lines.append(
-                    f"**MALICIOUS BEHAVIOR CONFIRMED** — "
-                    f"{len(confirmed)} confirmed finding(s)."
-                )
+                lines.append(f"**MALICIOUS BEHAVIOR CONFIRMED** — " f"{len(confirmed)} confirmed finding(s).")
             else:
                 lines.append("**No confirmed malicious behavior.**")
         else:
             purpose = self.blackboard.notebook.binary_purpose
-            lines.append(
-                purpose if purpose
-                else "Binary purpose could not be fully determined from analysis."
-            )
+            lines.append(purpose if purpose else "Binary purpose could not be fully determined from analysis.")
 
         # 3. Confirmed Findings
         lines.append("\n## Confirmed Findings")
@@ -2021,24 +2058,12 @@ class Orchestrator:
 
         # 5. Coverage
         lines.append("\n## Coverage")
-        area_names = (
-            ", ".join(a.name for a in analyzed_areas)
-            if analyzed_areas else "none"
-        )
-        gap_names = (
-            ", ".join(a.name for a in uncovered)
-            if uncovered else "none"
-        )
-        lines.append(
-            f"Areas analyzed: {area_names} "
-            f"({len(analyzed_areas)}/{total_areas})"
-        )
+        area_names = ", ".join(a.name for a in analyzed_areas) if analyzed_areas else "none"
+        gap_names = ", ".join(a.name for a in uncovered) if uncovered else "none"
+        lines.append(f"Areas analyzed: {area_names} " f"({len(analyzed_areas)}/{total_areas})")
         lines.append(f"Gaps: {gap_names}")
         if func_total > 0:
-            lines.append(
-                f"Functions: {func_count}/{func_total} "
-                f"({func_count / func_total:.1%} deeply analyzed)"
-            )
+            lines.append(f"Functions: {func_count}/{func_total} " f"({func_count / func_total:.1%} deeply analyzed)")
         elif func_count > 0:
             lines.append(f"Functions: {func_count} deeply analyzed")
 
@@ -2140,10 +2165,7 @@ class Orchestrator:
         # Since we don't track exact pre-cycle size, check if any
         # notebook entry has an address matching what we decompiled.
         decompiled_set = set(summary.functions_decompiled)
-        found_entries = [
-            e for e in self.blackboard.notebook.entries
-            if any(addr in decompiled_set for addr in e.addresses)
-        ]
+        found_entries = [e for e in self.blackboard.notebook.entries if any(addr in decompiled_set for addr in e.addresses)]
 
         # Also check if the result itself carried notebook entries
         result_had_entries = bool(result.notebook_entries)
@@ -2179,9 +2201,7 @@ class Orchestrator:
     # Worker result memory
     # ──────────────────────────────────────────────────────────────────────
 
-    def _build_worker_summary(
-        self, cycle: int, task: WorkerTask, result: AgentResult
-    ) -> WorkerResultSummary:
+    def _build_worker_summary(self, cycle: int, task: WorkerTask, result: AgentResult) -> WorkerResultSummary:
         """Extract a compact summary from a worker result for orchestrator memory.
 
         Called after each worker completes. The accumulated summaries are
@@ -2200,9 +2220,7 @@ class Orchestrator:
                     "decompile_function",
                     "decompile_function_by_address",
                 ):
-                    addr = te.parameters.get(
-                        "address", te.parameters.get("name", "unknown")
-                    )
+                    addr = te.parameters.get("address", te.parameters.get("name", "unknown"))
                     functions_decompiled.append(str(addr))
 
         return WorkerResultSummary(
@@ -2210,11 +2228,7 @@ class Orchestrator:
             goal=task.goal[:120],
             functions_decompiled=functions_decompiled,
             tools_used=tools_used,
-            key_findings=(
-                result.findings_summary[:600]
-                if result.findings_summary
-                else "No findings"
-            ),
+            key_findings=(result.findings_summary[:600] if result.findings_summary else "No findings"),
             exit_reason=result.exit_reason or "unknown",
         )
 
@@ -2233,17 +2247,8 @@ class Orchestrator:
             return ""
         lines = ["## Worker History (previous cycles)"]
         for ws in summaries[-max_show:]:
-            decomp = (
-                ", ".join(ws.functions_decompiled[:5])
-                if ws.functions_decompiled
-                else "none"
-            )
-            top_tools = ", ".join(
-                f"{t}\u00d7{c}"
-                for t, c in sorted(
-                    ws.tools_used.items(), key=lambda x: -x[1]
-                )[:4]
-            )
+            decomp = ", ".join(ws.functions_decompiled[:5]) if ws.functions_decompiled else "none"
+            top_tools = ", ".join(f"{t}\u00d7{c}" for t, c in sorted(ws.tools_used.items(), key=lambda x: -x[1])[:4])
             lines.append(
                 f"- **Cycle {ws.cycle}**: {ws.goal}\n"
                 f"  Functions decompiled: {decomp} | Tools: {top_tools}\n"
@@ -2283,15 +2288,12 @@ class Orchestrator:
             if area.depth in (DEPTH_ENCOUNTERED, DEPTH_ANALYZED):
                 all_apis.update(api.lower() for api in area.apis)
 
-        task = self._hook_registry.check_all(
-            all_apis, coverage, fn_registry, self.blackboard.discovery_cache
-        )
+        task = self._hook_registry.check_all(all_apis, coverage, fn_registry, self.blackboard.discovery_cache)
         if task is not None:
             rule_name = (task.metadata or {}).get("correlation_rule", "unknown")
             self.emitter.emit_cot(
                 "Orchestrator",
-                f"Correlation hook fired: {rule_name} — "
-                f"spawning targeted investigation task",
+                f"Correlation hook fired: {rule_name} — " f"spawning targeted investigation task",
             )
         return task
 
@@ -2312,13 +2314,12 @@ class Orchestrator:
             if area.depth in (DEPTH_ENCOUNTERED, DEPTH_ANALYZED):
                 all_apis.update(api.lower() for api in area.apis)
 
-        tasks = self._hook_registry.check_all_batch(
-            all_apis, coverage, fn_registry, self.blackboard.discovery_cache
-        )
+        tasks = self._hook_registry.check_all_batch(all_apis, coverage, fn_registry, self.blackboard.discovery_cache)
         for t in tasks:
             rule_name = (t.metadata or {}).get("correlation_rule", "unknown")
             self._inv_logger.log_correlation_fired(
-                rule_name=rule_name, task_goal=t.goal,
+                rule_name=rule_name,
+                task_goal=t.goal,
             )
         return tasks
 
@@ -2356,10 +2357,7 @@ class Orchestrator:
         if len(coverage_history) < n + 1:
             return False
         baseline = coverage_history[-(n + 1)]
-        coverage_flat = all(
-            abs(coverage_history[-(i + 1)] - baseline) < 0.01
-            for i in range(n)
-        )
+        coverage_flat = all(abs(coverage_history[-(i + 1)] - baseline) < 0.01 for i in range(n))
         if not coverage_flat:
             return False
 
@@ -2388,10 +2386,7 @@ class Orchestrator:
         if len(findings_history) < window + 1:
             return False
         baseline = findings_history[-(window + 1)]
-        return all(
-            findings_history[-(i + 1)] == baseline
-            for i in range(window)
-        )
+        return all(findings_history[-(i + 1)] == baseline for i in range(window))
 
     @staticmethod
     def _extract_goal_keywords(goal: str) -> Set[str]:
@@ -2401,17 +2396,15 @@ class Orchestrator:
         that rephrased goals ("Analyze recv callers" vs "Investigate recv
         call sites") produce similar keyword sets.
         """
-        words = set(re.findall(r'[a-z0-9_]+', goal.lower()))
+        words = set(re.findall(r"[a-z0-9_]+", goal.lower()))
         return words - _GOAL_STOP_WORDS
 
     @staticmethod
     def _extract_goal_addresses(goal: str) -> Set[str]:
         """Extract hex addresses from a goal string."""
-        return set(re.findall(r'(?:0x)?[0-9a-fA-F]{6,}', goal.lower()))
+        return set(re.findall(r"(?:0x)?[0-9a-fA-F]{6,}", goal.lower()))
 
-    def _is_orchestrator_doom_loop(
-        self, current_goal: str, recent_goals: List[str]
-    ) -> bool:
+    def _is_orchestrator_doom_loop(self, current_goal: str, recent_goals: List[str]) -> bool:
         """Check if the orchestrator is generating semantically similar tasks.
 
         Uses Jaccard similarity on keywords (after removing stop words and
@@ -2428,7 +2421,7 @@ class Orchestrator:
         if not current_kw:
             return False
 
-        last_n = recent_goals[-self.doom_loop_threshold:]
+        last_n = recent_goals[-self.doom_loop_threshold :]
 
         # Check 1: Keyword similarity (Jaccard)
         keyword_doom = True
@@ -2460,9 +2453,7 @@ class Orchestrator:
         # Check 3: API-name overlap — catches rephrased goals that target
         # the same Windows APIs (e.g., "Trace callers of CreateProcessW"
         # vs "Analyze CreateProcessW callers for unquoted paths").
-        api_pattern = re.compile(
-            r'\b([A-Z][a-z]+(?:[A-Z][a-z]*)+[WA]?)\b'  # PascalCase API names
-        )
+        api_pattern = re.compile(r"\b([A-Z][a-z]+(?:[A-Z][a-z]*)+[WA]?)\b")  # PascalCase API names
         current_apis = set(api_pattern.findall(current_goal))
         if current_apis and len(current_apis) <= 6:
             api_doom = True
@@ -2471,9 +2462,7 @@ class Orchestrator:
                 if not prev_apis:
                     api_doom = False
                     break
-                overlap = len(current_apis & prev_apis) / max(
-                    len(current_apis | prev_apis), 1
-                )
+                overlap = len(current_apis & prev_apis) / max(len(current_apis | prev_apis), 1)
                 if overlap < 0.4:
                     api_doom = False
                     break
@@ -2510,15 +2499,12 @@ class Orchestrator:
             "You are an expert reverse engineering investigation planner. "
             "You direct an investigation by creating focused tasks for worker agents "
             "that have access to Ghidra reverse engineering tools.\n\n"
-
             "## Your Role\n"
             "You do NOT execute tools yourself. You analyze the current investigation "
             "state and decide the single most valuable next task for a worker to execute. "
             "Each worker gets ONE task with a specific goal and returns findings.\n\n"
-
             f"## Investigation Strategy: {strategy}\n"
             f"{strategy_guidance}\n\n"
-
             "## How to Read the Investigation State\n"
             "The user message contains the current blackboard state:\n"
             "- **Coverage ratio**: Percentage of security-relevant areas investigated "
@@ -2528,7 +2514,6 @@ class Orchestrator:
             "- **Security findings**: Functions with security-relevant observations\n"
             "- **Active leads**: Specific follow-up items from previous tasks — address HIGH-priority first\n"
             "- **Notebook entries**: Running findings from the investigation so far\n\n"
-
             "## Task Creation Guidelines\n"
             "1. **Be specific**: 'Decompile FUN_00405b60 and check CreateProcessW arguments' "
             "is better than 'Look at interesting functions'\n"
@@ -2542,7 +2527,6 @@ class Orchestrator:
             "caller tracing / behavioral analysis, then deep verification\n"
             "7. **Address leads**: HIGH-priority leads should be investigated before "
             "creating exploratory tasks\n\n"
-
             "## include_sections — Context Filtering\n"
             "Workers see only the blackboard sections you specify. Choose wisely:\n"
             "- **scope**: Binary metadata (imports, exports) — always useful for early tasks\n"
@@ -2560,7 +2544,6 @@ class Orchestrator:
             "pre-cached binary surface data that prevents redundant tool calls.\n\n"
             "Early recon tasks need fewer sections (scope + analysis_state + discovery). "
             "Deep analysis tasks need more (function_registry + knowledge + leads + discovery).\n\n"
-
             "## Task Sizing\n"
             "Each worker task should be achievable in **5-8 actual tool calls**. "
             "If a goal requires more, split it into multiple tasks across cycles.\n"
@@ -2568,7 +2551,6 @@ class Orchestrator:
             "and trace all callers' (too broad, will exhaust budget)\n"
             "GOOD: 'Trace callers of CreateProcessW — decompile each and check for "
             "NULL lpApplicationName' (focused, 3-5 decompile calls)\n\n"
-
             "## Recipe Mode (Preferred for API Tracing)\n"
             "Workers support **deterministic recipes** that gather all relevant code "
             "automatically, then a single LLM call analyzes the full code. Recipes are "
@@ -2576,22 +2558,21 @@ class Orchestrator:
             "select tools.\n\n"
             "Available recipes:\n"
             "- **trace_import_callers**: Traces imported API callers. "
-            "Params: `{\"api_names\": [\"CreateProcessW\"], \"depth\": 1}`\n"
+            'Params: `{"api_names": ["CreateProcessW"], "depth": 1}`\n'
             "- **trace_string_refs**: Finds string references and decompiles referencing funcs. "
-            "Params: `{\"patterns\": [\".exe\", \"cmd\"]}`\n"
+            'Params: `{"patterns": [".exe", "cmd"]}`\n'
             "- **deep_function_analysis**: Decompiles target + callers + callees. "
-            "Params: `{\"addresses\": [\"0x00401000\"], \"depth\": 1}`\n"
+            'Params: `{"addresses": ["0x00401000"], "depth": 1}`\n'
             "- **surface_recon**: Gathers imports/exports/strings (used automatically in cycle 0). "
-            "Params: `{\"string_filters\": [\".exe\", \"cmd\"]}`\n\n"
+            'Params: `{"string_filters": [".exe", "cmd"]}`\n\n'
             "To use a recipe, include these fields in your JSON response:\n"
             "```\n"
-            "\"recipe\": \"trace_import_callers\",\n"
-            "\"recipe_params\": {\"api_names\": [\"CreateProcessW\"]},\n"
-            "\"analysis_focus\": \"Check for NULL lpApplicationName with unquoted paths\"\n"
+            '"recipe": "trace_import_callers",\n'
+            '"recipe_params": {"api_names": ["CreateProcessW"]},\n'
+            '"analysis_focus": "Check for NULL lpApplicationName with unquoted paths"\n'
             "```\n\n"
             "Use recipes for ALL API-tracing tasks. Only use the default LLM loop for "
             "tasks that don't fit a recipe pattern (e.g., open-ended exploration).\n\n"
-
             "## When to Complete the Investigation\n"
             "Respond with INVESTIGATION COMPLETE when:\n"
             "- The strategy's completion criteria are met (see strategy section above)\n"
@@ -2599,7 +2580,6 @@ class Orchestrator:
             "- All HIGH-severity findings have been verified (confirmed or ruled out)\n"
             "- No HIGH-priority leads remain unresolved\n"
             "- Further cycles would yield diminishing returns\n\n"
-
             "## Response Format\n"
             "Either respond with 'INVESTIGATION COMPLETE' or a JSON task specification "
             "(see user message for the exact JSON schema)."
@@ -2711,11 +2691,9 @@ class Orchestrator:
         return (
             "You are a reverse engineering analyst updating an investigation notebook "
             "with structured findings from a worker agent's task execution.\n\n"
-
             "## Your Task\n"
             "Given the worker's findings and tool execution results, produce new notebook "
             "entries as a JSON array. Each entry captures ONE distinct finding.\n\n"
-
             "## Entry Schema\n"
             "Each entry MUST have these fields:\n"
             "- **category**: Type of finding (see strategy-specific guidance below)\n"
@@ -2730,10 +2708,8 @@ class Orchestrator:
             "  - 'confirmed': Directly verified through decompilation or trace\n"
             "  - 'suspected': Strong indicators but not fully verified\n"
             "  - 'needs_investigation': Flagged for follow-up\n\n"
-
             f"## Strategy: {strategy}\n"
             f"{category_guidance}\n\n"
-
             "## Quality Guidelines\n"
             "- Only add entries for NEW findings not already in the notebook\n"
             "- Be specific in titles: 'CreateProcessW called with NULL lpApplicationName "
@@ -2752,13 +2728,12 @@ class Orchestrator:
             "- For vuln_hunting: if none of the findings have a concrete exploit "
             "path with attacker-controlled input, return []. This is STRONGLY "
             "preferred over padding the notebook with noise.\n\n"
-
             "## Response Format\n"
             "Return ONLY a JSON array. No explanation, no markdown. Example:\n"
-            "[{\"category\": \"vulnerability\", \"severity\": \"high\", "
-            "\"title\": \"Unquoted service path in CreateProcessW\", "
-            "\"detail\": \"FUN_00405b60 calls CreateProcessW with lpApplicationName=NULL "
-            "and lpCommandLine from registry without quotes\", "
-            "\"evidence\": [\"FUN_00405b60\", \"CreateProcessW\", \"lpApplicationName=NULL\"], "
-            "\"addresses\": [\"0x00405b60\"], \"status\": \"confirmed\"}]"
+            '[{"category": "vulnerability", "severity": "high", '
+            '"title": "Unquoted service path in CreateProcessW", '
+            '"detail": "FUN_00405b60 calls CreateProcessW with lpApplicationName=NULL '
+            'and lpCommandLine from registry without quotes", '
+            '"evidence": ["FUN_00405b60", "CreateProcessW", "lpApplicationName=NULL"], '
+            '"addresses": ["0x00405b60"], "status": "confirmed"}]'
         )

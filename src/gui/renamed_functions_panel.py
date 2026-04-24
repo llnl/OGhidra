@@ -1,8 +1,8 @@
-import datetime
 import json
 import logging
 import threading
 import tkinter as tk
+from datetime import datetime
 from queue import Queue
 from tkinter import filedialog, messagebox, scrolledtext, ttk
 from typing import Any, Literal, Tuple
@@ -293,16 +293,16 @@ class RenamedFunctionsPanel:
                     test_embeddings = Bridge.get_embeddings(["test"])
                     if not test_embeddings:
                         # Get the configured embedding model name
-                        client_config = getattr(Bridge._ollama_client, "config", None)
+                        client_config = getattr(Bridge._llm_embedding_client, "config", None)
                         emb_model = getattr(client_config, "embedding_model", "nomic-embed-text")
-                        provider = getattr(Bridge._ollama_client, "provider", "LLM")
+                        provider = getattr(Bridge._llm_embedding_client, "provider", "LLM")
                         raise Exception(
                             f"{provider} embedding model ({emb_model}) not available.\n\nPlease ensure your configuration is correct."
                         )
 
-                    client_config = getattr(Bridge._ollama_client, "config", None)
+                    client_config = getattr(Bridge._llm_embedding_client, "config", None)
                     emb_model = getattr(client_config, "embedding_model", "nomic-embed-text")
-                    provider = getattr(Bridge._ollama_client, "provider", "Ollama")
+                    provider = getattr(Bridge._llm_embedding_client, "provider", "Ollama")
                     self._logger.info(f"✅ Using {provider} embeddings ({emb_model}) for vector creation")
                 except Exception as e:
                     raise Exception(f"Embedding service not available: {e}")
@@ -493,32 +493,29 @@ class RenamedFunctionsPanel:
                 function_address_mapping = getattr(self.bridge, "function_address_mapping", {})
                 bridge_summaries = getattr(self.bridge, "function_summaries", {})
 
-                # Debug logging
-                self._logger.info(
-                    f"DEBUG: Updating function list - renamed_functions: {len(renamed_functions)}, address_mapping: {len(function_address_mapping)}"
+                self._logger.debug(
+                    f"Updating function list - renamed_functions: {len(renamed_functions)}, address_mapping: {len(function_address_mapping)}"
                 )
                 if renamed_functions:
-                    self._logger.info(f"DEBUG: Renamed functions keys: {list(renamed_functions.keys())}")
-                    self._logger.info(f"DEBUG: Renamed functions values: {list(renamed_functions.values())}")
+                    self._logger.debug(f"Renamed functions keys: {list(renamed_functions.keys())}")
+                    self._logger.debug(f"Renamed functions values: {list(renamed_functions.values())}")
                 if function_address_mapping:
-                    self._logger.info(f"DEBUG: Address mappings keys: {list(function_address_mapping.keys())}")
+                    self._logger.debug(f"Address mappings keys: {list(function_address_mapping.keys())}")
                     for addr, info in function_address_mapping.items():
-                        self._logger.info(f"DEBUG: Address {addr} -> {info}")
+                        self._logger.debug(f"Address {addr} -> {info}")
 
                 # Also check if bridge has the expected attributes
                 if hasattr(self.bridge, "analysis_state"):
-                    self._logger.info(
-                        f"DEBUG: Bridge analysis_state exists with keys: {list(self.bridge.analysis_state.keys())}"
-                    )
+                    self._logger.debug(f"Bridge analysis_state exists with keys: {list(self.bridge.analysis_state.keys())}")
                 else:
-                    self._logger.warning("DEBUG: Bridge has no analysis_state attribute!")
+                    self._logger.warning("Bridge has no analysis_state attribute!")
 
                 if hasattr(self.bridge, "function_address_mapping"):
-                    self._logger.info(
-                        f"DEBUG: Bridge function_address_mapping exists with {len(self.bridge.function_address_mapping)} entries"
+                    self._logger.debug(
+                        f"Bridge function_address_mapping exists with {len(self.bridge.function_address_mapping)} entries"
                     )
                 else:
-                    self._logger.warning("DEBUG: Bridge has no function_address_mapping attribute!")
+                    self._logger.warning("Bridge has no function_address_mapping attribute!")
 
                 # Update count with total unique functions - use address mapping as primary source
                 # to avoid duplicates between renamed_functions and function_address_mapping
