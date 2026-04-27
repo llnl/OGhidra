@@ -1,10 +1,10 @@
 import os
 import re
 import sys
-import threading
-import time
 import unittest
 from unittest.mock import MagicMock, patch
+
+from src.tool_executor import ToolExecutor
 
 # Add project root to path for imports
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -80,6 +80,56 @@ class TestBridge(unittest.TestCase):
 
         for camel, expected_snake in test_cases:
             self.assertEqual(convert_camel_to_snake(camel), expected_snake)
+
+    def test_normalize_command_name_integration(self):
+        """Integration test for _normalize_command_name using SubClass and real attributes."""
+
+        # Create a subclass that has the methods we want to test with
+        class TestGhidra:
+            def get_current_function(self):
+                pass
+
+            def decompile_function(self):
+                pass
+
+            def rename_function_by_address(self):
+                pass
+
+            def camelCaseMethod(self):
+                pass  # Also test a camelCase method that exists
+
+        # Create a subclass of Bridge that uses our TestGhidra
+        class TestBridge(Bridge):
+            def __init__(self):
+                # Skip the normal initialization
+                ghidra_client = TestGhidra()
+                self.ghidra_client = ghidra_client
+                self.logger = MagicMock()
+
+                # Create an actual ToolExecutor instance with the minimum required dependencies
+                command_parser = MagicMock()
+                self.tool_executor = ToolExecutor(
+                    ghidra_client=ghidra_client,
+                    command_parser=command_parser,
+                    logger=self.logger
+                )
+
+        # Create our test bridge
+        test_bridge = TestBridge()
+
+        # Test scenarios:
+
+        # 1. camelCase conversion when snake_case exists
+        self.assertEqual(test_bridge._normalize_command_name("getCurrentFunction"), "get_current_function")
+
+        # 2. Already snake_case name remains unchanged
+        self.assertEqual(test_bridge._normalize_command_name("get_current_function"), "get_current_function")
+
+        # 3. camelCase that exists on the object remains unchanged
+        self.assertEqual(test_bridge._normalize_command_name("camelCaseMethod"), "camelCaseMethod")
+
+        # 4. Unknown commands in any case format returns empty string
+        self.assertEqual(test_bridge._normalize_command_name("nonExistentCommand"), "")
 
 
 if __name__ == "__main__":
