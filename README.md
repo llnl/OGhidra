@@ -91,20 +91,64 @@ cp .env.example .env
 ### Setup Ghidra Plugin
 
 The OGhidraMCP plugin supports both Ghidra 11.3.2+ and Ghidra 12.0.3 (recommended).
-Theres also a youtube video https://www.youtube.com/watch?v=hBD92FUgR0Y
+There's also a YouTube video tutorial: https://www.youtube.com/watch?v=hBD92FUgR0Y
 
-1. **Identify the OGhidraMCP plugin**:
-   ```bash
-   # The plugin is: OGhidraMCP_1-9.zip or OGhidra_1-9_11.zip for the Ghidra 11.3.2
-   ```
+#### Building the GhidraMCP Extension
 
-2. **Install in Ghidra**:
+As a developer, you'll need to build the GhidraMCP extension before installing it in Ghidra:
+
+1. **Prerequisites**:
+   - Ghidra 12.0.3 (or compatible version) installed
+   - Gradle (run `gradle -v` to verify it's installed)
+   - Java 21 (required for Ghidra 12.0.3)
+
+2. **Option 1: Using the automated build scripts**:
+   - Windows:
+     ```bash
+     # Set the path to your Ghidra installation
+     set GHIDRA_INSTALL_DIR=C:\path\to\ghidra_12.0_PUBLIC
+
+     # Run the build script
+     build_ghidra_plugin.bat
+     ```
+
+   - Unix/Linux/Mac:
+     ```bash
+     # Set the path to your Ghidra installation
+     export GHIDRA_INSTALL_DIR=/path/to/ghidra_12.0_PUBLIC
+
+     # Run the build script (make it executable first if needed)
+     chmod +x build_ghidra_plugin.sh
+     ./build_ghidra_plugin.sh
+     ```
+
+3. **Option 2: Manual build process**:
+   - Create/update `OGhidraMCP/gradle.properties` with:
+     ```properties
+     GHIDRA_INSTALL_DIR=C:/path/to/ghidra_12.0_PUBLIC
+     ```
+
+   - Navigate to the OGhidraMCP directory and run the build:
+     ```bash
+     cd OGhidraMCP
+     gradle buildExtension
+     ```
+
+4. **Locate the built extension**:
+   - The extension zip file is created in `OGhidraMCP/dist/`
+   - The filename will be something like `ghidra_12.0_PUBLIC_YYYYMMDD_OGhidraMCP.zip`
+
+#### Installing the GhidraMCP Extension
+
+Once you've built or obtained the GhidraMCP extension zip:
+
+1. **Install in Ghidra**:
    - Open Ghidra -> **File** -> **Install Extensions**
    - Click **Add Extension** (green plus icon)
-   - Select the correct `OGhidraMCP.zip` for your Ghidra version
+   - Select the `OGhidraMCP.zip` from your `OGhidraMCP/dist/` directory
    - Restart Ghidra
 
-3. **Enable the plugin**:
+2. **Enable the plugin**:
    - Open a Ghidra project
    - **File** -> **Configure** -> Search "OGhidraMCP"
    - Check the box to enable
