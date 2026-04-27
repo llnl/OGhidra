@@ -1,4 +1,5 @@
 # OGhidra - AI-Powered Reverse Engineering with Ghidra
+
 ### Try with gemini-3.1-flash-lite-preview for insanely fast Zero-Day Hunting
 
 ![Python Version](https://img.shields.io/badge/python-3.12%2B-blue?logo=python)
@@ -10,7 +11,6 @@
 YouTube Setup Tutorial
 
 [![OGhidra Introduction](https://img.youtube.com/vi/hBD92FUgR0Y/0.jpg)](https://www.youtube.com/watch?v=hBD92FUgR0Y)
-
 
 ---
 
@@ -104,6 +104,7 @@ As a developer, you'll need to build the GhidraMCP extension before installing i
 
 2. **Option 1: Using the automated build scripts**:
    - Windows:
+
      ```bash
      # Set the path to your Ghidra installation
      set GHIDRA_INSTALL_DIR=C:\path\to\ghidra_12.0_PUBLIC
@@ -113,6 +114,7 @@ As a developer, you'll need to build the GhidraMCP extension before installing i
      ```
 
    - Unix/Linux/Mac:
+
      ```bash
      # Set the path to your Ghidra installation
      export GHIDRA_INSTALL_DIR=/path/to/ghidra_12.0_PUBLIC
@@ -124,6 +126,7 @@ As a developer, you'll need to build the GhidraMCP extension before installing i
 
 3. **Option 2: Manual build process**:
    - Create/update `OGhidraMCP/gradle.properties` with:
+
      ```properties
      GHIDRA_INSTALL_DIR=C:/path/to/ghidra_12.0_PUBLIC
      ```
@@ -140,12 +143,13 @@ As a developer, you'll need to build the GhidraMCP extension before installing i
 
 #### Installing the GhidraMCP Extension
 
-Once you've built or obtained the GhidraMCP extension zip:
+Once you've successfully built the extension:
 
 1. **Install in Ghidra**:
    - Open Ghidra -> **File** -> **Install Extensions**
    - Click **Add Extension** (green plus icon)
-   - Select the `OGhidraMCP.zip` from your `OGhidraMCP/dist/` directory
+   - Browse to your `OGhidraMCP/dist/` directory
+   - Select the newly built extension zip file (e.g., `ghidra_12.0_PUBLIC_YYYYMMDD_OGhidraMCP.zip`)
    - Restart Ghidra
 
 2. **Enable the plugin**:
@@ -259,6 +263,7 @@ AI:  [recon -> correlation hooks -> multi-cycle analysis -> report]
 ```
 
 The investigation system includes:
+
 - **Recon Phase** - Maps imports, exports, strings (cached for follow-ups)
 - **Correlation Hooks** - 5 built-in vulnerability patterns (unquoted paths, DLL hijacking, command injection, privilege escalation, directory traversal)
 - **Recipe System** - Deterministic API tracing without LLM overhead
@@ -267,18 +272,19 @@ The investigation system includes:
 
 ### 3. Smart Tool Buttons (GUI)
 
-| Tool | Description |
-|------|-------------|
-| **Analyze Current Function** | Deep dive into selected function's behavior |
-| **Rename Current Function** | AI suggests meaningful names based on analysis |
-| **Rename All Functions** | Bulk rename with Smart/Full/Rename-Only options |
-| **Analyze Imports** | Identify libraries and external dependencies |
-| **Analyze Strings** | Find URLs, credentials, configuration data |
-| **Generate Report** | Comprehensive security assessment |
+| Tool                         | Description                                     |
+| ---------------------------- | ----------------------------------------------- |
+| **Analyze Current Function** | Deep dive into selected function's behavior     |
+| **Rename Current Function**  | AI suggests meaningful names based on analysis  |
+| **Rename All Functions**     | Bulk rename with Smart/Full/Rename-Only options |
+| **Analyze Imports**          | Identify libraries and external dependencies    |
+| **Analyze Strings**          | Find URLs, credentials, configuration data      |
+| **Generate Report**          | Comprehensive security assessment               |
 
 ### 4. Artifact Detection
 
 Real-time scanning of tool results for 19 security patterns:
+
 - **Privilege Escalation**: SeDebugPrivilege, AdjustTokenPrivileges, token manipulation
 - **Crypto/Credentials**: CryptEncrypt, hardcoded passwords, embedded private keys
 - **C2 Indicators**: Hardcoded IP URLs, network callbacks
@@ -322,6 +328,7 @@ class MyHook(CorrelationHook):
 ### 6. Session Persistence
 
 Analysis state carries across queries within a session:
+
 - **Function Registry** - All analyzed functions accumulate
 - **Discovery Cache** - Imports/exports/strings cached from first recon
 - **Conversation History** - Follow-up questions reference prior answers
@@ -422,18 +429,18 @@ Analysis state carries across queries within a session:
 
 ### Key Components
 
-| Component | File | Purpose |
-|-----------|------|---------|
-| **Orchestrator** | `src/orchestrator.py` | Query routing, investigation planning, worker coordination |
-| **Worker Agent** | `src/agents/worker_agent.py` | Tool execution loop (conversational + investigation) |
-| **Blackboard** | `src/blackboard.py` | Shared investigation state across queries |
-| **Recipe Executor** | `src/recipes.py` | Deterministic API tracing (no LLM overhead) |
-| **Recipe Registry** | `src/recipe_registry.py` | Plugin system for custom analysis recipes |
-| **Correlation Hooks** | `src/correlation_hooks.py` | Extensible vulnerability pattern detection |
-| **Tool Health** | `src/tool_health.py` | Cross-worker tool failure tracking |
-| **Artifact Scanner** | `src/artifact_scanner.py` | Real-time security pattern matching |
-| **Config Loader** | `src/config_loader.py` | Multi-level config (user/project/env) |
-| **Lazy Ghidra** | `src/lazy_ghidra.py` | Deferred connection proxy |
+| Component             | File                         | Purpose                                                    |
+| --------------------- | ---------------------------- | ---------------------------------------------------------- |
+| **Orchestrator**      | `src/orchestrator.py`        | Query routing, investigation planning, worker coordination |
+| **Worker Agent**      | `src/agents/worker_agent.py` | Tool execution loop (conversational + investigation)       |
+| **Blackboard**        | `src/blackboard.py`          | Shared investigation state across queries                  |
+| **Recipe Executor**   | `src/recipes.py`             | Deterministic API tracing (no LLM overhead)                |
+| **Recipe Registry**   | `src/recipe_registry.py`     | Plugin system for custom analysis recipes                  |
+| **Correlation Hooks** | `src/correlation_hooks.py`   | Extensible vulnerability pattern detection                 |
+| **Tool Health**       | `src/tool_health.py`         | Cross-worker tool failure tracking                         |
+| **Artifact Scanner**  | `src/artifact_scanner.py`    | Real-time security pattern matching                        |
+| **Config Loader**     | `src/config_loader.py`       | Multi-level config (user/project/env)                      |
+| **Lazy Ghidra**       | `src/lazy_ghidra.py`         | Deferred connection proxy                                  |
 
 ---
 
