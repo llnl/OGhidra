@@ -20,4 +20,5 @@
         "--line-length=128"
     ],
     "python.analysis.supportAllPythonDocuments": true,
+    "python.terminal.useEnvFile": true,
 }
