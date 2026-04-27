@@ -20,7 +20,10 @@ IF NOT EXIST "%GHIDRA_INSTALL_DIR%" (
 
 REM Create gradle.properties with the correct GHIDRA_INSTALL_DIR
 echo # Path to your Ghidra installation directory > OGhidraMCP\gradle.properties
-echo GHIDRA_INSTALL_DIR=%GHIDRA_INSTALL_DIR% >> OGhidraMCP\gradle.properties
+REM Convert backslashes to forward slashes for Gradle and ensure no trailing spaces
+set "GRADLE_PATH=%GHIDRA_INSTALL_DIR:\=/%"
+REM Remove any trailing spaces from the path (this creates the file without trailing spaces)
+echo GHIDRA_INSTALL_DIR=%GRADLE_PATH%>> OGhidraMCP\gradle.properties
 
 REM Build the extension
 cd OGhidraMCP
