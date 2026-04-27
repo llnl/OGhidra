@@ -109,9 +109,7 @@ class TestBridge(unittest.TestCase):
                 # Create an actual ToolExecutor instance with the minimum required dependencies
                 command_parser = MagicMock()
                 self.tool_executor = ToolExecutor(
-                    ghidra_client=ghidra_client,
-                    command_parser=command_parser,
-                    logger=self.logger
+                    ghidra_client=ghidra_client, command_parser=command_parser, logger=self.logger
                 )
 
         # Create our test bridge
