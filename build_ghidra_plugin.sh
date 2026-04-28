@@ -2,7 +2,15 @@
 # Build script for GhidraMCP extension
 
 echo "Building GhidraMCP extension..."
-
+echo
+which gradle
+gradle --version
+echo
+which javac
+javac --version
+echo
+echo $JAVA_HOME
+echo
 # Check if GHIDRA_INSTALL_DIR environment variable is set
 if [ -z "$GHIDRA_INSTALL_DIR" ]; then
     echo "ERROR: GHIDRA_INSTALL_DIR environment variable not set."
@@ -23,7 +31,7 @@ echo "GHIDRA_INSTALL_DIR=$GHIDRA_INSTALL_DIR" >> OGhidraMCP/gradle.properties
 
 # Build the extension
 cd OGhidraMCP
-gradle buildExtension
+gradle buildExtension --info
 if [ $? -ne 0 ]; then
     echo "ERROR: Build failed!"
     cd ..

@@ -4,6 +4,10 @@ SETLOCAL
 
 echo Building GhidraMCP extension...
 
+echo.
+call gradle --version
+echo.
+
 REM Check if GHIDRA_INSTALL_DIR environment variable is set
 IF "%GHIDRA_INSTALL_DIR%"=="" (
     echo ERROR: GHIDRA_INSTALL_DIR environment variable not set.
