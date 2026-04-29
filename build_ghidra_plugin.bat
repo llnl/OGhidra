@@ -8,12 +8,22 @@ echo.
 call gradle --version
 echo.
 
-REM Check if GHIDRA_INSTALL_DIR environment variable is set
-IF "%GHIDRA_INSTALL_DIR%"=="" (
-    echo ERROR: GHIDRA_INSTALL_DIR environment variable not set.
-    echo Please set it to your Ghidra installation directory.
-    echo Example: set GHIDRA_INSTALL_DIR=C:\path\to\ghidra_12.0_PUBLIC
-    exit /b 1
+REM If GHIDRA_INSTALL_DIR is not set, attempt to read from lastrun file
+IF NOT DEFINED GHIDRA_INSTALL_DIR (
+    IF DEFINED XDG_CONFIG_HOME (
+        SET LASTRUN_FILE=%XDG_CONFIG_HOME%\ghidra\lastrun
+    ) ELSE (
+        SET LASTRUN_FILE=%APPDATA%\ghidra\lastrun
+    )
+    IF EXIST "%LASTRUN_FILE%" (
+        SET /P GHIDRA_INSTALL_DIR=<"%LASTRUN_FILE%"
+        echo Found Ghidra at %GHIDRA_INSTALL_DIR% using %LASTRUN_FILE%
+    ) ELSE (
+        echo ERROR: GHIDRA_INSTALL_DIR environment variable not set.
+        echo Please set it to your Ghidra installation directory.
+        echo Example: set GHIDRA_INSTALL_DIR=C:\path\to\ghidra_12.0_PUBLIC
+        exit /b 1
+    )
 )
 
 REM Check if Ghidra installation exists

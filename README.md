@@ -106,7 +106,7 @@ As a developer, you'll need to build the GhidraMCP extension before installing i
    - Windows:
 
      ```bash
-     # Set the path to your Ghidra installation
+     # Set the path to your Ghidra installation (will attempt to find last run copy of Ghidra if not set)
      set GHIDRA_INSTALL_DIR=C:\path\to\ghidra_12.0_PUBLIC
 
      # Run the build script
@@ -116,7 +116,7 @@ As a developer, you'll need to build the GhidraMCP extension before installing i
    - Unix/Linux/Mac:
 
      ```bash
-     # Set the path to your Ghidra installation
+     # Set the path to your Ghidra installation (will attempt to find last run copy of Ghidra if not set)
      export GHIDRA_INSTALL_DIR=/path/to/ghidra_12.0_PUBLIC
 
      # Run the build script (make it executable first if needed)
