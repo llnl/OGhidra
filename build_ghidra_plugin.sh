@@ -11,12 +11,25 @@ javac --version
 echo
 echo $JAVA_HOME
 echo
-# Check if GHIDRA_INSTALL_DIR environment variable is set
+# If GHIDRA_INSTALL_DIR is not set, attempt to read from lastrun file
 if [ -z "$GHIDRA_INSTALL_DIR" ]; then
-    echo "ERROR: GHIDRA_INSTALL_DIR environment variable not set."
-    echo "Please set it to your Ghidra installation directory."
-    echo "Example: export GHIDRA_INSTALL_DIR=/path/to/ghidra_12.0_PUBLIC"
-    exit 1
+    if [ -n "$XDG_CONFIG_HOME" ]; then
+        LASTRUN_FILE="$XDG_CONFIG_HOME/ghidra/lastrun"
+    elif [ "$(uname)" = "Darwin" ]; then
+        LASTRUN_FILE="$HOME/Library/ghidra/lastrun"
+    else
+        LASTRUN_FILE="$HOME/.config/ghidra/lastrun"
+    fi
+
+    if [ -f "$LASTRUN_FILE" ]; then
+        GHIDRA_INSTALL_DIR=$(head -n 1 "$LASTRUN_FILE" | tr -d '[:space:]')
+        echo "Found Ghidra at $GHIDRA_INSTALL_DIR using $LASTRUN_FILE"
+    else
+        echo "ERROR: GHIDRA_INSTALL_DIR environment variable not set."
+        echo "Please set it to your Ghidra installation directory."
+        echo "Example: export GHIDRA_INSTALL_DIR=/path/to/ghidra_12.0_PUBLIC"
+        exit 1
+    fi
 fi
 
 # Check if Ghidra installation exists
