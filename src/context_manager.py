@@ -22,15 +22,17 @@ logger = logging.getLogger("ollama-ghidra-bridge.context")
 
 class ResultPriority(Enum):
     """Priority levels for result content."""
+
     CRITICAL = 3  # Function names, addresses, errors
-    HIGH = 2      # Decompiled code, key findings
-    MEDIUM = 1    # Lists, cross-references
-    LOW = 0       # Verbose output, raw data
+    HIGH = 2  # Decompiled code, key findings
+    MEDIUM = 1  # Lists, cross-references
+    LOW = 0  # Verbose output, raw data
 
 
 @dataclass
 class CachedResult:
     """A cached tool execution result with metadata."""
+
     result_id: str
     tool_name: str
     parameters: Dict[str, Any]
@@ -41,7 +43,7 @@ class CachedResult:
     priority: ResultPriority = ResultPriority.MEDIUM
     timestamp: datetime = field(default_factory=datetime.now)
     is_summarized: bool = False
-    
+
     def get_display_content(self, detail_level: str = "full") -> str:
         """Get content at specified detail level."""
         if detail_level == "full":
@@ -57,21 +59,20 @@ class CachedResult:
 class ResultCache:
     """
     Cache for tool execution results with intelligent retrieval.
-    
+
     Stores full results and provides various levels of detail
     based on context budget and priority.
     """
-    
+
     def __init__(self, max_cache_size: int = 100):
         self.cache: Dict[str, CachedResult] = {}
         self.max_cache_size = max_cache_size
         self.result_counter = 0
-        
-    def store(self, tool_name: str, parameters: Dict[str, Any], result: str, 
-              custom_id: Optional[str] = None) -> CachedResult:
+
+    def store(self, tool_name: str, parameters: Dict[str, Any], result: str, custom_id: Optional[str] = None) -> CachedResult:
         """
         Store a result and return a CachedResult object.
-        
+
         Args:
             tool_name: Name of the tool that produced this result
             parameters: Parameters used in the tool call
@@ -79,23 +80,23 @@ class ResultCache:
             custom_id: Optional custom ID (e.g., 'step_1') for easy retrieval
         """
         self.result_counter += 1
-        
+
         # Use custom ID if provided, otherwise generate unique ID
         if custom_id:
             result_id = custom_id
         else:
             param_hash = hashlib.md5(json.dumps(parameters, sort_keys=True).encode()).hexdigest()[:8]
             result_id = f"r{self.result_counter}_{tool_name}_{param_hash}"
-        
+
         # Estimate tokens (rough: ~4 chars per token)
         token_estimate = len(result) // 4
-        
+
         # Determine priority based on tool type
         priority = self._determine_priority(tool_name, result)
-        
+
         # Create excerpt (first meaningful portion)
         excerpt = self._create_excerpt(result, tool_name)
-        
+
         cached = CachedResult(
             result_id=result_id,
             tool_name=tool_name,
@@ -103,80 +104,79 @@ class ResultCache:
             full_result=result,
             excerpt=excerpt,
             token_estimate=token_estimate,
-            priority=priority
+            priority=priority,
         )
-        
+
         self.cache[result_id] = cached
-        
+
         # Evict old entries if over limit
         if len(self.cache) > self.max_cache_size:
             self._evict_oldest()
-        
+
         return cached
-    
+
     def get(self, result_id: str) -> Optional[CachedResult]:
         """Retrieve a cached result by ID."""
         return self.cache.get(result_id)
-    
+
     def get_full_result(self, result_id: str) -> Optional[str]:
         """Get the full result content for a cached result."""
         cached = self.cache.get(result_id)
         return cached.full_result if cached else None
-    
+
     def _determine_priority(self, tool_name: str, result: str) -> ResultPriority:
         """Determine priority based on tool type and result content."""
-        high_priority_tools = {'decompile_function', 'decompile_function_by_address', 
-                               'get_current_function', 'analyze_function'}
-        medium_priority_tools = {'disassemble_function', 'read_bytes', 
-                                 'get_xrefs_to', 'get_xrefs_from'}
-        low_priority_tools = {'list_functions', 'list_methods', 'list_strings',
-                              'list_imports', 'list_exports'}
-        
+        high_priority_tools = {
+            "decompile_function",
+            "decompile_function_by_address",
+            "get_current_function",
+            "analyze_function",
+        }
+        medium_priority_tools = {"disassemble_function", "read_bytes", "get_xrefs_to", "get_xrefs_from"}
+        low_priority_tools = {"list_functions", "list_methods", "list_strings", "list_imports", "list_exports"}
+
         if tool_name in high_priority_tools:
             return ResultPriority.HIGH
         elif tool_name in medium_priority_tools:
             return ResultPriority.MEDIUM
         elif tool_name in low_priority_tools:
             return ResultPriority.LOW
-        
+
         # Check for error indicators
-        if 'error' in result.lower()[:100]:
+        if "error" in result.lower()[:100]:
             return ResultPriority.CRITICAL
-        
+
         return ResultPriority.MEDIUM
-    
+
     def _create_excerpt(self, result: str, tool_name: str) -> str:
         """Create a meaningful excerpt from the result."""
-        lines = result.split('\n')
-        
+        lines = result.split("\n")
+
         # For list results, show first few and count
-        if tool_name.startswith('list_') and len(lines) > 10:
+        if tool_name.startswith("list_") and len(lines) > 10:
             excerpt_lines = lines[:8]
             excerpt_lines.append(f"... ({len(lines)} total items)")
-            return '\n'.join(excerpt_lines)
-        
+            return "\n".join(excerpt_lines)
+
         # For decompiled code, preserve more content (high-priority analysis data)
-        if 'decompile' in tool_name:
+        if "decompile" in tool_name:
             # Keep up to 50 lines for decompiled code - this is critical analysis data
             max_lines = min(50, len(lines))
-            return '\n'.join(lines[:max_lines])
-        
+            return "\n".join(lines[:max_lines])
+
         # Default: first 500 chars
         return result[:500]
-    
+
     def _evict_oldest(self):
         """Remove the oldest low-priority entries."""
         # Sort by priority (low first) then timestamp (old first)
-        sorted_entries = sorted(
-            self.cache.items(),
-            key=lambda x: (x[1].priority.value, x[1].timestamp)
-        )
-        
+        sorted_entries = sorted(self.cache.items(), key=lambda x: (x[1].priority.value, x[1].timestamp))
+
         # Remove bottom 20%
         to_remove = len(self.cache) // 5
         for result_id, _ in sorted_entries[:to_remove]:
             del self.cache[result_id]
-    
+
     def clear(self):
         """Clear the cache."""
         self.cache.clear()
@@ -186,102 +186,91 @@ class ResultCache:
 class ContextBudget:
     """
     Track and enforce context budget limits.
-    
+
     Helps manage token usage across different prompt sections.
     """
-    
-    def __init__(self, total_budget: int = 80000, 
-                 execution_fraction: float = 0.4,
-                 chars_per_token: float = 4.0):
+
+    def __init__(self, total_budget: int = 80000, execution_fraction: float = 0.4, chars_per_token: float = 4.0):
         self.total_budget = total_budget
         self.execution_fraction = execution_fraction
         self.chars_per_token = chars_per_token
-        
+
         # Calculate section budgets
         self.system_budget = int(total_budget * 0.25)  # 25% for system prompt
         self.execution_budget = int(total_budget * execution_fraction)
         self.history_budget = int(total_budget * 0.15)  # 15% for history
         self.response_budget = int(total_budget * 0.20)  # 20% reserved for response
-        
+
         # Current usage tracking
-        self.current_usage = {
-            'system': 0,
-            'execution': 0,
-            'history': 0,
-            'other': 0
-        }
-    
+        self.current_usage = {"system": 0, "execution": 0, "history": 0, "other": 0}
+
     def estimate_tokens(self, text: str) -> int:
         """Estimate token count for text."""
         return int(len(text) / self.chars_per_token)
-    
+
     def estimate_chars(self, tokens: int) -> int:
         """Estimate character count for tokens."""
         return int(tokens * self.chars_per_token)
-    
+
     def get_remaining_execution_budget(self) -> int:
         """Get remaining tokens for execution results."""
-        return self.execution_budget - self.current_usage['execution']
-    
+        return self.execution_budget - self.current_usage["execution"]
+
     def get_remaining_execution_chars(self) -> int:
         """Get remaining characters for execution results."""
         return self.estimate_chars(self.get_remaining_execution_budget())
-    
+
     def add_usage(self, section: str, text: str) -> int:
         """Add usage and return tokens used."""
         tokens = self.estimate_tokens(text)
         self.current_usage[section] = self.current_usage.get(section, 0) + tokens
         return tokens
-    
-    def can_fit(self, text: str, section: str = 'execution') -> bool:
+
+    def can_fit(self, text: str, section: str = "execution") -> bool:
         """Check if text fits within section budget."""
         tokens = self.estimate_tokens(text)
         current = self.current_usage.get(section, 0)
-        budget = getattr(self, f'{section}_budget', self.total_budget)
+        budget = getattr(self, f"{section}_budget", self.total_budget)
         return current + tokens <= budget
-    
-    def get_budget_for_result(self, priority: ResultPriority, 
-                               remaining_results: int) -> int:
+
+    def get_budget_for_result(self, priority: ResultPriority, remaining_results: int) -> int:
         """Calculate character budget for a single result based on priority."""
         remaining_chars = self.get_remaining_execution_chars()
-        
+
         if remaining_results <= 0:
             return remaining_chars
-        
+
         # Allocate more budget to high priority results
         priority_multipliers = {
             ResultPriority.CRITICAL: 2.0,
             ResultPriority.HIGH: 1.5,
             ResultPriority.MEDIUM: 1.0,
-            ResultPriority.LOW: 0.5
+            ResultPriority.LOW: 0.5,
         }
-        
+
         base_budget = remaining_chars // remaining_results
         return int(base_budget * priority_multipliers.get(priority, 1.0))
-    
+
     def reset(self):
         """Reset usage tracking."""
-        self.current_usage = {
-            'system': 0,
-            'execution': 0,
-            'history': 0,
-            'other': 0
-        }
-    
+        self.current_usage = {"system": 0, "execution": 0, "history": 0, "other": 0}
+
     def get_usage_summary(self) -> str:
         """Get a summary of current usage."""
         total_used = sum(self.current_usage.values())
-        return (f"Context Usage: {total_used}/{self.total_budget} tokens "
-                f"({100*total_used/self.total_budget:.1f}%)\n"
-                f"  System: {self.current_usage['system']}/{self.system_budget}\n"
-                f"  Execution: {self.current_usage['execution']}/{self.execution_budget}\n"
-                f"  History: {self.current_usage['history']}/{self.history_budget}")
+        return (
+            f"Context Usage: {total_used}/{self.total_budget} tokens "
+            f"({100*total_used/self.total_budget:.1f}%)\n"
+            f"  System: {self.current_usage['system']}/{self.system_budget}\n"
+            f"  Execution: {self.current_usage['execution']}/{self.execution_budget}\n"
+            f"  History: {self.current_usage['history']}/{self.history_budget}"
+        )
 
 
 class ContextManager:
     """
     Main context management class that coordinates all context operations.
-    
+
     Features:
     - Intelligent result summarization
     - Tiered context (detailed recent, summarized older)
@@ -289,23 +278,25 @@ class ContextManager:
     - Smart content prioritization
     - Result caching with references
     """
-    
-    def __init__(self, 
-                 ollama_client=None,
-                 context_budget: int = 80000,
-                 execution_fraction: float = 0.5,
-                 enable_summarization: bool = True,
-                 enable_caching: bool = True,
-                 enable_tiered_context: bool = True,
-                 max_detailed_steps: int = 10,
-                 current_loop_max_chars: int = 4000,
-                 prev_loop_max_chars: int = 800,
-                 older_loop_max_chars: int = 200):
+
+    def __init__(
+        self,
+        llm_client=None,
+        context_budget: int = 80000,
+        execution_fraction: float = 0.5,
+        enable_summarization: bool = True,
+        enable_caching: bool = True,
+        enable_tiered_context: bool = True,
+        max_detailed_steps: int = 10,
+        current_loop_max_chars: int = 4000,
+        prev_loop_max_chars: int = 800,
+        older_loop_max_chars: int = 200,
+    ):
         """
         Initialize the ContextManager with configurable limits.
-        
+
         Args:
-            ollama_client: LLM client for summarization
+            llm_client: LLM client for summarization
             context_budget: Total context budget in tokens
             execution_fraction: Fraction of budget for execution results
             enable_summarization: Use LLM-based summarization
@@ -316,39 +307,42 @@ class ContextManager:
             prev_loop_max_chars: Max chars for previous loop bullet summaries
             older_loop_max_chars: Max chars for older loop one-line refs
         """
-        self.ollama_client = ollama_client
+        self.llm_client = llm_client
         self.enable_summarization = enable_summarization
         self.enable_caching = enable_caching
         self.enable_tiered_context = enable_tiered_context
-        
+
         # Initialize components
         self.result_cache = ResultCache() if enable_caching else None
         self.budget = ContextBudget(context_budget, execution_fraction)
-        
+
         # Track recent results for tiered context
         self.recent_results: List[CachedResult] = []
         self.max_recent_detailed = 3  # Last 3 get full detail
-        
+
         # Tiered context limits based on loop age (chars) - all from config
         self.CURRENT_LOOP_MAX_CHARS = current_loop_max_chars
         self.PREV_LOOP_MAX_CHARS = prev_loop_max_chars
         self.OLDER_LOOP_CHARS = older_loop_max_chars
-        
+
         # Sliding window settings - from config
         self.MAX_DETAILED_STEPS = max_detailed_steps
-        
+
         # Track current loop for tiered context
         self.current_loop = 1
-        
-        logger.info(f"ContextManager initialized: budget={context_budget}, "
-                   f"sliding_window={max_detailed_steps}, "
-                   f"tiered_chars=[{current_loop_max_chars}/{prev_loop_max_chars}/{older_loop_max_chars}]")
-    
-    def process_result(self, tool_name: str, parameters: Dict[str, Any], 
-                       result: str, goal: str = "") -> Tuple[str, CachedResult]:
+
+        logger.info(
+            f"ContextManager initialized: budget={context_budget}, "
+            f"sliding_window={max_detailed_steps}, "
+            f"tiered_chars=[{current_loop_max_chars}/{prev_loop_max_chars}/{older_loop_max_chars}]"
+        )
+
+    def process_result(
+        self, tool_name: str, parameters: Dict[str, Any], result: str, goal: str = ""
+    ) -> Tuple[str, CachedResult]:
         """
         Process a tool execution result for context-aware inclusion.
-        
+
         Returns:
             Tuple of (display_content, cached_result)
         """
@@ -365,16 +359,13 @@ class ContextManager:
                 parameters=parameters,
                 full_result=result,
                 token_estimate=len(result) // 4,
-                priority=ResultPriority.MEDIUM
+                priority=ResultPriority.MEDIUM,
             )
             self.recent_results.append(cached)
-        
+
         # Determine how much budget we have for this result
-        char_budget = self.budget.get_budget_for_result(
-            cached.priority,
-            remaining_results=1  # Conservative estimate
-        )
-        
+        char_budget = self.budget.get_budget_for_result(cached.priority, remaining_results=1)  # Conservative estimate
+
         # If result fits in budget, use full
         if len(result) <= char_budget:
             display_content = result
@@ -387,40 +378,39 @@ class ContextManager:
         # Otherwise, smart truncate
         else:
             display_content = self._smart_truncate(result, char_budget, tool_name)
-        
+
         # Track budget usage
-        self.budget.add_usage('execution', display_content)
-        
+        self.budget.add_usage("execution", display_content)
+
         return display_content, cached
-    
-    def format_results_for_prompt(self, tool_executions: List[Any], 
-                                   goal: str = "") -> str:
+
+    def format_results_for_prompt(self, tool_executions: List[Any], goal: str = "") -> str:
         """
         Format tool execution results for inclusion in prompt.
-        
+
         Uses tiered context: recent results get full detail,
         older results get summaries or excerpts.
         """
         if not tool_executions:
             return ""
-        
+
         sections = []
         total_results = len(tool_executions)
-        
+
         for i, exec_result in enumerate(tool_executions):
             is_recent = i >= total_results - self.max_recent_detailed
             result_num = i + 1
-            
+
             # Get tool info
-            tool_name = getattr(exec_result, 'tool_name', str(exec_result))
-            parameters = getattr(exec_result, 'parameters', {})
-            result = getattr(exec_result, 'result', str(exec_result))
-            
+            tool_name = getattr(exec_result, "tool_name", str(exec_result))
+            parameters = getattr(exec_result, "parameters", {})
+            result = getattr(exec_result, "result", str(exec_result))
+
             # Determine detail level based on recency and budget
             if is_recent or not self.enable_tiered_context:
                 detail_level = "full"
                 remaining_budget = self.budget.get_remaining_execution_chars()
-                
+
                 if len(result) > remaining_budget:
                     if self.enable_summarization and len(result) > 3000:
                         detail_level = "summary"
@@ -429,27 +419,23 @@ class ContextManager:
             else:
                 # Older results get summarized
                 detail_level = "summary" if self.enable_summarization else "excerpt"
-            
+
             # Get display content
-            display_content = self._get_result_content(
-                result, tool_name, parameters, goal, detail_level
-            )
-            
+            display_content = self._get_result_content(result, tool_name, parameters, goal, detail_level)
+
             # Track budget
-            self.budget.add_usage('execution', display_content)
-            
+            self.budget.add_usage("execution", display_content)
+
             # Format section
             section = f"### Step {result_num}: {tool_name}\n"
             section += f"Parameters: {parameters}\n"
             section += f"Result:\n{display_content}\n"
-            
+
             sections.append(section)
-        
+
         return "\n".join(sections)
-    
-    def _get_result_content(self, result: str, tool_name: str, 
-                            parameters: Dict, goal: str, 
-                            detail_level: str) -> str:
+
+    def _get_result_content(self, result: str, tool_name: str, parameters: Dict, goal: str, detail_level: str) -> str:
         """Get result content at specified detail level."""
         if detail_level == "full":
             # Apply smart truncation if still too large
@@ -457,50 +443,46 @@ class ContextManager:
             if len(result) > max_chars:
                 return self._smart_truncate(result, max_chars, tool_name)
             return result
-        
+
         elif detail_level == "summary":
             if self.enable_summarization:
                 summary = self._summarize_result(result, tool_name, goal)
                 return f"[SUMMARIZED] {summary}\n[Full: {len(result)} chars]"
             else:
                 return self._smart_truncate(result, 1000, tool_name)
-        
+
         else:  # excerpt
             return self._smart_truncate(result, 500, tool_name)
-    
+
     def _summarize_result(self, result: str, tool_name: str, goal: str = "") -> str:
         """Use LLM to summarize a large result."""
-        if not self.ollama_client:
-            logger.warning("No ollama_client available for summarization, using truncation")
+        if not self.llm_client:
+            logger.warning("No llm_client available for summarization, using truncation")
             return self._smart_truncate(result, 800, tool_name)
-        
+
         try:
             # Limit input to avoid token overflow
             input_text = result[:12000] if len(result) > 12000 else result
-            
+
             prompt = f"""Concisely summarize this {tool_name} output in 2-4 sentences.
 Preserve: function names, addresses, key patterns, errors, important values.
 
 {input_text}
 
 Summary:"""
-            
-            summary = self.ollama_client.generate(
-                prompt=prompt,
-                temperature=0.3,
-                max_tokens=200
-            )
-            
+
+            summary = self.llm_client.generate(prompt=prompt, temperature=0.3, max_tokens=200)
+
             return summary.strip() if summary else self._smart_truncate(result, 800, tool_name)
-            
+
         except Exception as e:
             logger.warning(f"Summarization failed: {e}, using truncation")
             return self._smart_truncate(result, 800, tool_name)
-    
+
     def _smart_truncate(self, result: str, max_chars: int, tool_name: str) -> str:
         """
         Smart truncation that preserves important content.
-        
+
         Strategy:
         - For list results: first N items + count
         - For code: signature + first lines
@@ -509,254 +491,258 @@ Summary:"""
         """
         if len(result) <= max_chars:
             return result
-        
-        lines = result.split('\n')
-        
+
+        lines = result.split("\n")
+
         # List results: show first and count
-        if tool_name.startswith('list_') or len(lines) > 50:
+        if tool_name.startswith("list_") or len(lines) > 50:
             # Calculate how many lines we can show
             avg_line_len = len(result) // max(len(lines), 1)
             lines_to_show = max(5, max_chars // max(avg_line_len, 50))
-            
+
             if lines_to_show < len(lines):
-                first_lines = lines[:lines_to_show - 2]
-                return '\n'.join(first_lines) + f"\n... [{len(lines) - lines_to_show + 2} more lines, {len(result)} total chars]"
-        
+                first_lines = lines[: lines_to_show - 2]
+                return (
+                    "\n".join(first_lines) + f"\n... [{len(lines) - lines_to_show + 2} more lines, {len(result)} total chars]"
+                )
+
         # Hex dumps: show first and last
-        if 'read_bytes' in tool_name or all(c in '0123456789ABCDEFabcdef: |\n' for c in result[:100]):
+        if "read_bytes" in tool_name or all(c in "0123456789ABCDEFabcdef: |\n" for c in result[:100]):
             portion = max_chars // 3
             first_part = result[:portion]
             last_part = result[-portion:]
             return f"{first_part}\n... [middle truncated] ...\n{last_part}"
-        
+
         # Decompiled code: preserve signature
-        if 'decompile' in tool_name:
+        if "decompile" in tool_name:
             # Find function signature (first line with parentheses)
             sig_end = 0
             for i, line in enumerate(lines[:10]):
-                if '(' in line and ')' in line:
-                    sig_end = result.find('\n', result.find(line))
+                if "(" in line and ")" in line:
+                    sig_end = result.find("\n", result.find(line))
                     break
-            
+
             if sig_end > 0:
-                signature = result[:sig_end + 1]
+                signature = result[: sig_end + 1]
                 remaining = max_chars - len(signature) - 50
-                body_preview = result[sig_end + 1:sig_end + 1 + remaining]
+                body_preview = result[sig_end + 1 : sig_end + 1 + remaining]
                 return f"{signature}{body_preview}\n... [truncated, {len(result)} total chars]"
-        
+
         # Default: first and last portions
         first_portion = int(max_chars * 0.7)
         last_portion = max_chars - first_portion - 50
-        
-        return (f"{result[:first_portion]}\n"
-                f"... [truncated {len(result) - max_chars} chars] ...\n"
-                f"{result[-last_portion:]}")
-    
+
+        return (
+            f"{result[:first_portion]}\n" f"... [truncated {len(result) - max_chars} chars] ...\n" f"{result[-last_portion:]}"
+        )
+
     def prioritize_results(self, results: List[Any], goal: str) -> List[Any]:
         """
         Prioritize results by relevance to goal.
-        
+
         Higher priority results get more context budget.
         """
         scored = []
         goal_words = set(goal.lower().split())
-        
+
         for exec_result in results:
-            result_text = str(getattr(exec_result, 'result', exec_result)).lower()
-            tool_name = getattr(exec_result, 'tool_name', '')
-            
+            result_text = str(getattr(exec_result, "result", exec_result)).lower()
+            tool_name = getattr(exec_result, "tool_name", "")
+
             score = 0
-            
+
             # Score based on goal word matches
             for word in goal_words:
                 if len(word) > 3 and word in result_text:
                     score += 2
-            
+
             # Tool type scoring
-            if 'decompile' in tool_name:
+            if "decompile" in tool_name:
                 score += 5
-            elif 'analyze' in tool_name:
+            elif "analyze" in tool_name:
                 score += 4
-            elif 'get_current' in tool_name:
+            elif "get_current" in tool_name:
                 score += 3
-            elif 'xrefs' in tool_name:
+            elif "xrefs" in tool_name:
                 score += 2
-            elif 'list_' in tool_name:
+            elif "list_" in tool_name:
                 score -= 1
-            
+
             # Error penalty
-            if 'error' in result_text[:200]:
+            if "error" in result_text[:200]:
                 score -= 3
-            
+
             scored.append((score, exec_result))
-        
+
         # Sort by score descending
         scored.sort(key=lambda x: x[0], reverse=True)
-        
+
         return [exec_result for _, exec_result in scored]
-    
+
     def get_full_result(self, result_id: str) -> Optional[str]:
         """Retrieve the full cached result by ID."""
         if self.result_cache:
             return self.result_cache.get_full_result(result_id)
         return None
-    
+
     def reset(self):
         """Reset context manager state for new query."""
         self.budget.reset()
         self.recent_results.clear()
-    
+
     def get_status(self) -> str:
         """Get current status summary."""
-        return (f"Context Manager Status:\n"
-                f"  {self.budget.get_usage_summary()}\n"
-                f"  Cached results: {len(self.result_cache.cache) if self.result_cache else 0}\n"
-                f"  Recent results: {len(self.recent_results)}\n"
-                f"  Current loop: {self.current_loop}")
-    
+        return (
+            f"Context Manager Status:\n"
+            f"  {self.budget.get_usage_summary()}\n"
+            f"  Cached results: {len(self.result_cache.cache) if self.result_cache else 0}\n"
+            f"  Recent results: {len(self.recent_results)}\n"
+            f"  Current loop: {self.current_loop}"
+        )
+
     def set_current_loop(self, loop_number: int) -> None:
         """Set the current loop number for tiered context."""
         self.current_loop = loop_number
         logger.debug(f"ContextManager: Current loop set to {loop_number}")
-    
-    def get_tiered_display_content(self, 
-                                    result: str, 
-                                    result_loop: int,
-                                    tool_name: str,
-                                    step_id: str = None) -> str:
+
+    def get_tiered_display_content(self, result: str, result_loop: int, tool_name: str, step_id: str = None) -> str:
         """
         Get appropriately summarized content based on loop age.
-        
+
         Tiering strategy:
         - Current loop: Full details (limited to CURRENT_LOOP_MAX_CHARS)
         - Previous loop: Bullet-point summaries (PREV_LOOP_MAX_CHARS)
         - Older loops: One-line references with get_cached_result hint
-        
+
         Args:
             result: The full result text
             result_loop: Which loop this result came from
             tool_name: Name of the tool (for smart truncation)
             step_id: Optional step ID for cache references
-            
+
         Returns:
             Appropriately compressed content string
         """
         if not self.enable_tiered_context:
             return self._smart_truncate(result, self.CURRENT_LOOP_MAX_CHARS, tool_name)
-        
+
         loop_age = self.current_loop - result_loop
-        
+
         if loop_age <= 0:
             # Current loop: full details with character limit
             if len(result) <= self.CURRENT_LOOP_MAX_CHARS:
                 return result
             return self._smart_truncate(result, self.CURRENT_LOOP_MAX_CHARS, tool_name)
-        
+
         elif loop_age == 1:
             # Previous loop: bullet-point summary
             return self._create_bullet_summary(result, tool_name, self.PREV_LOOP_MAX_CHARS)
-        
+
         else:
             # Older loops: one-line reference
             if step_id:
-                return f"[{tool_name}] {len(result):,} chars - use get_cached_result(\"{step_id}\") for details"
+                return f'[{tool_name}] {len(result):,} chars - use get_cached_result("{step_id}") for details'
             else:
                 # Extract first meaningful line as hint
-                first_line = result.split('\n')[0][:self.OLDER_LOOP_CHARS]
+                first_line = result.split("\n")[0][: self.OLDER_LOOP_CHARS]
                 return f"[{tool_name}] {first_line}... ({len(result):,} chars)"
-    
+
     def _create_bullet_summary(self, result: str, tool_name: str, max_chars: int) -> str:
         """
         Create a bullet-point summary of a result.
-        
+
         Extracts key information like:
         - Function names and addresses
         - Error messages
         - Important patterns
         """
-        lines = result.split('\n')
+        lines = result.split("\n")
         bullets = []
         char_count = 0
-        
+
         # Priority patterns to include
         priority_patterns = [
-            'function', 'error', 'fail', 'success', 'found', 
-            'address', '0x', 'call', 'return', 'import', 'export'
+            "function",
+            "error",
+            "fail",
+            "success",
+            "found",
+            "address",
+            "0x",
+            "call",
+            "return",
+            "import",
+            "export",
         ]
-        
+
         for line in lines:
             line = line.strip()
             if not line or len(line) < 5:
                 continue
-            
+
             # Check if line contains priority content
             line_lower = line.lower()
             is_priority = any(p in line_lower for p in priority_patterns)
-            
+
             if is_priority or len(bullets) < 3:  # Always include first 3 non-empty lines
                 # Truncate long lines
                 if len(line) > 80:
                     line = line[:77] + "..."
-                
+
                 bullet = f"• {line}"
-                
+
                 if char_count + len(bullet) + 1 > max_chars:
                     break
-                
+
                 bullets.append(bullet)
                 char_count += len(bullet) + 1
-        
+
         if not bullets:
             # Fallback: just truncate
             return self._smart_truncate(result, max_chars, tool_name)
-        
-        summary = '\n'.join(bullets)
+
+        summary = "\n".join(bullets)
         remaining = len(lines) - len(bullets)
         if remaining > 0:
             summary += f"\n  ...({remaining} more lines)"
-        
+
         return summary
-    
-    def format_results_with_sliding_window(self, 
-                                            tool_executions: List[Any],
-                                            current_loop: int,
-                                            goal: str = "") -> str:
+
+    def format_results_with_sliding_window(self, tool_executions: List[Any], current_loop: int, goal: str = "") -> str:
         """
         Format results with sliding window: recent steps get full detail,
         older steps get compressed.
-        
+
         Args:
             tool_executions: List of tool execution results
             current_loop: Current loop number
             goal: Investigation goal (for relevance scoring)
-            
+
         Returns:
             Formatted string suitable for prompt inclusion
         """
         if not tool_executions:
             return "No tool executions recorded."
-        
+
         self.set_current_loop(current_loop)
         sections = []
         total = len(tool_executions)
-        
+
         for i, tool_exec in enumerate(tool_executions, 1):
             # Determine if this is a recent step (within sliding window)
             is_recent = i > total - self.MAX_DETAILED_STEPS
-            
+
             # Get tool info
-            tool_name = getattr(tool_exec, 'tool_name', str(tool_exec))
-            parameters = getattr(tool_exec, 'parameters', {})
-            result = str(getattr(tool_exec, 'result', str(tool_exec)))
-            result_loop = getattr(tool_exec, 'loop_number', current_loop)
+            tool_name = getattr(tool_exec, "tool_name", str(tool_exec))
+            parameters = getattr(tool_exec, "parameters", {})
+            result = str(getattr(tool_exec, "result", str(tool_exec)))
+            result_loop = getattr(tool_exec, "loop_number", current_loop)
             step_id = f"step_L{result_loop}_{i}"
-            
+
             if is_recent:
                 # Recent steps: use tiered context based on loop age
-                display_content = self.get_tiered_display_content(
-                    result, result_loop, tool_name, step_id
-                )
-                
+                display_content = self.get_tiered_display_content(result, result_loop, tool_name, step_id)
+
                 section = f"\n### {step_id}: {tool_name}\n"
                 param_str = ", ".join([f'{k}="{v}"' for k, v in parameters.items()])
                 section += f"Parameters: {param_str}\n"
@@ -765,121 +751,122 @@ Summary:"""
                 # Older steps: compressed summary with cache hint
                 section = f"\n• {step_id}: {tool_name} - "
                 if len(result) > 100:
-                    section += f"{len(result):,} chars [use get_cached_result(\"{step_id}\")]"
+                    section += f'{len(result):,} chars [use get_cached_result("{step_id}")]'
                 else:
                     section += result[:100]
-            
+
             sections.append(section)
-            
+
             # Track budget usage
-            self.budget.add_usage('execution', section)
-        
-        return ''.join(sections)
+            self.budget.add_usage("execution", section)
+
+        return "".join(sections)
 
 
 class RelevanceRanker:
     """
     Rank tool execution results by relevance to user goal.
-    
+
     Uses a scoring system based on:
     - Goal term matches in result text
     - Tool type priority (decompilation > analysis > lists)
     - Error/success indicators
     """
-    
+
     # Map tool names to categories for grouping
     CATEGORY_MAP = {
-        'decompile_function': 'decompilation',
-        'decompile_function_by_address': 'decompilation',
-        'disassemble_function': 'disassembly',
-        'analyze_function': 'analysis',
-        'list_functions': 'functions',
-        'list_methods': 'functions',
-        'search_functions_by_name': 'functions',
-        'list_strings': 'strings',
-        'list_imports': 'imports',
-        'list_exports': 'exports',
-        'get_xrefs_to': 'xrefs',
-        'get_xrefs_from': 'xrefs',
-        'get_function_xrefs': 'xrefs',
-        'read_bytes': 'raw_bytes',
-        'list_segments': 'segments',
-        'rename_function': 'modifications',
-        'rename_function_by_address': 'modifications',
-        'get_cached_result': 'cache',
+        "decompile_function": "decompilation",
+        "decompile_function_by_address": "decompilation",
+        "disassemble_function": "disassembly",
+        "analyze_function": "analysis",
+        "list_functions": "functions",
+        "list_methods": "functions",
+        "search_functions_by_name": "functions",
+        "list_strings": "strings",
+        "list_imports": "imports",
+        "list_exports": "exports",
+        "get_xrefs_to": "xrefs",
+        "get_xrefs_from": "xrefs",
+        "get_function_xrefs": "xrefs",
+        "read_bytes": "raw_bytes",
+        "list_segments": "segments",
+        "rename_function": "modifications",
+        "rename_function_by_address": "modifications",
+        "get_cached_result": "cache",
     }
-    
+
     # Priority scores by category (higher = more important)
     CATEGORY_PRIORITY = {
-        'decompilation': 10,
-        'analysis': 9,
-        'xrefs': 7,
-        'disassembly': 6,
-        'strings': 5,
-        'imports': 5,
-        'exports': 4,
-        'functions': 3,
-        'raw_bytes': 3,
-        'segments': 2,
-        'modifications': 1,
-        'cache': 0,
-        'other': 2,
+        "decompilation": 10,
+        "analysis": 9,
+        "xrefs": 7,
+        "disassembly": 6,
+        "strings": 5,
+        "imports": 5,
+        "exports": 4,
+        "functions": 3,
+        "raw_bytes": 3,
+        "segments": 2,
+        "modifications": 1,
+        "cache": 0,
+        "other": 2,
     }
-    
+
     def __init__(self, top_n_per_category: int = 10):
         self.top_n = top_n_per_category
         self.logger = logging.getLogger("ollama-ghidra-bridge.ranker")
-    
+
     def rank_results(self, tool_executions: List[Any], goal: str) -> Dict[str, List[Any]]:
         """
         Rank and group tool execution results by category.
-        
+
         Args:
             tool_executions: List of ToolExecution objects
             goal: User's investigation goal
-            
+
         Returns:
             Dict mapping category -> list of (score, tool_exec) tuples, sorted by score
         """
         goal_tokens = self._tokenize(goal)
-        
+
         # Score and categorize all results
         categorized: Dict[str, List[Tuple[float, Any]]] = {}
-        
+
         for tool_exec in tool_executions:
-            tool_name = getattr(tool_exec, 'tool_name', str(tool_exec))
-            result_text = str(getattr(tool_exec, 'result', ''))
-            
+            tool_name = getattr(tool_exec, "tool_name", str(tool_exec))
+            result_text = str(getattr(tool_exec, "result", ""))
+
             # Determine category
-            category = self.CATEGORY_MAP.get(tool_name, 'other')
-            
+            category = self.CATEGORY_MAP.get(tool_name, "other")
+
             # Score the result
             score = self._score_result(tool_name, result_text, goal_tokens)
-            
+
             if category not in categorized:
                 categorized[category] = []
             categorized[category].append((score, tool_exec))
-        
+
         # Sort each category by score (descending) and take top N
         ranked: Dict[str, List[Any]] = {}
         for category, items in categorized.items():
             sorted_items = sorted(items, key=lambda x: x[0], reverse=True)
-            ranked[category] = [item[1] for item in sorted_items[:self.top_n]]
-        
+            ranked[category] = [item[1] for item in sorted_items[: self.top_n]]
+
         self.logger.debug(f"Ranked results: {[(cat, len(items)) for cat, items in ranked.items()]}")
         return ranked
-    
+
     def _tokenize(self, text: str) -> set:
         """Extract meaningful tokens from text."""
         # Simple tokenization: lowercase, split on non-alphanumeric, filter short tokens
         import re
-        tokens = re.findall(r'\b[a-zA-Z0-9_]{3,}\b', text.lower())
+
+        tokens = re.findall(r"\b[a-zA-Z0-9_]{3,}\b", text.lower())
         return set(tokens)
-    
+
     def _score_result(self, tool_name: str, result_text: str, goal_tokens: set) -> float:
         """
         Score a single result based on relevance.
-        
+
         Scoring factors:
         - Goal term matches (major factor)
         - Category priority (minor factor)
@@ -887,97 +874,104 @@ class RelevanceRanker:
         - Result length (slight bonus for substantial content)
         """
         score = 0.0
-        
+
         # Category priority
-        category = self.CATEGORY_MAP.get(tool_name, 'other')
+        category = self.CATEGORY_MAP.get(tool_name, "other")
         score += self.CATEGORY_PRIORITY.get(category, 2)
-        
+
         # Goal term matches
         result_lower = result_text.lower()
         matches = sum(1 for token in goal_tokens if token in result_lower)
         score += matches * 3  # Each match is worth 3 points
-        
+
         # Bonus for substantial content (not too short, not too long)
         result_len = len(result_text)
         if 100 < result_len < 5000:
             score += 2
         elif result_len >= 5000:
             score += 1  # Still good but may be verbose
-        
+
         # Penalty for errors
-        if 'error' in result_lower[:200] or 'failed' in result_lower[:200]:
+        if "error" in result_lower[:200] or "failed" in result_lower[:200]:
             score -= 5
-        
+
         # Bonus for key security terms
-        security_terms = ['password', 'token', 'key', 'auth', 'encrypt', 'decrypt', 
-                         'privilege', 'admin', 'root', 'inject', 'shellcode', 'exploit']
+        security_terms = [
+            "password",
+            "token",
+            "key",
+            "auth",
+            "encrypt",
+            "decrypt",
+            "privilege",
+            "admin",
+            "root",
+            "inject",
+            "shellcode",
+            "exploit",
+        ]
         for term in security_terms:
             if term in result_lower:
                 score += 2
-        
+
         return score
-    
-    def format_ranked_for_prompt(self, ranked_results: Dict[str, List[Any]], 
-                                  max_chars_per_category: int = 3000) -> str:
+
+    def format_ranked_for_prompt(self, ranked_results: Dict[str, List[Any]], max_chars_per_category: int = 3000) -> str:
         """
         Format ranked results for inclusion in consolidation prompt.
-        
+
         Args:
             ranked_results: Output from rank_results()
             max_chars_per_category: Max chars to show per category
-            
+
         Returns:
             Formatted string suitable for prompt
         """
         sections = []
-        
+
         # Order categories by priority
-        sorted_categories = sorted(
-            ranked_results.keys(),
-            key=lambda c: self.CATEGORY_PRIORITY.get(c, 0),
-            reverse=True
-        )
-        
+        sorted_categories = sorted(ranked_results.keys(), key=lambda c: self.CATEGORY_PRIORITY.get(c, 0), reverse=True)
+
         for category in sorted_categories:
             items = ranked_results[category]
             if not items:
                 continue
-            
+
             section_lines = [f"\n## {category.upper()} ({len(items)} results)"]
             char_count = 0
-            
+
             for tool_exec in items:
-                tool_name = getattr(tool_exec, 'tool_name', str(tool_exec))
-                result = str(getattr(tool_exec, 'result', ''))
-                params = getattr(tool_exec, 'parameters', {})
-                
+                tool_name = getattr(tool_exec, "tool_name", str(tool_exec))
+                result = str(getattr(tool_exec, "result", ""))
+                params = getattr(tool_exec, "parameters", {})
+
                 # Truncate if needed
                 remaining = max_chars_per_category - char_count
                 if remaining < 200:
                     section_lines.append(f"\n... [{len(items) - items.index(tool_exec)} more {category} results]")
                     break
-                
+
                 if len(result) > remaining:
-                    result = result[:remaining - 50] + f"\n... [Truncated]"
-                
+                    result = result[: remaining - 50] + f"\n... [Truncated]"
+
                 param_str = ", ".join(f'{k}="{v}"' for k, v in params.items())
                 section_lines.append(f"\n### {tool_name}({param_str})")
                 section_lines.append(result)
                 char_count += len(result) + 50
-            
+
             sections.append("\n".join(section_lines))
-        
+
         return "\n".join(sections)
 
 
 class CorrelationHintBuilder:
     """
     Build cross-tool correlation hints by finding addresses mentioned in multiple tool results.
-    
+
     This addresses the key concern about missing patterns that require correlating
     multiple data streams (e.g., matching string addresses with function addresses).
     """
-    
+
     def __init__(self, min_mentions: int = 2):
         """
         Args:
@@ -985,45 +979,46 @@ class CorrelationHintBuilder:
         """
         self.min_mentions = min_mentions
         self.logger = logging.getLogger("ollama-ghidra-bridge.correlator")
-        
+
         # Patterns for address extraction
         import re
+
         self.address_patterns = [
-            re.compile(r'\b0x([0-9a-fA-F]{6,16})\b'),  # 0x prefix
-            re.compile(r'\b([0-9a-fA-F]{8,16})\b'),     # Raw hex (8+ digits)
-            re.compile(r'FUN_([0-9a-fA-F]{8,16})'),     # Ghidra function format
+            re.compile(r"\b0x([0-9a-fA-F]{6,16})\b"),  # 0x prefix
+            re.compile(r"\b([0-9a-fA-F]{8,16})\b"),  # Raw hex (8+ digits)
+            re.compile(r"FUN_([0-9a-fA-F]{8,16})"),  # Ghidra function format
         ]
-    
+
     def build_hints(self, tool_executions: List[Any]) -> List[Dict[str, Any]]:
         """
         Find addresses mentioned across multiple tool results.
-        
+
         Args:
             tool_executions: List of ToolExecution objects
-            
+
         Returns:
             List of correlation hints as dicts:
             [{"address": "140001234", "mentions": ["strings: '...'", "xref: ..."], "significance": "HIGH"}]
         """
         # Map: normalized_address -> list of (tool_name, context_snippet)
         address_mentions: Dict[str, List[Tuple[str, str]]] = {}
-        
+
         for tool_exec in tool_executions:
-            tool_name = getattr(tool_exec, 'tool_name', str(tool_exec))
-            result = str(getattr(tool_exec, 'result', ''))
-            
+            tool_name = getattr(tool_exec, "tool_name", str(tool_exec))
+            result = str(getattr(tool_exec, "result", ""))
+
             # Extract addresses and their context
             addresses_found = self._extract_addresses_with_context(result, tool_name)
-            
+
             for addr, context in addresses_found:
                 normalized = self._normalize_address(addr)
                 if normalized not in address_mentions:
                     address_mentions[normalized] = []
-                
+
                 # Avoid duplicate mentions from same tool
                 if not any(m[0] == tool_name for m in address_mentions[normalized]):
                     address_mentions[normalized].append((tool_name, context))
-        
+
         # Build hints for addresses with multiple mentions
         hints = []
         for addr, mentions in address_mentions.items():
@@ -1031,52 +1026,57 @@ class CorrelationHintBuilder:
                 hint = {
                     "address": f"0x{addr}",
                     "mentions": [f"{tool}: {ctx}" for tool, ctx in mentions[:5]],
-                    "significance": self._assess_significance(mentions)
+                    "significance": self._assess_significance(mentions),
                 }
                 hints.append(hint)
-        
+
         # Sort by significance
         significance_order = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
         hints.sort(key=lambda h: (significance_order.get(h["significance"], 2), -len(h["mentions"])))
-        
+
         self.logger.info(f"Built {len(hints)} correlation hints from {len(tool_executions)} tool results")
         return hints
-    
+
     def _extract_addresses_with_context(self, text: str, tool_name: str) -> List[Tuple[str, str]]:
         """Extract addresses and surrounding context from text."""
         results = []
-        
+
         for pattern in self.address_patterns:
             for match in pattern.finditer(text):
                 addr = match.group(1) if match.lastindex else match.group(0)
-                
+
                 # Get context (50 chars before and after)
                 start = max(0, match.start() - 50)
                 end = min(len(text), match.end() + 50)
-                context = text[start:end].replace('\n', ' ').strip()
-                
+                context = text[start:end].replace("\n", " ").strip()
+
                 # Truncate long context
                 if len(context) > 80:
                     context = context[:77] + "..."
-                
+
                 results.append((addr, context))
-        
+
         return results
-    
+
     def _normalize_address(self, addr: str) -> str:
         """Normalize address to lowercase hex without prefix."""
-        addr = addr.lower().replace('0x', '').lstrip('0') or '0'
+        addr = addr.lower().replace("0x", "").lstrip("0") or "0"
         return addr.zfill(8)  # Pad to 8 chars minimum
-    
+
     def _assess_significance(self, mentions: List[Tuple[str, str]]) -> str:
         """Assess the significance of a correlation."""
         tools = {m[0] for m in mentions}
-        
+
         # HIGH: Multiple high-value tool types
-        high_value = {'decompile_function', 'decompile_function_by_address', 
-                     'get_xrefs_to', 'get_xrefs_from', 'analyze_function'}
+        high_value = {
+            "decompile_function",
+            "decompile_function_by_address",
+            "get_xrefs_to",
+            "get_xrefs_from",
+            "analyze_function",
+        }
         high_matches = len(tools & high_value)
-        
+
         if high_matches >= 2:
             return "HIGH"
         elif high_matches >= 1 and len(tools) >= 3:
@@ -1085,32 +1085,31 @@ class CorrelationHintBuilder:
             return "MEDIUM"
         else:
             return "LOW"
-    
+
     def format_for_prompt(self, hints: List[Dict[str, Any]], max_hints: int = 15) -> str:
         """
         Format correlation hints for inclusion in consolidation prompt.
-        
+
         Args:
             hints: List of correlation hint dicts
             max_hints: Maximum hints to include
-            
+
         Returns:
             Formatted string for prompt
         """
         if not hints:
             return ""
-        
+
         lines = ["\n## Cross-Tool Correlations"]
         lines.append("The following addresses appear in multiple tool results, suggesting potential patterns:\n")
-        
+
         for i, hint in enumerate(hints[:max_hints]):
             sig = hint["significance"]
             addr = hint["address"]
             mentions = "; ".join(hint["mentions"])
             lines.append(f"- **[{sig}] {addr}**: {mentions}")
-        
+
         if len(hints) > max_hints:
             lines.append(f"\n... and {len(hints) - max_hints} more correlations")
-        
-        return "\n".join(lines)
 
+        return "\n".join(lines)

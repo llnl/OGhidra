@@ -7,10 +7,10 @@ This is the "candidate" generator for benchmark evaluation.
 """
 
 import logging
-import time
 import re
-from typing import Dict, List, Optional, Any
+import time
 from dataclasses import dataclass
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("oghidra.benchmark.runners.oghidra")
 
@@ -18,6 +18,7 @@ logger = logging.getLogger("oghidra.benchmark.runners.oghidra")
 @dataclass
 class OGhidraResult:
     """Result from OGhidra function analysis."""
+
     function_address: str
     function_name: str
     decompiled_code: str
@@ -78,9 +79,9 @@ class OGhidraRunner:
 
         # Decompile the function
         if function_name:
-            decompiled = self.bridge.ghidra.decompile_function(name=function_name)
+            decompiled = self.bridge.ghidra_client.decompile_function(name=function_name)
         else:
-            decompiled = self.bridge.ghidra.decompile_function_by_address(address=address)
+            decompiled = self.bridge.ghidra_client.decompile_function_by_address(address=address)
 
         if not decompiled or decompiled.lower().startswith("error"):
             raise ValueError(f"Failed to decompile function at {address}: {decompiled}")
@@ -100,7 +101,7 @@ class OGhidraRunner:
         )
 
         # Generate AI summary
-        ai_response = self.bridge.ollama.generate(prompt=analysis_prompt)
+        ai_response = self.bridge.llm_client.generate(prompt=analysis_prompt)
 
         # Parse response
         summary, suggested_name = self._parse_response(ai_response)
@@ -128,14 +129,14 @@ class OGhidraRunner:
 
         try:
             # Get callers
-            callers = self.bridge.ghidra.get_xrefs_to(address=address)
+            callers = self.bridge.ghidra_client.get_xrefs_to(address=address)
             if isinstance(callers, list) and callers:
                 caller_addrs = self._extract_addresses(callers[:3])
                 for caller_addr in caller_addrs:
                     if total_chars >= self.max_context_chars:
                         break
                     try:
-                        caller_code = self.bridge.ghidra.decompile_function_by_address(address=caller_addr)
+                        caller_code = self.bridge.ghidra_client.decompile_function_by_address(address=caller_addr)
                         if caller_code and not caller_code.lower().startswith("error"):
                             truncated = caller_code[:1000] if len(caller_code) > 1000 else caller_code
                             context_parts.append(f"### Caller at {caller_addr}:\n```c\n{truncated}\n```")
@@ -144,14 +145,14 @@ class OGhidraRunner:
                         pass
 
             # Get callees
-            callees = self.bridge.ghidra.get_xrefs_from(address=address)
+            callees = self.bridge.ghidra_client.get_xrefs_from(address=address)
             if isinstance(callees, list) and callees:
                 callee_addrs = self._extract_addresses(callees[:3])
                 for callee_addr in callee_addrs:
                     if total_chars >= self.max_context_chars:
                         break
                     try:
-                        callee_code = self.bridge.ghidra.decompile_function_by_address(address=callee_addr)
+                        callee_code = self.bridge.ghidra_client.decompile_function_by_address(address=callee_addr)
                         if callee_code and not callee_code.lower().startswith("error"):
                             truncated = callee_code[:1000] if len(callee_code) > 1000 else callee_code
                             context_parts.append(f"### Callee at {callee_addr}:\n```c\n{truncated}\n```")
@@ -169,11 +170,11 @@ class OGhidraRunner:
         addresses = []
         for xref in xrefs:
             if isinstance(xref, dict):
-                addr = xref.get('from_address') or xref.get('to_address') or xref.get('address')
+                addr = xref.get("from_address") or xref.get("to_address") or xref.get("address")
                 if addr:
                     addresses.append(str(addr))
             elif isinstance(xref, str):
-                match = re.search(r'([0-9a-fA-F]{6,})', xref)
+                match = re.search(r"([0-9a-fA-F]{6,})", xref)
                 if match:
                     addresses.append(match.group(1))
         return addresses
@@ -218,12 +219,12 @@ Based on the function's code and context, provide:
         suggested_name = None
 
         # Extract suggested name
-        lines = response.split('\n')
+        lines = response.split("\n")
         for line in lines:
-            if 'suggested name:' in line.lower():
-                name_part = line.split(':', 1)[1].strip()
-                name_part = name_part.replace('**', '').replace('*', '').strip()
-                match = re.search(r'\b([a-z][a-zA-Z0-9_]*[a-zA-Z0-9])\b', name_part)
+            if "suggested name:" in line.lower():
+                name_part = line.split(":", 1)[1].strip()
+                name_part = name_part.replace("**", "").replace("*", "").strip()
+                match = re.search(r"\b([a-z][a-zA-Z0-9_]*[a-zA-Z0-9])\b", name_part)
                 if match:
                     suggested_name = match.group(1)
                     break

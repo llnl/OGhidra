@@ -3,7 +3,17 @@
 apply plugin: 'java'
 
 // Point to Ghidra installation
-def ghidraInstallDir = file(project.findProperty('GHIDRA_INSTALL_DIR') ?: System.env.GHIDRA_INSTALL_DIR ?: "<PATH_TO_GHIDRA_INSTALLATION>")
+def ghidraInstallDirPath = project.findProperty('GHIDRA_INSTALL_DIR') ?: System.env.GHIDRA_INSTALL_DIR ?: "<PATH_TO_GHIDRA_INSTALLATION>"
+
+// Handle Windows paths correctly by ensuring they're treated as absolute
+def ghidraInstallDir
+if (ghidraInstallDirPath.toString().matches("^[A-Za-z]:.*")) {
+    // This is a Windows-style absolute path starting with drive letter
+    ghidraInstallDir = new File(ghidraInstallDirPath)
+} else {
+    // Use default Gradle file() behavior for other paths
+    ghidraInstallDir = file(ghidraInstallDirPath)
+}
 
 // Check if Ghidra installation is valid
 if (!ghidraInstallDir.exists()) {
@@ -15,16 +25,13 @@ apply from: new File(ghidraInstallDir, "support/buildExtension.gradle").absolute
 
 // Extension information
 version = "1.0"
-ext.ghidraVersion = "12.0.2"
+ext.ghidraVersion = "12.0.3"
 
-// Java version matching Ghidra 11.3.2
+// Java version matching Ghidra 12.0
 java {
-    toolchain {
-        languageVersion = JavaLanguageVersion.of(25)
-    }
+    sourceCompatibility = JavaVersion.VERSION_21
+    targetCompatibility = JavaVersion.VERSION_21
 }
-// sourceCompatibility = 21
-// targetCompatibility = 21
 
 repositories {
     mavenCentral()

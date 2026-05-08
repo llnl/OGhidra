@@ -158,7 +158,7 @@ class LLMJudgeMetric(BaseMetric):
         import re
 
         # Try to extract JSON from response
-        json_match = re.search(r'\{[^{}]*\}', response, re.DOTALL)
+        json_match = re.search(r"\{[^{}]*\}", response, re.DOTALL)
         if json_match:
             try:
                 result = json.loads(json_match.group())
@@ -173,7 +173,7 @@ class LLMJudgeMetric(BaseMetric):
 
         # Fallback: try to extract numbers from response
         logger.warning("Could not parse JSON from LLM response, using fallback parsing")
-        numbers = re.findall(r'\b([1-5])\b', response)
+        numbers = re.findall(r"\b([1-5])\b", response)
         if len(numbers) >= 4:
             return {
                 "semantic_accuracy": int(numbers[0]),
