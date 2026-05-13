@@ -2,12 +2,11 @@
 Data structures for session memory and tool call tracking.
 """
 
-from datetime import datetime, UTC, timedelta
 import uuid
+from datetime import datetime, UTC, timedelta
 from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
-
 
 
 class ToolCallRecord(BaseModel):

@@ -19,6 +19,7 @@ from src.bridge import Bridge, setup_logging
 from src.config import BridgeConfig, get_config
 
 
+
 def print_header():
     """Print the application header."""
     width = 70
@@ -107,7 +108,7 @@ def run_interactive_mode(bridge: Bridge, config: BridgeConfig):
                                         if session_ids:
                                             print(f"\nStored Session IDs ({len(session_ids)}):")
                                             for i, sid in enumerate(session_ids[:5]):  # Show first 5
-                                                print(f"  {i+1}. {sid}")
+                                                print(f"  {i + 1}. {sid}")
                                             if len(session_ids) > 5:
                                                 print(f"  ... and {len(session_ids) - 5} more")
                     except Exception as e:
@@ -150,7 +151,7 @@ def run_interactive_mode(bridge: Bridge, config: BridgeConfig):
                                     if session_ids:
                                         print(f"\nStored Session IDs ({len(session_ids)}):")
                                         for i, sid in enumerate(session_ids):
-                                            print(f"  {i+1}. {sid}")
+                                            print(f"  {i + 1}. {sid}")
                 except Exception as e:
                     print(f"Error displaying vector store info: {e}")
 
@@ -183,9 +184,7 @@ def run_interactive_mode(bridge: Bridge, config: BridgeConfig):
                     tools = [
                         name
                         for name in dir(bridge.ghidra_client)
-                        if not name.startswith("_")
-                        and callable(getattr(bridge.ghidra_client, name))
-                        and name not in non_tool_methods
+                        if not name.startswith("_") and callable(getattr(bridge.ghidra_client, name)) and name not in non_tool_methods
                     ]
 
                     print(f"Found {len(tools)} available tools (via run-tool command):\n")
@@ -700,9 +699,7 @@ Tool Output:
 
                             # Decompile the function
                             function_decompile_result = (
-                                bridge.ghidra_client.decompile_function(name=function_name)
-                                if hasattr(bridge, "ghidra")
-                                else None
+                                bridge.ghidra_client.decompile_function(name=function_name) if hasattr(bridge, "ghidra") else None
                             )
                             if not function_decompile_result or (
                                 isinstance(function_decompile_result, str)
@@ -870,9 +867,7 @@ EXAMPLES of good names:
 
 CRITICAL: You MUST include all four sections with the exact headers shown above. Focus on making the suggested name as specific and descriptive as possible."""
 
-                            ai_response = (
-                                bridge.llm_client.generate(prompt=analysis_query) if hasattr(bridge, "ollama") else None
-                            )
+                            ai_response = bridge.llm_client.generate(prompt=analysis_query) if hasattr(bridge, "ollama") else None
 
                             if ai_response and ai_response.strip():
                                 function_summary = ai_response.strip()
@@ -1020,7 +1015,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                     enumeration_time = time.time() - start_time
                     print(f"\n[Step 2 Complete] Enumerated {successful_enumerations}/{total_functions} functions")
                     print(
-                        f"  Time: {enumeration_time:.1f}s, Average: {enumeration_time/max(1, successful_enumerations):.2f}s per function"
+                        f"  Time: {enumeration_time:.1f}s, Average: {enumeration_time / max(1, successful_enumerations):.2f}s per function"
                     )
 
                     # Step 3: Load vectors
@@ -1333,6 +1328,7 @@ def main():
         # Single query mode
         result = bridge.process_query(args.query)
         print(result)
+
 
 
 if __name__ == "__main__":

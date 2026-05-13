@@ -2,6 +2,7 @@
 Session history storage and retrieval.
 """
 
+import datetime
 import json
 import os
 from datetime import UTC, datetime
