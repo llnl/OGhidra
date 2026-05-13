@@ -8,7 +8,7 @@ access to the original source code.
 """
 
 import logging
-from typing import Optional, Any
+from typing import Any, Optional
 
 from .extractor import FunctionGroundTruth
 
@@ -95,7 +95,7 @@ class SourceSummaryGenerator:
         # Truncate source if too long
         source_code = func.source_code
         if len(source_code) > self.max_source_chars:
-            source_code = source_code[:self.max_source_chars] + "\n// ... [truncated]"
+            source_code = source_code[: self.max_source_chars] + "\n// ... [truncated]"
 
         # Format docstring
         docstring = func.original_docstring or "No documentation available."
@@ -131,17 +131,17 @@ class SourceSummaryGenerator:
         summary = response.strip()
 
         # Remove markdown headers if present
-        lines = summary.split('\n')
+        lines = summary.split("\n")
         cleaned_lines = []
         for line in lines:
             # Skip lines that look like section headers from our prompt
-            if line.strip().startswith('## Summary'):
+            if line.strip().startswith("## Summary"):
                 continue
-            if line.strip().startswith('```'):
+            if line.strip().startswith("```"):
                 continue
             cleaned_lines.append(line)
 
-        return '\n'.join(cleaned_lines).strip()
+        return "\n".join(cleaned_lines).strip()
 
     def batch_generate(
         self,

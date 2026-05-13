@@ -9,14 +9,14 @@ and evaluation metrics to produce benchmark results.
 import json
 import logging
 import time
-from pathlib import Path
-from typing import Dict, List, Optional, Any
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
-from ..metrics.evaluator import SemanticEvaluator, EvaluationResult
-from ..ground_truth.extractor import GroundTruthDataset, FunctionGroundTruth
-from .oghidra_runner import OGhidraRunner, OGhidraResult
+from ..ground_truth.extractor import FunctionGroundTruth, GroundTruthDataset
+from ..metrics.evaluator import EvaluationResult, SemanticEvaluator
+from .oghidra_runner import OGhidraResult, OGhidraRunner
 
 logger = logging.getLogger("oghidra.benchmark.runner")
 
@@ -24,6 +24,7 @@ logger = logging.getLogger("oghidra.benchmark.runner")
 @dataclass
 class BenchmarkConfig:
     """Configuration for benchmark execution."""
+
     name: str
     description: str = ""
 
@@ -45,6 +46,7 @@ class BenchmarkConfig:
 @dataclass
 class FunctionBenchmarkResult:
     """Complete benchmark result for a single function."""
+
     # Ground truth info
     function_id: str
     function_name: str
@@ -69,6 +71,7 @@ class FunctionBenchmarkResult:
 @dataclass
 class BenchmarkResults:
     """Complete results from a benchmark run."""
+
     # Configuration
     config: BenchmarkConfig
     dataset_name: str
@@ -100,7 +103,7 @@ class BenchmarkResults:
 
     def save(self, path: str):
         """Save results to JSON file."""
-        with open(path, 'w') as f:
+        with open(path, "w") as f:
             json.dump(self.to_dict(), f, indent=2)
         logger.info(f"Saved benchmark results to {path}")
 

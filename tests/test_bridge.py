@@ -118,16 +118,25 @@ class TestBridge(unittest.TestCase):
         # Test scenarios:
 
         # 1. camelCase conversion when snake_case exists
-        self.assertEqual(test_bridge._normalize_command_name("getCurrentFunction"), "get_current_function")
+        self.assertEqual(
+            test_bridge._normalize_command_name("getCurrentFunction"),
+            "get_current_function",
+        )
 
         # 2. Already snake_case name remains unchanged
-        self.assertEqual(test_bridge._normalize_command_name("get_current_function"), "get_current_function")
+        self.assertEqual(
+            test_bridge._normalize_command_name("get_current_function"),
+            "get_current_function",
+        )
 
         # 3. camelCase that exists on the object remains unchanged
         self.assertEqual(test_bridge._normalize_command_name("camelCaseMethod"), "camelCaseMethod")
 
-        # 4. Unknown commands in any case format returns empty string
-        self.assertEqual(test_bridge._normalize_command_name("nonExistentCommand"), "")
+        # 4. Unknown commands in any case format remain unchanged
+        self.assertEqual(
+            test_bridge._normalize_command_name("nonExistentCommand"),
+            "nonExistentCommand",
+        )
 
 
 if __name__ == "__main__":

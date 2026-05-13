@@ -25,9 +25,9 @@ Usage:
 
 __version__ = "0.1.0"
 
+from .ground_truth.extractor import GroundTruthExtractor
 from .metrics.evaluator import SemanticEvaluator
 from .runners.benchmark_runner import BenchmarkRunner
-from .ground_truth.extractor import GroundTruthExtractor
 
 __all__ = [
     "SemanticEvaluator",

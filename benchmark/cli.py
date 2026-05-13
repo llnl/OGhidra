@@ -143,9 +143,7 @@ def cmd_run(args):
     print(f"Functions evaluated: {results.functions_evaluated}")
     print(f"Functions failed: {results.functions_failed}")
     print(f"Total time: {results.total_time:.1f}s")
-    print(
-        f"\nCombined Score: {stats.get('combined', {}).get('mean', 0):.3f} " f"(±{stats.get('combined', {}).get('std', 0):.3f})"
-    )
+    print(f"\nCombined Score: {stats.get('combined', {}).get('mean', 0):.3f} (±{stats.get('combined', {}).get('std', 0):.3f})")
     print("=" * 60)
 
 

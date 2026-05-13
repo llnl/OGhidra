@@ -16,9 +16,10 @@ Usage:
 """
 
 import logging
-from typing import Dict, List, Optional, Any, Tuple
-from dataclasses import dataclass, field
 from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Tuple
+
 import numpy as np
 
 logger = logging.getLogger("oghidra.benchmark.evaluator")
@@ -112,7 +113,7 @@ class SemanticEvaluator:
             use_gpu: Use GPU for transformer-based metrics
             batch_size: Batch size for efficient processing
             include_llm_judge: Whether to include LLM-as-Judge (slower but more nuanced)
-            ollama_client: OllamaClient instance for LLM-as-Judge
+            llm_client: OllamaClient instance for LLM-as-Judge
         """
         self.use_gpu = use_gpu
         self.batch_size = batch_size
@@ -165,9 +166,7 @@ class SemanticEvaluator:
         self._initialized = True
 
         if not self.metrics:
-            raise RuntimeError(
-                "No metrics available. Install at least one of: " "bert-score, sentence-transformers, rouge-score"
-            )
+            raise RuntimeError("No metrics available. Install at least one of: bert-score, sentence-transformers, rouge-score")
 
     def evaluate(
         self,

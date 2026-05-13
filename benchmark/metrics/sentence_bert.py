@@ -67,8 +67,7 @@ class SentenceBERTMetric(BaseMetric):
             logger.info(f"SentenceTransformer loaded on {device}")
         except ImportError:
             raise ImportError(
-                "sentence-transformers is required for SentenceBERTMetric. "
-                "Install with: pip install sentence-transformers"
+                "sentence-transformers is required for SentenceBERTMetric. Install with: pip install sentence-transformers"
             )
 
     def score(self, candidate: str, reference: str) -> float:

@@ -9,13 +9,18 @@ Tests:
 - Result prioritization
 """
 
-import sys
 import os
+import sys
 
 # Add src to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.context_manager import ContextManager, ContextBudget, ResultCache, ResultPriority
+from src.context_manager import (
+    ContextBudget,
+    ContextManager,
+    ResultCache,
+    ResultPriority,
+)
 
 
 def test_context_budget():
@@ -63,7 +68,11 @@ def test_result_cache():
     cache = ResultCache(max_cache_size=10)
 
     # Store some results
-    result1 = cache.store("decompile_function", {"name": "main"}, "void main() {\n    printf('Hello');\n    return 0;\n}")
+    result1 = cache.store(
+        "decompile_function",
+        {"name": "main"},
+        "void main() {\n    printf('Hello');\n    return 0;\n}",
+    )
 
     result2 = cache.store("list_functions", {}, "\n".join([f"FUN_{i:08x} at {i:08x}" for i in range(100)]))
 
@@ -115,7 +124,12 @@ def test_context_manager():
 
     # Process a large result
     large_result = "\n".join([f"Line {i}: Some content here with data" for i in range(200)])
-    display, cached = manager.process_result("list_functions", {"offset": 0, "limit": 200}, large_result, "List all functions")
+    display, cached = manager.process_result(
+        "list_functions",
+        {"offset": 0, "limit": 200},
+        large_result,
+        "List all functions",
+    )
 
     print(f"\nProcessed large result:")
     print(f"  Original length: {len(large_result)} chars")
@@ -140,7 +154,7 @@ def test_smart_truncation():
     manager = ContextManager(context_budget=80000, enable_summarization=False, enable_caching=False)
 
     # Test list truncation
-    list_result = "\n".join([f"Function_{i:04d} at 0x{i*16:08x}" for i in range(100)])
+    list_result = "\n".join([f"Function_{i:04d} at 0x{i * 16:08x}" for i in range(100)])
     truncated = manager._smart_truncate(list_result, 500, "list_functions")
     print(f"\nList truncation (100 items -> 500 chars):")
     print(truncated[:200] + "...")
@@ -161,7 +175,7 @@ def test_smart_truncation():
     print(truncated)
 
     # Test hex dump truncation
-    hex_result = "\n".join([f"0x{i*16:08x}: " + " ".join([f"{b:02X}" for b in range(16)]) for i in range(50)])
+    hex_result = "\n".join([f"0x{i * 16:08x}: " + " ".join([f"{b:02X}" for b in range(16)]) for i in range(50)])
     truncated = manager._smart_truncate(hex_result, 300, "read_bytes")
     print(f"\nHex dump truncation:")
     print(truncated)

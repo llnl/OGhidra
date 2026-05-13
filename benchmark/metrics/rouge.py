@@ -10,7 +10,7 @@ than embedding-based metrics, but useful for content coverage.
 """
 
 import logging
-from typing import List, Dict
+from typing import Dict, List
 
 from .evaluator import BaseMetric
 
@@ -53,15 +53,12 @@ class RougeMetric(BaseMetric):
             from rouge_score import rouge_scorer
 
             self._scorer = rouge_scorer.RougeScorer(
-                ['rouge1', 'rouge2', 'rougeL'],
+                ["rouge1", "rouge2", "rougeL"],
                 use_stemmer=self.use_stemmer,
             )
             logger.info("rouge_score library loaded successfully")
         except ImportError:
-            raise ImportError(
-                "rouge-score is required for RougeMetric. "
-                "Install with: pip install rouge-score"
-            )
+            raise ImportError("rouge-score is required for RougeMetric. Install with: pip install rouge-score")
 
     def score(self, candidate: str, reference: str) -> float:
         """
@@ -77,7 +74,7 @@ class RougeMetric(BaseMetric):
         self._lazy_init()
 
         scores = self._scorer.score(reference, candidate)
-        return scores['rougeL'].fmeasure
+        return scores["rougeL"].fmeasure
 
     def detailed_score(self, candidate: str, reference: str) -> Dict[str, Dict[str, float]]:
         """
@@ -92,20 +89,20 @@ class RougeMetric(BaseMetric):
         scores = self._scorer.score(reference, candidate)
 
         return {
-            'rouge1': {
-                'precision': scores['rouge1'].precision,
-                'recall': scores['rouge1'].recall,
-                'fmeasure': scores['rouge1'].fmeasure,
+            "rouge1": {
+                "precision": scores["rouge1"].precision,
+                "recall": scores["rouge1"].recall,
+                "fmeasure": scores["rouge1"].fmeasure,
             },
-            'rouge2': {
-                'precision': scores['rouge2'].precision,
-                'recall': scores['rouge2'].recall,
-                'fmeasure': scores['rouge2'].fmeasure,
+            "rouge2": {
+                "precision": scores["rouge2"].precision,
+                "recall": scores["rouge2"].recall,
+                "fmeasure": scores["rouge2"].fmeasure,
             },
-            'rougeL': {
-                'precision': scores['rougeL'].precision,
-                'recall': scores['rougeL'].recall,
-                'fmeasure': scores['rougeL'].fmeasure,
+            "rougeL": {
+                "precision": scores["rougeL"].precision,
+                "recall": scores["rougeL"].recall,
+                "fmeasure": scores["rougeL"].fmeasure,
             },
         }
 
@@ -125,6 +122,6 @@ class RougeMetric(BaseMetric):
         scores = []
         for candidate, reference in zip(candidates, references):
             result = self._scorer.score(reference, candidate)
-            scores.append(result['rougeL'].fmeasure)
+            scores.append(result["rougeL"].fmeasure)
 
         return scores

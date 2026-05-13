@@ -260,7 +260,7 @@ class ContextBudget:
         total_used = sum(self.current_usage.values())
         return (
             f"Context Usage: {total_used}/{self.total_budget} tokens "
-            f"({100*total_used/self.total_budget:.1f}%)\n"
+            f"({100 * total_used / self.total_budget:.1f}%)\n"
             f"  System: {self.current_usage['system']}/{self.system_budget}\n"
             f"  Execution: {self.current_usage['execution']}/{self.execution_budget}\n"
             f"  History: {self.current_usage['history']}/{self.history_budget}"
@@ -364,7 +364,10 @@ class ContextManager:
             self.recent_results.append(cached)
 
         # Determine how much budget we have for this result
-        char_budget = self.budget.get_budget_for_result(cached.priority, remaining_results=1)  # Conservative estimate
+        char_budget = self.budget.get_budget_for_result(
+            cached.priority,
+            remaining_results=1,  # Conservative estimate
+        )
 
         # If result fits in budget, use full
         if len(result) <= char_budget:
@@ -532,9 +535,7 @@ Summary:"""
         first_portion = int(max_chars * 0.7)
         last_portion = max_chars - first_portion - 50
 
-        return (
-            f"{result[:first_portion]}\n" f"... [truncated {len(result) - max_chars} chars] ...\n" f"{result[-last_portion:]}"
-        )
+        return f"{result[:first_portion]}\n... [truncated {len(result) - max_chars} chars] ...\n{result[-last_portion:]}"
 
     def prioritize_results(self, results: List[Any], goal: str) -> List[Any]:
         """

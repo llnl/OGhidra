@@ -59,13 +59,11 @@ class BERTScoreMetric(BaseMetric):
 
         try:
             import bert_score
+
             self._scorer = bert_score
             logger.info("bert_score library loaded successfully")
         except ImportError:
-            raise ImportError(
-                "bert_score is required for BERTScoreMetric. "
-                "Install with: pip install bert-score"
-            )
+            raise ImportError("bert_score is required for BERTScoreMetric. Install with: pip install bert-score")
 
     def score(self, candidate: str, reference: str) -> float:
         """
@@ -116,9 +114,7 @@ class BERTScoreMetric(BaseMetric):
 
         return [float(f) for f in F1]
 
-    def detailed_score(
-        self, candidate: str, reference: str
-    ) -> dict:
+    def detailed_score(self, candidate: str, reference: str) -> dict:
         """
         Get detailed BERTScore with precision, recall, and F1.
 

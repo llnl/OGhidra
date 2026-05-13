@@ -10,9 +10,9 @@ Generates comprehensive benchmark reports in multiple formats:
 
 import json
 import logging
-from pathlib import Path
-from typing import Dict, List, Optional, Any
 from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("oghidra.benchmark.reports")
 
@@ -60,7 +60,7 @@ class ReportGenerator:
 
         md = f"""# OGhidra Semantic Similarity Benchmark Report
 
-**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+**Generated:** {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
 **Dataset:** {results.dataset_name}
 **Benchmark:** {config.name}
 
@@ -87,7 +87,7 @@ class ReportGenerator:
             combined = stats["combined"]
             md += f"""| Metric | Mean | Std | Median | Min | Max |
 |--------|------|-----|--------|-----|-----|
-| **Combined Score** | {combined['mean']:.3f} | {combined['std']:.3f} | {combined['median']:.3f} | {combined['min']:.3f} | {combined['max']:.3f} |
+| **Combined Score** | {combined["mean"]:.3f} | {combined["std"]:.3f} | {combined["median"]:.3f} | {combined["min"]:.3f} | {combined["max"]:.3f} |
 """
 
         md += "\n### Individual Metrics\n\n"
@@ -110,9 +110,9 @@ class ReportGenerator:
 
 | Metric | Value |
 |--------|-------|
-| Exact Matches | {na['exact_matches']} |
-| Total Functions | {na['total']} |
-| Accuracy | {na['accuracy']:.1%} |
+| Exact Matches | {na["exact_matches"]} |
+| Total Functions | {na["total"]} |
+| Accuracy | {na["accuracy"]:.1%} |
 """
 
         # Configuration
@@ -132,11 +132,7 @@ class ReportGenerator:
 
         # Top/Bottom performers
         if results.function_results:
-            sorted_results = sorted(
-                results.function_results,
-                key=lambda x: x.combined_score,
-                reverse=True
-            )
+            sorted_results = sorted(results.function_results, key=lambda x: x.combined_score, reverse=True)
 
             md += """
 ---
@@ -186,7 +182,7 @@ class ReportGenerator:
 
         # Save if path provided
         if output_path:
-            with open(output_path, 'w') as f:
+            with open(output_path, "w") as f:
                 f.write(md)
             logger.info(f"Saved Markdown report to {output_path}")
 
@@ -298,7 +294,7 @@ class ReportGenerator:
 <body>
     <div class="container">
         <h1>🔬 OGhidra Semantic Similarity Benchmark</h1>
-        <p class="timestamp">Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | Dataset: {results.dataset_name}</p>
+        <p class="timestamp">Generated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")} | Dataset: {results.dataset_name}</p>
 
         <div class="card">
             <h2>📊 Summary Statistics</h2>
@@ -308,7 +304,7 @@ class ReportGenerator:
                     <div class="stat-label">Functions Evaluated</div>
                 </div>
                 <div class="stat-box">
-                    <div class="stat-value">{stats.get('combined', {}).get('mean', 0):.3f}</div>
+                    <div class="stat-value">{stats.get("combined", {}).get("mean", 0):.3f}</div>
                     <div class="stat-label">Mean Combined Score</div>
                 </div>
                 <div class="stat-box">
@@ -316,7 +312,7 @@ class ReportGenerator:
                     <div class="stat-label">Total Time</div>
                 </div>
                 <div class="stat-box">
-                    <div class="stat-value">{stats.get('name_accuracy', {}).get('accuracy', 0):.1%}</div>
+                    <div class="stat-value">{stats.get("name_accuracy", {}).get("accuracy", 0):.1%}</div>
                     <div class="stat-label">Name Accuracy</div>
                 </div>
             </div>
@@ -344,11 +340,11 @@ class ReportGenerator:
             if isinstance(data, dict) and "mean" in data:
                 html += f"""                    <tr>
                         <td>{metric}</td>
-                        <td>{data['mean']:.3f}</td>
-                        <td>{data['std']:.3f}</td>
-                        <td>{data['median']:.3f}</td>
-                        <td>{data['min']:.3f}</td>
-                        <td>{data['max']:.3f}</td>
+                        <td>{data["mean"]:.3f}</td>
+                        <td>{data["std"]:.3f}</td>
+                        <td>{data["median"]:.3f}</td>
+                        <td>{data["min"]:.3f}</td>
+                        <td>{data["max"]:.3f}</td>
                     </tr>
 """
 
@@ -370,11 +366,7 @@ class ReportGenerator:
 """
 
         if results.function_results:
-            sorted_results = sorted(
-                results.function_results,
-                key=lambda x: x.combined_score,
-                reverse=True
-            )
+            sorted_results = sorted(results.function_results, key=lambda x: x.combined_score, reverse=True)
             for r in sorted_results[:10]:
                 html += f"""                    <tr>
                         <td>{r.function_name}</td>
@@ -392,7 +384,7 @@ class ReportGenerator:
 """
 
         if output_path:
-            with open(output_path, 'w') as f:
+            with open(output_path, "w") as f:
                 f.write(html)
             logger.info(f"Saved HTML report to {output_path}")
 
@@ -412,7 +404,7 @@ class ReportGenerator:
         """
         import csv
 
-        with open(output_path, 'w', newline='') as f:
+        with open(output_path, "w", newline="") as f:
             if not results.function_results:
                 return
 
@@ -420,9 +412,15 @@ class ReportGenerator:
             score_keys = list(results.function_results[0].scores.keys())
 
             fieldnames = [
-                'function_id', 'function_name', 'source_file', 'binary_address',
-                'combined_score', 'analysis_time', 'decompiled_length', 'context_chars',
-                'suggested_name',
+                "function_id",
+                "function_name",
+                "source_file",
+                "binary_address",
+                "combined_score",
+                "analysis_time",
+                "decompiled_length",
+                "context_chars",
+                "suggested_name",
             ] + score_keys
 
             writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -430,15 +428,15 @@ class ReportGenerator:
 
             for r in results.function_results:
                 row = {
-                    'function_id': r.function_id,
-                    'function_name': r.function_name,
-                    'source_file': r.source_file,
-                    'binary_address': r.binary_address,
-                    'combined_score': r.combined_score,
-                    'analysis_time': r.analysis_time,
-                    'decompiled_length': r.decompiled_length,
-                    'context_chars': r.context_chars,
-                    'suggested_name': r.suggested_name,
+                    "function_id": r.function_id,
+                    "function_name": r.function_name,
+                    "source_file": r.source_file,
+                    "binary_address": r.binary_address,
+                    "combined_score": r.combined_score,
+                    "analysis_time": r.analysis_time,
+                    "decompiled_length": r.decompiled_length,
+                    "context_chars": r.context_chars,
+                    "suggested_name": r.suggested_name,
                 }
                 row.update(r.scores)
                 writer.writerow(row)
@@ -468,22 +466,22 @@ class ReportGenerator:
         # Markdown
         md_path = self.output_dir / f"{base_name}.md"
         self.generate_markdown(results, str(md_path))
-        outputs['markdown'] = str(md_path)
+        outputs["markdown"] = str(md_path)
 
         # HTML
         html_path = self.output_dir / f"{base_name}.html"
         self.generate_html(results, str(html_path))
-        outputs['html'] = str(html_path)
+        outputs["html"] = str(html_path)
 
         # CSV
         csv_path = self.output_dir / f"{base_name}.csv"
         self.generate_csv(results, str(csv_path))
-        outputs['csv'] = str(csv_path)
+        outputs["csv"] = str(csv_path)
 
         # JSON (raw results)
         json_path = self.output_dir / f"{base_name}.json"
         results.save(str(json_path))
-        outputs['json'] = str(json_path)
+        outputs["json"] = str(json_path)
 
         logger.info(f"Generated all report formats: {list(outputs.keys())}")
 

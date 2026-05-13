@@ -9,8 +9,8 @@ Uses regex-based parsing for portability (no external dependencies like libclang
 For more accurate parsing, consider integrating with tree-sitter or clang.
 """
 
-import re
 import logging
+import re
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -30,25 +30,14 @@ class SourceCodeParser:
     # Regex patterns for C/C++ parsing
     PATTERNS = {
         # Doxygen-style comments: /** ... */ or /// ...
-        'doxygen_block': re.compile(
-            r'/\*\*\s*(.*?)\s*\*/',
-            re.DOTALL
-        ),
-        'doxygen_line': re.compile(
-            r'(?:^|\n)\s*///\s*(.+?)(?=\n(?!\s*///))',
-            re.MULTILINE
-        ),
-
+        "doxygen_block": re.compile(r"/\*\*\s*(.*?)\s*\*/", re.DOTALL),
+        "doxygen_line": re.compile(r"(?:^|\n)\s*///\s*(.+?)(?=\n(?!\s*///))", re.MULTILINE),
         # C-style block comment: /* ... */
-        'c_block_comment': re.compile(
-            r'/\*\s*(.*?)\s*\*/',
-            re.DOTALL
-        ),
-
+        "c_block_comment": re.compile(r"/\*\s*(.*?)\s*\*/", re.DOTALL),
         # Function definition pattern (simplified)
         # Captures: return_type, function_name, parameters, body
-        'function_def': re.compile(
-            r'''
+        "function_def": re.compile(
+            r"""
             # Optional static/inline/extern keywords
             (?:(?:static|inline|extern|__attribute__\s*\([^)]*\))\s+)*
             # Return type (including pointers)
@@ -59,23 +48,40 @@ class SourceCodeParser:
             \(([^)]*)\)\s*
             # Function body
             (\{(?:[^{}]|\{(?:[^{}]|\{[^{}]*\})*\})*\})
-            ''',
-            re.VERBOSE | re.MULTILINE
+            """,
+            re.VERBOSE | re.MULTILINE,
         ),
-
         # Simpler function signature (for declarations)
-        'function_sig': re.compile(
-            r'([\w\s\*]+?)\s+(\w+)\s*\(([^)]*)\)',
-            re.MULTILINE
-        ),
+        "function_sig": re.compile(r"([\w\s\*]+?)\s+(\w+)\s*\(([^)]*)\)", re.MULTILINE),
     }
 
     # Keywords that are not function names
     KEYWORDS = {
-        'if', 'else', 'while', 'for', 'do', 'switch', 'case', 'default',
-        'return', 'break', 'continue', 'goto', 'sizeof', 'typeof',
-        'struct', 'union', 'enum', 'typedef', 'static', 'extern',
-        'const', 'volatile', 'inline', 'register', 'auto',
+        "if",
+        "else",
+        "while",
+        "for",
+        "do",
+        "switch",
+        "case",
+        "default",
+        "return",
+        "break",
+        "continue",
+        "goto",
+        "sizeof",
+        "typeof",
+        "struct",
+        "union",
+        "enum",
+        "typedef",
+        "static",
+        "extern",
+        "const",
+        "volatile",
+        "inline",
+        "register",
+        "auto",
     }
 
     def __init__(self):
@@ -101,7 +107,7 @@ class SourceCodeParser:
         if not path.exists():
             raise FileNotFoundError(f"Source file not found: {file_path}")
 
-        with open(path, 'r', encoding='utf-8', errors='replace') as f:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
             content = f.read()
 
         # Get relative path for cleaner reporting
@@ -127,7 +133,7 @@ class SourceCodeParser:
         functions = []
 
         # Find all function definitions
-        for match in self.PATTERNS['function_def'].finditer(content):
+        for match in self.PATTERNS["function_def"].finditer(content):
             return_type = match.group(1).strip()
             func_name = match.group(2).strip()
             params = match.group(3).strip()
@@ -142,7 +148,7 @@ class SourceCodeParser:
                 continue
 
             # Calculate line number
-            line_number = content[:match.start()].count('\n') + 1
+            line_number = content[: match.start()].count("\n") + 1
 
             # Build signature
             signature = f"{return_type} {func_name}({params})"
@@ -159,17 +165,19 @@ class SourceCodeParser:
             # Extract tags from function characteristics
             tags = self._extract_tags(func_name, body, docstring)
 
-            functions.append(FunctionGroundTruth(
-                function_id=func_id,
-                function_name=func_name,
-                source_file=source_file,
-                line_number=line_number,
-                signature=signature,
-                original_docstring=docstring,
-                source_code=body,
-                complexity_score=complexity,
-                tags=tags,
-            ))
+            functions.append(
+                FunctionGroundTruth(
+                    function_id=func_id,
+                    function_name=func_name,
+                    source_file=source_file,
+                    line_number=line_number,
+                    signature=signature,
+                    original_docstring=docstring,
+                    source_code=body,
+                    complexity_score=complexity,
+                    tags=tags,
+                )
+            )
 
         return functions
 
@@ -184,20 +192,20 @@ class SourceCodeParser:
         preceding = content[search_start:func_start]
 
         # Try Doxygen block comment first
-        matches = list(self.PATTERNS['doxygen_block'].finditer(preceding))
+        matches = list(self.PATTERNS["doxygen_block"].finditer(preceding))
         if matches:
             # Get the last (closest) match
             comment = matches[-1].group(1)
             # Check it's close to the function (within 50 chars of whitespace)
-            after_comment = preceding[matches[-1].end():]
+            after_comment = preceding[matches[-1].end() :]
             if len(after_comment.strip()) < 50:
                 return self._clean_comment(comment)
 
         # Try regular C block comment
-        matches = list(self.PATTERNS['c_block_comment'].finditer(preceding))
+        matches = list(self.PATTERNS["c_block_comment"].finditer(preceding))
         if matches:
             comment = matches[-1].group(1)
-            after_comment = preceding[matches[-1].end():]
+            after_comment = preceding[matches[-1].end() :]
             if len(after_comment.strip()) < 50:
                 return self._clean_comment(comment)
 
@@ -205,18 +213,18 @@ class SourceCodeParser:
 
     def _clean_comment(self, comment: str) -> str:
         """Clean up comment text by removing asterisks and extra whitespace."""
-        lines = comment.split('\n')
+        lines = comment.split("\n")
         cleaned = []
         for line in lines:
             # Remove leading asterisks and whitespace
-            line = re.sub(r'^\s*\*\s?', '', line)
+            line = re.sub(r"^\s*\*\s?", "", line)
             cleaned.append(line)
 
-        result = '\n'.join(cleaned).strip()
+        result = "\n".join(cleaned).strip()
 
         # Remove Doxygen tags for cleaner text
-        result = re.sub(r'@\w+\s*', '', result)
-        result = re.sub(r'\\[a-z]+\s*', '', result)
+        result = re.sub(r"@\w+\s*", "", result)
+        result = re.sub(r"\\[a-z]+\s*", "", result)
 
         return result if result else None
 
@@ -231,15 +239,15 @@ class SourceCodeParser:
 
         # Count control flow statements
         control_patterns = [
-            r'\bif\s*\(',
-            r'\belse\s+if\s*\(',
-            r'\bwhile\s*\(',
-            r'\bfor\s*\(',
-            r'\bcase\s+',
-            r'\bcatch\s*\(',
-            r'\b\?\s*',  # Ternary operator
-            r'\b&&\b',
-            r'\b\|\|\b',
+            r"\bif\s*\(",
+            r"\belse\s+if\s*\(",
+            r"\bwhile\s*\(",
+            r"\bfor\s*\(",
+            r"\bcase\s+",
+            r"\bcatch\s*\(",
+            r"\b\?\s*",  # Ternary operator
+            r"\b&&\b",
+            r"\b\|\|\b",
         ]
 
         for pattern in control_patterns:
@@ -260,15 +268,15 @@ class SourceCodeParser:
 
         # Domain detection
         tag_patterns = {
-            'crypto': ['encrypt', 'decrypt', 'aes', 'rsa', 'hash', 'sha', 'md5', 'cipher', 'key'],
-            'network': ['socket', 'connect', 'send', 'recv', 'http', 'tcp', 'udp', 'port', 'host'],
-            'file_io': ['fopen', 'fread', 'fwrite', 'fclose', 'read', 'write', 'file', 'path'],
-            'memory': ['malloc', 'free', 'alloc', 'realloc', 'memcpy', 'memset', 'buffer'],
-            'string': ['str', 'sprintf', 'printf', 'sscanf', 'parse', 'format', 'concat'],
-            'error_handling': ['error', 'exception', 'fail', 'errno', 'perror'],
-            'init': ['init', 'setup', 'create', 'new', 'construct'],
-            'cleanup': ['cleanup', 'destroy', 'free', 'close', 'release', 'delete'],
-            'validation': ['valid', 'check', 'verify', 'assert', 'sanity'],
+            "crypto": ["encrypt", "decrypt", "aes", "rsa", "hash", "sha", "md5", "cipher", "key"],
+            "network": ["socket", "connect", "send", "recv", "http", "tcp", "udp", "port", "host"],
+            "file_io": ["fopen", "fread", "fwrite", "fclose", "read", "write", "file", "path"],
+            "memory": ["malloc", "free", "alloc", "realloc", "memcpy", "memset", "buffer"],
+            "string": ["str", "sprintf", "printf", "sscanf", "parse", "format", "concat"],
+            "error_handling": ["error", "exception", "fail", "errno", "perror"],
+            "init": ["init", "setup", "create", "new", "construct"],
+            "cleanup": ["cleanup", "destroy", "free", "close", "release", "delete"],
+            "validation": ["valid", "check", "verify", "assert", "sanity"],
         }
 
         for tag, keywords in tag_patterns.items():

@@ -7,8 +7,8 @@ Uses matplotlib if available, falls back to ASCII charts.
 """
 
 import logging
-from typing import Dict, List, Optional, Any
 from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("oghidra.benchmark.visualizations")
 
@@ -42,8 +42,10 @@ class BenchmarkVisualizer:
         """Check if matplotlib is available."""
         try:
             import matplotlib
-            matplotlib.use('Agg')  # Non-interactive backend
+
+            matplotlib.use("Agg")  # Non-interactive backend
             import matplotlib.pyplot as plt
+
             return True
         except ImportError:
             return False
@@ -85,29 +87,29 @@ class BenchmarkVisualizer:
         fig, ax = plt.subplots(figsize=(10, 6))
 
         # Plot histogram
-        ax.hist(scores, bins=20, color='#e94560', edgecolor='white', alpha=0.8)
+        ax.hist(scores, bins=20, color="#e94560", edgecolor="white", alpha=0.8)
 
         # Add mean line
         mean_score = np.mean(scores)
-        ax.axvline(mean_score, color='#00d26a', linestyle='--', linewidth=2, label=f'Mean: {mean_score:.3f}')
+        ax.axvline(mean_score, color="#00d26a", linestyle="--", linewidth=2, label=f"Mean: {mean_score:.3f}")
 
         # Styling
-        ax.set_xlabel('Score', fontsize=12)
-        ax.set_ylabel('Frequency', fontsize=12)
-        ax.set_title(f'{metric.replace("_", " ").title()} Score Distribution', fontsize=14)
+        ax.set_xlabel("Score", fontsize=12)
+        ax.set_ylabel("Frequency", fontsize=12)
+        ax.set_title(f"{metric.replace('_', ' ').title()} Score Distribution", fontsize=14)
         ax.legend()
-        ax.set_facecolor('#16213e')
-        fig.patch.set_facecolor('#1a1a2e')
-        ax.tick_params(colors='white')
-        ax.xaxis.label.set_color('white')
-        ax.yaxis.label.set_color('white')
-        ax.title.set_color('white')
+        ax.set_facecolor("#16213e")
+        fig.patch.set_facecolor("#1a1a2e")
+        ax.tick_params(colors="white")
+        ax.xaxis.label.set_color("white")
+        ax.yaxis.label.set_color("white")
+        ax.title.set_color("white")
 
         # Save
         if output_path is None:
             output_path = self.output_dir / f"distribution_{metric}.png"
 
-        plt.savefig(output_path, dpi=150, bbox_inches='tight', facecolor=fig.get_facecolor())
+        plt.savefig(output_path, dpi=150, bbox_inches="tight", facecolor=fig.get_facecolor())
         plt.close()
 
         logger.info(f"Saved distribution plot to {output_path}")
@@ -158,11 +160,11 @@ class BenchmarkVisualizer:
         x = np.arange(len(metrics))
         width = 0.6
 
-        bars = ax.bar(x, means, width, yerr=stds, color='#e94560', capsize=5, alpha=0.8)
+        bars = ax.bar(x, means, width, yerr=stds, color="#e94560", capsize=5, alpha=0.8)
 
         # Styling
-        ax.set_ylabel('Score', fontsize=12)
-        ax.set_title('Metric Comparison', fontsize=14)
+        ax.set_ylabel("Score", fontsize=12)
+        ax.set_title("Metric Comparison", fontsize=14)
         ax.set_xticks(x)
         ax.set_xticklabels(metrics)
         ax.set_ylim(0, 1)
@@ -170,24 +172,28 @@ class BenchmarkVisualizer:
         # Add value labels
         for bar, mean in zip(bars, means):
             height = bar.get_height()
-            ax.annotate(f'{mean:.3f}',
-                       xy=(bar.get_x() + bar.get_width() / 2, height),
-                       xytext=(0, 3),
-                       textcoords="offset points",
-                       ha='center', va='bottom', color='white')
+            ax.annotate(
+                f"{mean:.3f}",
+                xy=(bar.get_x() + bar.get_width() / 2, height),
+                xytext=(0, 3),
+                textcoords="offset points",
+                ha="center",
+                va="bottom",
+                color="white",
+            )
 
-        ax.set_facecolor('#16213e')
-        fig.patch.set_facecolor('#1a1a2e')
-        ax.tick_params(colors='white')
-        ax.xaxis.label.set_color('white')
-        ax.yaxis.label.set_color('white')
-        ax.title.set_color('white')
+        ax.set_facecolor("#16213e")
+        fig.patch.set_facecolor("#1a1a2e")
+        ax.tick_params(colors="white")
+        ax.xaxis.label.set_color("white")
+        ax.yaxis.label.set_color("white")
+        ax.title.set_color("white")
 
         # Save
         if output_path is None:
             output_path = self.output_dir / "metric_comparison.png"
 
-        plt.savefig(output_path, dpi=150, bbox_inches='tight', facecolor=fig.get_facecolor())
+        plt.savefig(output_path, dpi=150, bbox_inches="tight", facecolor=fig.get_facecolor())
         plt.close()
 
         logger.info(f"Saved metric comparison to {output_path}")
@@ -236,26 +242,26 @@ class BenchmarkVisualizer:
         # Create figure
         fig, ax = plt.subplots(figsize=(10, 6))
 
-        ax.scatter(complexities, scores, color='#e94560', alpha=0.6, s=50)
+        ax.scatter(complexities, scores, color="#e94560", alpha=0.6, s=50)
 
         # Styling
-        ax.set_xlabel('Function Complexity', fontsize=12)
-        ax.set_ylabel('Combined Score', fontsize=12)
-        ax.set_title('Complexity vs Semantic Similarity Score', fontsize=14)
+        ax.set_xlabel("Function Complexity", fontsize=12)
+        ax.set_ylabel("Combined Score", fontsize=12)
+        ax.set_title("Complexity vs Semantic Similarity Score", fontsize=14)
         ax.set_ylim(0, 1)
 
-        ax.set_facecolor('#16213e')
-        fig.patch.set_facecolor('#1a1a2e')
-        ax.tick_params(colors='white')
-        ax.xaxis.label.set_color('white')
-        ax.yaxis.label.set_color('white')
-        ax.title.set_color('white')
+        ax.set_facecolor("#16213e")
+        fig.patch.set_facecolor("#1a1a2e")
+        ax.tick_params(colors="white")
+        ax.xaxis.label.set_color("white")
+        ax.yaxis.label.set_color("white")
+        ax.title.set_color("white")
 
         # Save
         if output_path is None:
             output_path = self.output_dir / "complexity_vs_accuracy.png"
 
-        plt.savefig(output_path, dpi=150, bbox_inches='tight', facecolor=fig.get_facecolor())
+        plt.savefig(output_path, dpi=150, bbox_inches="tight", facecolor=fig.get_facecolor())
         plt.close()
 
         logger.info(f"Saved complexity plot to {output_path}")
