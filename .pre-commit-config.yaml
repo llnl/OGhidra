@@ -19,6 +19,8 @@ repos:
       - id: check-toml
       - id: check-json
       - id: pretty-format-json
+        args:
+          - --autofix
   - repo: https://github.com/shellcheck-py/shellcheck-py
     rev: v0.11.0.1
     hooks:
