@@ -198,4 +198,3 @@ LLM logging has minimal performance impact:
 - File I/O is asynchronous
 - Only enabled interactions are logged
 - JSON serialization is efficient
-

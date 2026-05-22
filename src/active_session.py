@@ -25,7 +25,10 @@ class ActiveSessionManager:
             The session ID of the new session, or None if creation failed.
         """
         if self.current_session and self.current_session.outcome == "in_progress":
-            self.end_current_session(outcome="aborted", reason="New session started before explicit completion.")
+            self.end_current_session(
+                outcome="aborted",
+                reason="New session started before explicit completion.",
+            )
 
         self.current_session = SessionRecord(user_task_description=user_task_description)
         return self.current_session.session_id
@@ -52,12 +55,20 @@ class ActiveSessionManager:
         if not self.current_session:
             return False
 
-        tool_call = ToolCallRecord(tool_name=tool_name, parameters=parameters, status=status, result_preview=result_preview)
+        tool_call = ToolCallRecord(
+            tool_name=tool_name,
+            parameters=parameters,
+            status=status,
+            result_preview=result_preview,
+        )
         self.current_session.tool_calls.append(tool_call)
         return True
 
     def update_tool_call_status(
-        self, index: int, status: Literal["success", "error"], result_preview: Optional[str] = None
+        self,
+        index: int,
+        status: Literal["success", "error"],
+        result_preview: Optional[str] = None,
     ) -> bool:
         """
         Updates the status of a previously logged tool call.

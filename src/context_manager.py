@@ -69,7 +69,13 @@ class ResultCache:
         self.max_cache_size = max_cache_size
         self.result_counter = 0
 
-    def store(self, tool_name: str, parameters: Dict[str, Any], result: str, custom_id: Optional[str] = None) -> CachedResult:
+    def store(
+        self,
+        tool_name: str,
+        parameters: Dict[str, Any],
+        result: str,
+        custom_id: Optional[str] = None,
+    ) -> CachedResult:
         """
         Store a result and return a CachedResult object.
 
@@ -132,8 +138,19 @@ class ResultCache:
             "get_current_function",
             "analyze_function",
         }
-        medium_priority_tools = {"disassemble_function", "read_bytes", "get_xrefs_to", "get_xrefs_from"}
-        low_priority_tools = {"list_functions", "list_methods", "list_strings", "list_imports", "list_exports"}
+        medium_priority_tools = {
+            "disassemble_function",
+            "read_bytes",
+            "get_xrefs_to",
+            "get_xrefs_from",
+        }
+        low_priority_tools = {
+            "list_functions",
+            "list_methods",
+            "list_strings",
+            "list_imports",
+            "list_exports",
+        }
 
         if tool_name in high_priority_tools:
             return ResultPriority.HIGH
@@ -190,7 +207,12 @@ class ContextBudget:
     Helps manage token usage across different prompt sections.
     """
 
-    def __init__(self, total_budget: int = 80000, execution_fraction: float = 0.4, chars_per_token: float = 4.0):
+    def __init__(
+        self,
+        total_budget: int = 80000,
+        execution_fraction: float = 0.4,
+        chars_per_token: float = 4.0,
+    ):
         self.total_budget = total_budget
         self.execution_fraction = execution_fraction
         self.chars_per_token = chars_per_token
@@ -438,7 +460,14 @@ class ContextManager:
 
         return "\n".join(sections)
 
-    def _get_result_content(self, result: str, tool_name: str, parameters: Dict, goal: str, detail_level: str) -> str:
+    def _get_result_content(
+        self,
+        result: str,
+        tool_name: str,
+        parameters: Dict,
+        goal: str,
+        detail_level: str,
+    ) -> str:
         """Get result content at specified detail level."""
         if detail_level == "full":
             # Apply smart truncation if still too large
@@ -931,7 +960,11 @@ class RelevanceRanker:
         sections = []
 
         # Order categories by priority
-        sorted_categories = sorted(ranked_results.keys(), key=lambda c: self.CATEGORY_PRIORITY.get(c, 0), reverse=True)
+        sorted_categories = sorted(
+            ranked_results.keys(),
+            key=lambda c: self.CATEGORY_PRIORITY.get(c, 0),
+            reverse=True,
+        )
 
         for category in sorted_categories:
             items = ranked_results[category]
@@ -953,7 +986,7 @@ class RelevanceRanker:
                     break
 
                 if len(result) > remaining:
-                    result = result[: remaining - 50] + f"\n... [Truncated]"
+                    result = result[: remaining - 50] + "\n... [Truncated]"
 
                 param_str = ", ".join(f'{k}="{v}"' for k, v in params.items())
                 section_lines.append(f"\n### {tool_name}({param_str})")
@@ -1033,7 +1066,12 @@ class CorrelationHintBuilder:
 
         # Sort by significance
         significance_order = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
-        hints.sort(key=lambda h: (significance_order.get(h["significance"], 2), -len(h["mentions"])))
+        hints.sort(
+            key=lambda h: (
+                significance_order.get(h["significance"], 2),
+                -len(h["mentions"]),
+            )
+        )
 
         self.logger.info(f"Built {len(hints)} correlation hints from {len(tool_executions)} tool results")
         return hints

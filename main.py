@@ -5,7 +5,6 @@ Main entry point for the Ollama-GhidraMCP Bridge application.
 
 import argparse
 import json
-import logging
 import sys
 
 from dotenv import load_dotenv
@@ -240,7 +239,7 @@ def run_interactive_mode(bridge: Bridge, config: BridgeConfig):
                     # Session Memory status from cag_details
                     session_info = cag_details.get("session")
                     if session_info:
-                        print(f"Session Memory Active: Yes")
+                        print("Session Memory Active: Yes")
                         print(f"  Session ID: {session_info.get('session_id', 'N/A')}")
                         print(f"  Messages: {session_info.get('messages', 0)}")
                         print(f"  Tool Executions: {session_info.get('tool_executions', 0)}")
@@ -248,7 +247,7 @@ def run_interactive_mode(bridge: Bridge, config: BridgeConfig):
                         print(f"  Renamed Entities: {session_info.get('renamed_entities', 0)}")
                         print(f"  Analysis Results Cached: {session_info.get('analysis_results', 0)}")
                     else:
-                        print(f"Session Memory Active: No")
+                        print("Session Memory Active: No")
 
                     # Token limit is part of BridgeConfig, not CAGManager debug info directly
                     # However, the cag_manager might have its own internal token limits for enhancement logic
@@ -407,8 +406,14 @@ def run_interactive_mode(bridge: Bridge, config: BridgeConfig):
                                         f"4. Point out any immediate observations a reverse engineer might find interesting (e.g., unusual patterns, specific API calls, complex logic, potential vulnerabilities like buffer overflows, format string bugs, etc.).\\n"
                                         f"Tool Output:\\n```json\\n{formatted_tool_data}\\n```"
                                     )
-                                elif tool_name in ["decompile_function", "decompile_function_by_address"]:
-                                    func_id = params.get("name", params.get("address", "unknown function"))
+                                elif tool_name in [
+                                    "decompile_function",
+                                    "decompile_function_by_address",
+                                ]:
+                                    func_id = params.get(
+                                        "name",
+                                        params.get("address", "unknown function"),
+                                    )
                                     analysis_prompt = (
                                         f"The Ghidra tool '{tool_name}' was executed for function '{func_id}'. Its output (decompiled C code) is below. "
                                         f"Based *only* on this provided code:\\n"
@@ -450,7 +455,7 @@ def run_interactive_mode(bridge: Bridge, config: BridgeConfig):
                                         f"Tool Output:\\n```json\\n{formatted_tool_data}\\n```"
                                     )
                                 elif tool_name == "list_strings":
-                                    analysis_prompt = f"""The Ghidra tool '{tool_name}' was executed. Its output (a list of strings found in the binary) is below. 
+                                    analysis_prompt = f"""The Ghidra tool '{tool_name}' was executed. Its output (a list of strings found in the binary) is below.
 Based *only* on this provided data:
 1. Are there any strings in this segment of output that look like file paths, URLs, or IP addresses?
 2. Are there any error messages or debug messages shown?
@@ -498,7 +503,10 @@ Tool Output:
 
                                     except Exception as e:
                                         print(f"Error during AI analysis: {e}")
-                                        bridge.logger.error(f"Error during AI analysis for {tool_name}: {e}", exc_info=True)
+                                        bridge.logger.error(
+                                            f"Error during AI analysis for {tool_name}: {e}",
+                                            exc_info=True,
+                                        )
                                         current_session_log.append(
                                             f"=== Error during AI analysis of {tool_name}({params_for_log}): {e} ===\\n"
                                         )
@@ -557,7 +565,7 @@ Tool Output:
                     )
 
                     print("\n============================================================")
-                    print(f"Results from analyze_function:")
+                    print("Results from analyze_function:")
                     print("============================================================")
                     current_session_log.append(f"=== Result of analyze-function({params_for_log}) ===\\n{raw_tool_result}\\n")
                     print(raw_tool_result)  # Print raw output
@@ -586,7 +594,7 @@ Tool Output:
                             f"Tool Output:\\n```json\\n{formatted_tool_data}\\n```"
                         )
 
-                        print(f"Sending output from analyze-function to AI for analysis...")
+                        print("Sending output from analyze-function to AI for analysis...")
                         try:
                             ai_analysis = (
                                 bridge.ollama.generate(prompt=analysis_prompt)
@@ -617,7 +625,10 @@ Tool Output:
 
                         except Exception as e:
                             print(f"Error during AI analysis: {e}")
-                            bridge.logger.error(f"Error during AI analysis for analyze-function shortcut: {e}", exc_info=True)
+                            bridge.logger.error(
+                                f"Error during AI analysis for analyze-function shortcut: {e}",
+                                exc_info=True,
+                            )
                             current_session_log.append(
                                 f"=== Error during AI analysis of analyze-function({params_for_log}): {e} ===\\n"
                             )
@@ -718,9 +729,14 @@ Tool Output:
                             print(f"  ✓ Decompiled ({len(function_decompile_result)} chars)")
 
                             # STEP 1.5: Gather contextual information (callers and callees)
-                            context = {"callers_code": [], "callees_code": [], "truncated": False, "total_chars": 0}
+                            context = {
+                                "callers_code": [],
+                                "callees_code": [],
+                                "truncated": False,
+                                "total_chars": 0,
+                            }
                             try:
-                                print(f"  🔍 Gathering context (callers/callees)...")
+                                print("  🔍 Gathering context (callers/callees)...")
 
                                 # Get callers (who calls this function?)
                                 try:
@@ -739,7 +755,11 @@ Tool Output:
                                             elif isinstance(c, str):
                                                 import re
 
-                                                match = re.search(r"(?:from[:\s]+)?([0-9a-fA-F]{6,})", c, re.IGNORECASE)
+                                                match = re.search(
+                                                    r"(?:from[:\s]+)?([0-9a-fA-F]{6,})",
+                                                    c,
+                                                    re.IGNORECASE,
+                                                )
                                                 if match:
                                                     caller_addresses.append(match.group(1))
 
@@ -753,7 +773,10 @@ Tool Output:
                                                     if len(caller_code) > 1000:
                                                         caller_code = caller_code[:1000] + "...[truncated]"
                                                     context["callers_code"].append(
-                                                        {"address": caller_addr, "code": caller_code}
+                                                        {
+                                                            "address": caller_addr,
+                                                            "code": caller_code,
+                                                        }
                                                     )
                                             except:
                                                 pass
@@ -777,7 +800,11 @@ Tool Output:
                                             elif isinstance(c, str):
                                                 import re
 
-                                                match = re.search(r"(?:to[:\s]+)?([0-9a-fA-F]{6,})", c, re.IGNORECASE)
+                                                match = re.search(
+                                                    r"(?:to[:\s]+)?([0-9a-fA-F]{6,})",
+                                                    c,
+                                                    re.IGNORECASE,
+                                                )
                                                 if match:
                                                     callee_addresses.append(match.group(1))
 
@@ -791,7 +818,10 @@ Tool Output:
                                                     if len(callee_code) > 1000:
                                                         callee_code = callee_code[:1000] + "...[truncated]"
                                                     context["callees_code"].append(
-                                                        {"address": callee_addr, "code": callee_code}
+                                                        {
+                                                            "address": callee_addr,
+                                                            "code": callee_code,
+                                                        }
                                                     )
                                             except:
                                                 pass
@@ -809,7 +839,7 @@ Tool Output:
                                         f"  ✓ Context: {callers_count} caller(s), {callees_count} callee(s) ({context['total_chars']} chars)"
                                     )
                                 else:
-                                    print(f"  ℹ️  No caller/callee context found")
+                                    print("  ℹ️  No caller/callee context found")
                             except Exception as e:
                                 print(f"  ⚠ Context gathering failed: {e}")
 
@@ -877,7 +907,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
 
                             if ai_response and ai_response.strip():
                                 function_summary = ai_response.strip()
-                                print(f"  ✓ AI analysis complete")
+                                print("  ✓ AI analysis complete")
 
                                 # Extract suggested name from AI response (same logic as UI)
                                 suggested_name = None
@@ -894,7 +924,8 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                                         import re
 
                                         name_match = re.search(
-                                            r"\b([a-z][a-zA-Z0-9_]*[a-zA-Z0-9]|[a-z][a-zA-Z0-9]*)\b", name_part
+                                            r"\b([a-z][a-zA-Z0-9_]*[a-zA-Z0-9]|[a-z][a-zA-Z0-9]*)\b",
+                                            name_part,
                                         )
                                         if name_match:
                                             suggested_name = name_match.group(1)
@@ -904,7 +935,10 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                                 if not suggested_name:
                                     import re
 
-                                    camel_case_matches = re.findall(r"\b([a-z][a-zA-Z0-9]*[A-Z][a-zA-Z0-9]*)\b", ai_response)
+                                    camel_case_matches = re.findall(
+                                        r"\b([a-z][a-zA-Z0-9]*[A-Z][a-zA-Z0-9]*)\b",
+                                        ai_response,
+                                    )
                                     excluded_words = {
                                         "function",
                                         "name",
@@ -928,7 +962,14 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                                             len(match) > 4
                                             and match.lower() not in excluded_words
                                             and not match.startswith("FUN_")
-                                            and not any(word in match.lower() for word in ["function", "name", "example"])
+                                            and not any(
+                                                word in match.lower()
+                                                for word in [
+                                                    "function",
+                                                    "name",
+                                                    "example",
+                                                ]
+                                            )
                                         ):
                                             suggested_name = match
                                             break
@@ -943,7 +984,13 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                                                 and not match.startswith("FUN_")
                                                 and not any(
                                                     word in match.lower()
-                                                    for word in ["function", "name", "example", "analysis", "response"]
+                                                    for word in [
+                                                        "function",
+                                                        "name",
+                                                        "example",
+                                                        "analysis",
+                                                        "response",
+                                                    ]
                                                 )
                                             ):
                                                 suggested_name = match
@@ -963,12 +1010,17 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
 
                                         if hasattr(bridge, "execute_command"):
                                             rename_result = bridge.execute_command(
-                                                "rename_function", {"old_name": function_name, "new_name": suggested_name}
+                                                "rename_function",
+                                                {
+                                                    "old_name": function_name,
+                                                    "new_name": suggested_name,
+                                                },
                                             )
                                         else:
                                             # Fallback to direct ghidra call
                                             rename_result = bridge.ghidra.rename_function(
-                                                old_name=function_name, new_name=suggested_name
+                                                old_name=function_name,
+                                                new_name=suggested_name,
                                             )
 
                                         if isinstance(rename_result, str) and rename_result.lower().startswith("error:"):
@@ -986,7 +1038,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                                         f"  ℹ️  Already has descriptive name: {function_name} (AI suggested: {suggested_name})"
                                     )
                                 elif not suggested_name:
-                                    print(f"  ⚠ Could not extract function name from AI response")
+                                    print("  ⚠ Could not extract function name from AI response")
                                     print(f"  ℹ️  Keeping original name: {function_name}")
 
                                 # Store function summary
@@ -1009,12 +1061,15 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                                     f"=== Processed: {function_name} → {final_name} at {address} ===\\n{function_summary}\\n"
                                 )
                             else:
-                                print(f"  ⚠ AI analysis failed or returned empty")
+                                print("  ⚠ AI analysis failed or returned empty")
                                 failed_enumerations += 1
 
                         except Exception as e:
                             print(f"  ✗ Error processing {function_name}: {e}")
-                            bridge.logger.error(f"Error enumerating function {function_name}: {e}", exc_info=True)
+                            bridge.logger.error(
+                                f"Error enumerating function {function_name}: {e}",
+                                exc_info=True,
+                            )
                             failed_enumerations += 1
                             continue
 
@@ -1063,7 +1118,10 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
 
                                     for batch_num in range(num_batches):
                                         batch_start = batch_num * BATCH_SIZE
-                                        batch_end = min(batch_start + BATCH_SIZE, len(processed_functions_data))
+                                        batch_end = min(
+                                            batch_start + BATCH_SIZE,
+                                            len(processed_functions_data),
+                                        )
                                         batch = processed_functions_data[batch_start:batch_end]
 
                                         print(f"  Processing batch {batch_num + 1}/{num_batches}...")
@@ -1108,7 +1166,10 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                                                             vector_store.embeddings = [embedding]
                                                         else:
                                                             vector_store.embeddings = np.vstack(
-                                                                [vector_store.embeddings, embedding.reshape(1, -1)]
+                                                                [
+                                                                    vector_store.embeddings,
+                                                                    embedding.reshape(1, -1),
+                                                                ]
                                                             )
 
                                                     vectors_loaded += 1
@@ -1132,17 +1193,17 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                     print("\n" + "=" * 60)
                     print("🎉 BINARY ENUMERATION COMPLETE 🎉")
                     print("=" * 60)
-                    print(f"📊 Summary:")
+                    print("📊 Summary:")
                     print(f"  • Total functions: {total_functions}")
                     print(f"  • Successfully processed: {successful_enumerations}")
                     print(f"  • Failed: {failed_enumerations}")
                     print(f"  • Vectors loaded: {vectors_loaded if 'vectors_loaded' in locals() else 0}")
-                    print(f"⚡ Performance:")
+                    print("⚡ Performance:")
                     print(f"  • Total time: {total_time:.1f}s")
                     print(f"  • Average per function: {avg_time:.2f}s")
-                    print(f"\nℹ️  Functions with generic names (FUN_, sub_, etc.) were renamed.")
-                    print(f"ℹ️  Functions with descriptive names were analyzed but kept their original names.")
-                    print(f"ℹ️  All analyses are available in the vector store for enhanced queries.")
+                    print("\nℹ️  Functions with generic names (FUN_, sub_, etc.) were renamed.")
+                    print("ℹ️  Functions with descriptive names were analyzed but kept their original names.")
+                    print("ℹ️  All analyses are available in the vector store for enhanced queries.")
                     print("=" * 60 + "\n")
 
                 except Exception as e:
@@ -1245,13 +1306,24 @@ def main():
     parser.add_argument("--interactive", "-i", action="store_true", help="Enable interactive mode")
     parser.add_argument("--query", "-q", type=str, help="Single query to execute (non-interactive mode)")
     # UI now defaults to ON when no other mode flags are passed
-    parser.add_argument("--ui", action="store_true", help="Launch the graphical user interface (default)")
+    parser.add_argument(
+        "--ui",
+        action="store_true",
+        help="Launch the graphical user interface (default)",
+    )
 
     # Capabilities list is now included by default; provide opt-out flag instead
     parser.add_argument(
-        "--no-capabilities", "--no-cap", action="store_true", help="Do NOT include tool capabilities in the prompt"
+        "--no-capabilities",
+        "--no-cap",
+        action="store_true",
+        help="Do NOT include tool capabilities in the prompt",
     )
-    parser.add_argument("--disable-cag", action="store_true", help="Disable Cache-Augmented Generation (CAG)")
+    parser.add_argument(
+        "--disable-cag",
+        action="store_true",
+        help="Disable Cache-Augmented Generation (CAG)",
+    )
 
     args = parser.parse_args()
 

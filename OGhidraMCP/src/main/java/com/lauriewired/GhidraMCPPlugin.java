@@ -1,14 +1,14 @@
 /*
  * OGhidraMCP - Extended GhidraMCP Plugin
- * 
+ *
  * Original Author: LaurieWired (https://github.com/LaurieWired/GhidraMCP)
  * Multi-Instance Architecture inspired by GhydraMCP (https://github.com/starsong/GhydraMCP)
  * Modified by: ezrealenoch
- * 
+ *
  * This is a modified version of GhidraMCP with additional capabilities:
  *   - read_bytes: Read raw bytes from memory addresses for AI analysis
  *   - Multi-instance support (dynamic port allocation)
- * 
+ *
  * Original project: https://github.com/LaurieWired/GhidraMCP
  * License: See original project for license terms
  */
@@ -422,11 +422,11 @@ public class GhidraMCPPlugin extends Plugin {
 
     /**
      * Find an available port based on configuration.
-     * 
+     *
      * Multi-instance port allocation logic adapted from GhydraMCP project:
      * https://github.com/starsong/GhydraMCP
      * Authors: starsong and contributors
-     * 
+     *
      * This implementation allows multiple Ghidra instances to run simultaneously,
      * each on a unique port. It prioritizes the lowest available port in a
      * queue-like fashion.
@@ -821,7 +821,7 @@ public class GhidraMCPPlugin extends Plugin {
      * idea.
      * Return true if there is a difference. If a specific symbol is being changed,
      * it can be passed in to check whether or not the prototype is being affected.
-     * 
+     *
      * @param highSymbol (if not null) is the symbol being modified
      * @param hfunction  is the given HighFunction
      * @return true if there is a difference (and a full commit is required)
@@ -945,7 +945,7 @@ public class GhidraMCPPlugin extends Plugin {
 
     /**
      * Gets a function at the given address or containing the address
-     * 
+     *
      * @return the function or null if not found
      */
     private Function getFunctionForAddress(Program program, Address addr) {
@@ -1644,7 +1644,7 @@ public class GhidraMCPPlugin extends Plugin {
 
     /**
      * Resolves a data type by name, handling common types and pointer types
-     * 
+     *
      * @param dtm      The data type manager
      * @param typeName The type name to resolve
      * @return The resolved DataType, or null if not found
@@ -1763,7 +1763,7 @@ public class GhidraMCPPlugin extends Plugin {
 
     /**
      * Read raw bytes from memory at specified address
-     * 
+     *
      * @param addressStr The starting address in hex format
      * @param length     Number of bytes to read (1-4096)
      * @param format     Output format: "hex" for hex dump, "raw" for base64 encoded
@@ -1806,7 +1806,7 @@ public class GhidraMCPPlugin extends Plugin {
     /**
      * Format bytes as a traditional hex dump with address, hex bytes, and ASCII
      * representation
-     * 
+     *
      * @param startAddr Starting address for the dump
      * @param bytes     The byte array to format
      * @param length    Number of valid bytes in the array

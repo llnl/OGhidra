@@ -8,7 +8,7 @@ Uses matplotlib if available, falls back to ASCII charts.
 
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger("oghidra.benchmark.visualizations")
 
@@ -44,7 +44,7 @@ class BenchmarkVisualizer:
             import matplotlib
 
             matplotlib.use("Agg")  # Non-interactive backend
-            import matplotlib.pyplot as plt
+            import matplotlib.pyplot as plt  # noqa: F401
 
             return True
         except ImportError:
@@ -91,7 +91,13 @@ class BenchmarkVisualizer:
 
         # Add mean line
         mean_score = np.mean(scores)
-        ax.axvline(mean_score, color="#00d26a", linestyle="--", linewidth=2, label=f"Mean: {mean_score:.3f}")
+        ax.axvline(
+            mean_score,
+            color="#00d26a",
+            linestyle="--",
+            linewidth=2,
+            label=f"Mean: {mean_score:.3f}",
+        )
 
         # Styling
         ax.set_xlabel("Score", fontsize=12)

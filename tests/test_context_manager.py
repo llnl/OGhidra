@@ -19,7 +19,6 @@ from src.context_manager import (
     ContextBudget,
     ContextManager,
     ResultCache,
-    ResultPriority,
 )
 
 
@@ -46,7 +45,7 @@ def test_context_budget():
     budget.add_usage("system", "A" * 4000)  # ~1000 tokens
     budget.add_usage("execution", "B" * 8000)  # ~2000 tokens
 
-    print(f"\nAfter adding usage:")
+    print("\nAfter adding usage:")
     print(budget.get_usage_summary())
 
     # Test can_fit
@@ -76,7 +75,7 @@ def test_result_cache():
 
     result2 = cache.store("list_functions", {}, "\n".join([f"FUN_{i:08x} at {i:08x}" for i in range(100)]))
 
-    print(f"\nStored results:")
+    print("\nStored results:")
     print(f"  - {result1.result_id}: {result1.tool_name} ({result1.token_estimate} tokens, priority: {result1.priority})")
     print(f"  - {result2.result_id}: {result2.tool_name} ({result2.token_estimate} tokens, priority: {result2.priority})")
 
@@ -118,7 +117,7 @@ def test_context_manager():
     small_result = "Function main at 0x140001000"
     display, cached = manager.process_result("get_current_function", {}, small_result, "Analyze the main function")
 
-    print(f"\nProcessed small result:")
+    print("\nProcessed small result:")
     print(f"  Display: {display}")
     print(f"  Cached ID: {cached.result_id}")
 
@@ -131,7 +130,7 @@ def test_context_manager():
         "List all functions",
     )
 
-    print(f"\nProcessed large result:")
+    print("\nProcessed large result:")
     print(f"  Original length: {len(large_result)} chars")
     print(f"  Display length: {len(display)} chars")
     print(f"  Cached: {cached.result_id}")
@@ -156,7 +155,7 @@ def test_smart_truncation():
     # Test list truncation
     list_result = "\n".join([f"Function_{i:04d} at 0x{i * 16:08x}" for i in range(100)])
     truncated = manager._smart_truncate(list_result, 500, "list_functions")
-    print(f"\nList truncation (100 items -> 500 chars):")
+    print("\nList truncation (100 items -> 500 chars):")
     print(truncated[:200] + "...")
 
     # Test code truncation
@@ -171,13 +170,13 @@ def test_smart_truncation():
     return process_result(result);
 }"""
     truncated = manager._smart_truncate(code_result, 100, "decompile_function")
-    print(f"\nCode truncation:")
+    print("\nCode truncation:")
     print(truncated)
 
     # Test hex dump truncation
     hex_result = "\n".join([f"0x{i * 16:08x}: " + " ".join([f"{b:02X}" for b in range(16)]) for i in range(50)])
     truncated = manager._smart_truncate(hex_result, 300, "read_bytes")
-    print(f"\nHex dump truncation:")
+    print("\nHex dump truncation:")
     print(truncated)
 
     print("\n[PASS] Smart Truncation tests passed!")

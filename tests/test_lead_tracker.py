@@ -1,6 +1,7 @@
 import unittest
 from src.lead_tracker import LeadTracker
 
+
 class TestLeadTracker(unittest.TestCase):
     def setUp(self):
         self.tracker = LeadTracker()
@@ -10,7 +11,7 @@ class TestLeadTracker(unittest.TestCase):
         self.assertTrue(self.tracker.add_lead("Lead A", "HIGH"))
         self.assertTrue(self.tracker.add_lead("Lead B", "MEDIUM"))
         self.assertTrue(self.tracker.add_lead("Lead C", "LOW"))
-        
+
         # Test default priority
         self.assertTrue(self.tracker.add_lead("Lead D", "INVALID_PRIO"))
         # After sorting (HIGH, MEDIUM, MEDIUM, LOW), Lead D (MEDIUM) should be present
@@ -21,7 +22,7 @@ class TestLeadTracker(unittest.TestCase):
         """Test that duplicate leads are rejected."""
         self.tracker.add_lead("Same", "HIGH", "0x123")
         self.assertFalse(self.tracker.add_lead("Same", "HIGH", "0x123"))
-        
+
         # Different address should be accepted
         self.assertTrue(self.tracker.add_lead("Same", "HIGH", "0x456"))
 
@@ -30,7 +31,7 @@ class TestLeadTracker(unittest.TestCase):
         self.tracker.add_lead("Medium lead", "MEDIUM")
         self.tracker.add_lead("Low lead", "LOW")
         self.tracker.add_lead("High lead", "HIGH")
-        
+
         self.assertEqual(self.tracker.leads[0].priority, "HIGH")
         self.assertEqual(self.tracker.leads[1].priority, "MEDIUM")
         self.assertEqual(self.tracker.leads[2].priority, "LOW")
@@ -44,7 +45,7 @@ class TestLeadTracker(unittest.TestCase):
         """
         count = self.tracker.parse_analysis_dump(dump_content)
         self.assertEqual(count, 2)
-        
+
         high_lead = self.tracker.leads[0]
         self.assertEqual(high_lead.priority, "HIGH")
         self.assertEqual(high_lead.source_address, "0x004a0e20")
@@ -54,10 +55,9 @@ class TestLeadTracker(unittest.TestCase):
         """Test formatting leads for LLM prompt."""
         self.tracker.add_lead("Critical issue", "HIGH")
         formatted = self.tracker.format_for_prompt()
-        
+
         self.assertIn("🔴 **HIGH**: Critical issue", formatted)
         self.assertIn("You MUST address all HIGH priority leads", formatted)
-
 
     def test_reset(self):
         """Test resetting the tracker."""
@@ -67,6 +67,6 @@ class TestLeadTracker(unittest.TestCase):
         self.assertEqual(len(self.tracker.leads), 0)
         self.assertEqual(len(self.tracker.seen_leads), 0)
 
-if __name__ == '__main__':
 
+if __name__ == "__main__":
     unittest.main()

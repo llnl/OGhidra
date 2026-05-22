@@ -37,7 +37,7 @@ graph TD
     C --> E[Review Phase]
     E -- Agentic Loop --> B
     E --> F[Final Response]
-    
+
     style E fill:#f9f,stroke:#333,stroke-width:2px
     style B fill:#bbf,stroke:#333,stroke-width:2px
 ```
@@ -142,7 +142,7 @@ Once you've successfully built the extension:
    - **File** → **Configure** → **Enable Developer**
    - Check the box to enable
    - The server will start on `http://localhost:8080/methods`
-     
+
    > **YOU NEED TO HAVE CODE BROWSER OPEN**
 
    > **Note**: The plugin is compatible with Ghidra 11.0.3+ and optimized for Ghidra 12.0.3
@@ -156,8 +156,8 @@ ollama pull nomic-embed-text     		# Embedding model for RAG
 
 # Alternative models
 ollama pull gpt-oss:120b         		# High quality (80GB RAM)
-ollama pull devstral-2:123b 			# High quality (80GB RAM) 
-ollama pull devstral-2:123b-cloud       # Cloud Model 
+ollama pull devstral-2:123b 			# High quality (80GB RAM)
+ollama pull devstral-2:123b-cloud       # Cloud Model
 ```
 
 ### Launch OGhidra
@@ -384,7 +384,7 @@ LLM_LOG_FORMAT=json
 
 ```bash
 # Verify plugin is loaded
-# Open up codebrowser! 
+# Open up codebrowser!
 
 # Check server is running
 curl http://localhost:8080/methods
@@ -470,7 +470,7 @@ COMPACTION_THRESHOLD=0.75
 We welcome contributions! Areas of interest:
 
 - **New malware patterns** for detection
-- **LLM provider integrations** 
+- **LLM provider integrations**
 - **UI/UX improvements**
 - **Performance optimizations**
 - **Documentation** and examples

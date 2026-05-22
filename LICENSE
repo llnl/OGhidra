@@ -3,7 +3,7 @@ BSD 3-Clause with Commercial License alternative
 Copyright © 2025 Lawrence Livermore National Security, LLC (LLNS)
 
 Redistribution and use in source and binary forms, with or without
-modification, are permitted for any non‑commercial purpose, 
+modification, are permitted for any non‑commercial purpose,
 including educational, academic research, personal, and other
 not‑for‑profit activities, provided that the following conditions
 are met:
@@ -25,9 +25,9 @@ are met:
    license from the copyright holder.  To obtain such a license, please
    contact LLNS at softwarelicensing@llnl.gov
 
-   “Commercial use” includes, but is not limited to:  
-1. integrating the software into a product or service for sale or subscription;  
-2. using the software to provide paid consulting or support services;  
+   “Commercial use” includes, but is not limited to:
+1. integrating the software into a product or service for sale or subscription;
+2. using the software to provide paid consulting or support services;
 3. distributing derivative works or larger works that are monetized in any way.
 
    Non‑commercial internal use by employees or students of a

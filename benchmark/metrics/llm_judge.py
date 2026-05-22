@@ -163,7 +163,13 @@ class LLMJudgeMetric(BaseMetric):
             try:
                 result = json.loads(json_match.group())
                 # Validate expected keys
-                expected_keys = ["semantic_accuracy", "completeness", "technical_precision", "clarity", "overall_score"]
+                expected_keys = [
+                    "semantic_accuracy",
+                    "completeness",
+                    "technical_precision",
+                    "clarity",
+                    "overall_score",
+                ]
                 for key in expected_keys:
                     if key not in result:
                         result[key] = 3  # Default to middle score if missing

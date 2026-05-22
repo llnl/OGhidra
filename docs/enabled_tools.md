@@ -140,4 +140,4 @@ EXECUTE: xref_lookup(name="CreateFileW")
 
 # Find all strings that mention "passwd"
 EXECUTE: string_search(filter="passwd")
-``` 
+```

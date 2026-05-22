@@ -54,7 +54,7 @@ If no address is provided, uses the current function.
 
 Args:
     address: Function address (optional)
-    
+
 Returns:
     Comprehensive function analysis including decompiled code and referenced functions
 
@@ -82,7 +82,7 @@ void __fastcall func_00401000_renamed_test(int param1,char *param2)
 
 {
   uint uVar1;
-  
+
                     /* Test comment added by API test */
   ...
 ```
@@ -122,7 +122,7 @@ Args:
     name: Function name
     offset: Line offset (default: 0)
     limit: Max lines to return (default: 100)
-    
+
 Returns:
     Decompiled C code
 
@@ -156,7 +156,7 @@ Args:
     address: Function address
     offset: Line offset (default: 0)
     limit: Max lines to return (default: 100)
-    
+
 Returns:
     Decompiled function
 
@@ -184,7 +184,7 @@ void __fastcall func_00401000_renamed_test(int param1,char *param2)
 
 {
   uint uVar1;
-  
+
                     /* Test comment added by API test */
   uVar1 = 0x10;
   do {
@@ -199,7 +199,7 @@ Get assembly code (address: instruction; comment) for a function.
 
 Args:
     address: Function address
-    
+
 Returns:
     Disassembled function
 
@@ -219,10 +219,10 @@ disassemble_function(address: str) -> List[str]
 - Sample Result:
 ```
 00401000: MOV EAX,0x10 ; Test comment added by API test
-00401005: PUSH ESI 
-00401006: MOV ESI,dword ptr [EDX] 
-00401008: CMP ESI,dword ptr [ECX] 
-0040100a: JNZ 0x00401027 
+00401005: PUSH ESI
+00401006: MOV ESI,dword ptr [EDX]
+00401008: CMP ESI,dword ptr [ECX]
+0040100a: JNZ 0x00401027
 ... truncated ...
 ```
 
@@ -235,7 +235,7 @@ Format the scan results for human-readable output.
 Args:
     tables: List of table dicts from scan_function_pointer_tables
     max_entries_shown: Maximum entries to show per table (default: 10)
-    
+
 Returns:
     Formatted string with table information
 
@@ -344,7 +344,7 @@ Get a function by its address.
 
 Args:
     address: Function address
-    
+
 Returns:
     Function information
 
@@ -516,7 +516,7 @@ Args:
     host: Hostname to scan (default: localhost)
     start_port: Start of port range
     end_port: End of port range
-    
+
 Returns:
     Discovery results
 
@@ -539,7 +539,7 @@ instances_discover(host: str = 'localhost', start_port: int = 8192, end_port: in
 ```
 === Active Ghidra Instances ===
 • Port 8080: SmrtAdptr.exe [exploit-db] (CURRENT)
-• Port 8192: WiseDiskCleaner.exe [exploit-db] 
+• Port 8192: WiseDiskCleaner.exe [exploit-db]
 
 Use 'instances_use(port=...)' to switch between instances.
 ```
@@ -568,7 +568,7 @@ No parameters.
 ```
 === Active Ghidra Instances ===
 • Port 8080: SmrtAdptr.exe [exploit-db] (CURRENT)
-• Port 8192: WiseDiskCleaner.exe [exploit-db] 
+• Port 8192: WiseDiskCleaner.exe [exploit-db]
 
 Use 'instances_use(port=...)' to switch between instances.
 ```
@@ -581,7 +581,7 @@ Switch the active Ghidra instance to the specified port.
 
 Args:
     port: The port number of the instance to use
-    
+
 Returns:
     Confirmation message
 
@@ -612,7 +612,7 @@ List all namespace/class names in the program with pagination.
 Args:
     offset: Offset to start from
     limit: Maximum number of results
-    
+
 Returns:
     List of class names
 
@@ -649,7 +649,7 @@ List defined data labels and their values with pagination.
 Args:
     offset: Offset to start from
     limit: Maximum number of results
-    
+
 Returns:
     List of data items
 
@@ -670,10 +670,10 @@ list_data_items(offset: int = 0, limit: int = 100) -> List[str]
 - Sample Result:
 ```
 [Total: 113537] [Showing: 1-10] [Next: offset=10, limit=10]
-00400000: IMAGE_DOS_HEADER_00400000 = 
-00400100: (unnamed) = 
-004001f8: (unnamed) = 
-00400220: (unnamed) = 
+00400000: IMAGE_DOS_HEADER_00400000 =
+00400100: (unnamed) =
+004001f8: (unnamed) =
+00400220: (unnamed) =
 ... truncated ...
 ```
 
@@ -686,7 +686,7 @@ List exported functions/symbols with pagination.
 Args:
     offset: Offset to start from
     limit: Maximum number of results
-    
+
 Returns:
     List of exported symbols
 
@@ -756,7 +756,7 @@ List imported symbols in the program with pagination.
 Args:
     offset: Offset to start from
     limit: Maximum number of results
-    
+
 Returns:
     List of imported symbols
 
@@ -793,7 +793,7 @@ List all function names in the program with pagination.
 Args:
     offset: Offset to start from
     limit: Maximum number of results
-    
+
 Returns:
     List of function names
 
@@ -830,7 +830,7 @@ List all non-global namespaces in the program with pagination.
 Args:
     offset: Offset to start from
     limit: Maximum number of results
-    
+
 Returns:
     List of namespaces
 
@@ -867,7 +867,7 @@ List all memory segments in the program with pagination.
 Args:
     offset: Offset to start from
     limit: Maximum number of results
-    
+
 Returns:
     List of memory segments
 
@@ -943,9 +943,9 @@ Read raw bytes from memory at the specified address.
 Args:
     address: Starting address in hex format (e.g. "0x1400010a0")
     length: Number of bytes to read (1-4096, default: 16)
-    format: "hex" for hex dump with ASCII representation, 
+    format: "hex" for hex dump with ASCII representation,
             "raw" for base64 encoded bytes
-    
+
 Returns:
     Hex dump string or base64-encoded raw bytes
 
@@ -978,7 +978,7 @@ Rename a data label at the specified address.
 Args:
     address: Data address
     new_name: New data name
-    
+
 Returns:
     Result of the rename operation
 
@@ -1010,7 +1010,7 @@ Rename a function by its current name to a new user-defined name.
 Args:
     old_name: Current function name
     new_name: New function name
-    
+
 Returns:
     Result of the rename operation
 
@@ -1042,7 +1042,7 @@ Rename a function by its address.
 Args:
     function_address: Function address
     new_name: New name
-    
+
 Returns:
     Result of the rename operation
 
@@ -1075,7 +1075,7 @@ Args:
     function_name: Function name
     old_name: Current variable name
     new_name: New variable name
-    
+
 Returns:
     Result of the rename operation
 
@@ -1117,7 +1117,7 @@ Args:
     pointer_size: Size of pointers in bytes (8 for x64, 4 for x86)
     max_scan_size: Maximum bytes to scan per segment
     alignment: Expected pointer alignment
-    
+
 Returns:
     List of dicts: {
         'table_address': str,
@@ -1155,7 +1155,7 @@ Args:
     query: Search query
     offset: Offset to start from
     limit: Maximum number of results
-    
+
 Returns:
     List of matching functions
 
@@ -1188,7 +1188,7 @@ Set a comment for a given address in the function pseudocode.
 Args:
     address: Address
     comment: Comment
-    
+
 Returns:
     Result of the operation
 
@@ -1220,7 +1220,7 @@ Set a comment for a given address in the function disassembly.
 Args:
     address: Address
     comment: Comment
-    
+
 Returns:
     Result of the operation
 
@@ -1252,7 +1252,7 @@ Set a function's prototype.
 Args:
     function_address: Function address
     prototype: Function prototype
-    
+
 Returns:
     Result of the operation
 
@@ -1285,7 +1285,7 @@ Args:
     function_address: Function address
     variable_name: Variable name
     new_type: New type
-    
+
 Returns:
     Result of the operation
 

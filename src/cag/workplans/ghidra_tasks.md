@@ -84,4 +84,4 @@ This document contains step-by-step workplans for common Ghidra tasks. These wor
 ### Common Errors and Solutions:
 - If no matches are found, try alternative search terms or patterns
 - Break down complex searches into multiple simpler searches
-- Consider function size, imports, or reference counts as additional filters 
+- Consider function size, imports, or reference counts as additional filters

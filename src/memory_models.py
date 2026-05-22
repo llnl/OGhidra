@@ -39,7 +39,9 @@ class SessionRecord(BaseModel):
     end_time: Optional[datetime.datetime] = None
 
     user_task_description: str = Field(
-        min_length=1, max_length=2000, description="The core task, problem, or question from the user"
+        min_length=1,
+        max_length=2000,
+        description="The core task, problem, or question from the user",
     )
 
     tool_calls: List[ToolCallRecord] = Field(default_factory=list)
@@ -48,7 +50,9 @@ class SessionRecord(BaseModel):
     outcome_reason: Optional[str] = Field(default=None, max_length=500, description="Brief explanation for the outcome")
 
     session_summary: Optional[str] = Field(
-        default=None, max_length=2000, description="LLM-generated summary of key findings or solution"
+        default=None,
+        max_length=2000,
+        description="LLM-generated summary of key findings or solution",
     )
 
     @field_validator("user_task_description")

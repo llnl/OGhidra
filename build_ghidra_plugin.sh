@@ -9,7 +9,7 @@ echo
 which javac
 javac --version
 echo
-echo $JAVA_HOME
+echo "$JAVA_HOME"
 echo
 # If GHIDRA_INSTALL_DIR is not set, attempt to read from lastrun file
 if [ -z "$GHIDRA_INSTALL_DIR" ]; then
@@ -43,9 +43,8 @@ echo "# Path to your Ghidra installation directory" > OGhidraMCP/gradle.properti
 echo "GHIDRA_INSTALL_DIR=$GHIDRA_INSTALL_DIR" >> OGhidraMCP/gradle.properties
 
 # Build the extension
-cd OGhidraMCP
-gradle buildExtension --info
-if [ $? -ne 0 ]; then
+cd OGhidraMCP || cd ..
+if ! gradle buildExtension --info; then
     echo "ERROR: Build failed!"
     cd ..
     exit 1

@@ -38,10 +38,7 @@ class TestParseFromResponse(unittest.TestCase):
 
     def test_parse_without_options(self):
         """ASK_USER without OPTIONS should be freeform-only."""
-        response = (
-            "REASONING: I'm not sure which binary to analyze.\n"
-            "ASK_USER: Which binary should I prioritize?"
-        )
+        response = "REASONING: I'm not sure which binary to analyze.\nASK_USER: Which binary should I prioritize?"
         q = self.handler.parse_from_response(response)
         self.assertIsNotNone(q)
         self.assertEqual(q.question, "Which binary should I prioritize?")
@@ -50,10 +47,7 @@ class TestParseFromResponse(unittest.TestCase):
 
     def test_no_ask_user_returns_none(self):
         """Normal tool response without ASK_USER should return None."""
-        response = (
-            "REASONING: I will decompile the main function.\n"
-            "EXECUTE: decompile_function(address=\"0x401000\")"
-        )
+        response = 'REASONING: I will decompile the main function.\nEXECUTE: decompile_function(address="0x401000")'
         q = self.handler.parse_from_response(response)
         self.assertIsNone(q)
 
@@ -121,7 +115,7 @@ class TestQuestionDisplay(unittest.TestCase):
         q = UserQuestion(
             question="What next?",
             options=["Trace crypto", "Follow network"],
-            allow_custom=True
+            allow_custom=True,
         )
         display = q.format_for_display()
         self.assertIn("❓ What next?", display)
@@ -144,12 +138,12 @@ class TestReset(unittest.TestCase):
         handler = QuestionHandler()
         handler.parse_from_response("ASK_USER: Test?")
         handler.set_answer("answer")
-        
+
         handler.reset()
-        
+
         self.assertIsNone(handler.pending_question)
         self.assertIsNone(handler.consume_answer())
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

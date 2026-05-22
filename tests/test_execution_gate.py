@@ -12,21 +12,21 @@ Verifies:
 """
 
 import unittest
-from unittest.mock import MagicMock
-from src.models.memory import ExecutionSignal, ExecutionGate, ToolExecution
+from src.models.memory import ExecutionSignal
 from src.execution_gate import ExecutionGatekeeper
 
 
 class MockConfig:
     """Minimal config mock for gatekeeper tests."""
+
     def __init__(self, **overrides):
         defaults = {
-            'execution_gate_enabled': True,
-            'gate_on_artifact': True,
-            'gate_on_repetition': True,
-            'gate_repetition_threshold': 3,
-            'gate_on_high_risk_tool': False,
-            'gate_auto_resume_timeout': 0,
+            "execution_gate_enabled": True,
+            "gate_on_artifact": True,
+            "gate_on_repetition": True,
+            "gate_repetition_threshold": 3,
+            "gate_on_high_risk_tool": False,
+            "gate_auto_resume_timeout": 0,
         }
         defaults.update(overrides)
         for k, v in defaults.items():
@@ -78,7 +78,7 @@ class TestArtifactDetection(unittest.TestCase):
 
     def test_private_key_detected(self):
         """Embedded private key should trigger PAUSE."""
-        result = '-----BEGIN RSA PRIVATE KEY-----\nMIIBogIBAAJ...'
+        result = "-----BEGIN RSA PRIVATE KEY-----\nMIIBogIBAAJ..."
         signal = self.gate.check_after_execution("list_strings", result, [])
         self.assertEqual(signal, ExecutionSignal.PAUSE)
 
@@ -123,11 +123,11 @@ class TestDoomLoopDetection(unittest.TestCase):
         # First two calls: fine
         self.assertEqual(
             self.gate.check_before_execution("rename_function", params, []),
-            ExecutionSignal.CONTINUE
+            ExecutionSignal.CONTINUE,
         )
         self.assertEqual(
             self.gate.check_before_execution("rename_function", params, []),
-            ExecutionSignal.CONTINUE
+            ExecutionSignal.CONTINUE,
         )
         # Third call: doom-loop
         signal = self.gate.check_before_execution("rename_function", params, [])
@@ -140,9 +140,7 @@ class TestDoomLoopDetection(unittest.TestCase):
         """Same tool with different params should NOT trigger."""
         # Use a non-investigation tool
         for i in range(5):
-            signal = self.gate.check_before_execution(
-                "rename_function", {"name": f"func_{i}"}, []
-            )
+            signal = self.gate.check_before_execution("rename_function", {"name": f"func_{i}"}, [])
             self.assertEqual(signal, ExecutionSignal.CONTINUE)
 
     def test_different_tools_no_trigger(self):
@@ -159,13 +157,16 @@ class TestDoomLoopDetection(unittest.TestCase):
         params = {"address": "0x401000"}
         for _ in range(10):  # Well over the threshold of 3
             signal = self.gate.check_before_execution("get_xrefs_to", params, [])
-            self.assertEqual(signal, ExecutionSignal.CONTINUE, 
-                "get_xrefs_to should be exempt from doom-loop detection")
-        
+            self.assertEqual(
+                signal,
+                ExecutionSignal.CONTINUE,
+                "get_xrefs_to should be exempt from doom-loop detection",
+            )
+
         # Test other investigation tools
         investigation_tools = [
             "get_xrefs_from",
-            "get_function_xrefs", 
+            "get_function_xrefs",
             "decompile_function_by_address",
             "list_strings",
             "list_imports",
@@ -173,9 +174,12 @@ class TestDoomLoopDetection(unittest.TestCase):
         for tool in investigation_tools:
             for _ in range(5):
                 signal = self.gate.check_before_execution(tool, params, [])
-                self.assertEqual(signal, ExecutionSignal.CONTINUE,
-                    f"{tool} should be exempt from doom-loop detection")
-    
+                self.assertEqual(
+                    signal,
+                    ExecutionSignal.CONTINUE,
+                    f"{tool} should be exempt from doom-loop detection",
+                )
+
     def test_non_investigation_tool_still_triggers(self):
         """Non-investigation tools should still trigger doom-loop detection."""
         # Use a tool that's NOT in INVESTIGATION_TOOLS
@@ -183,7 +187,7 @@ class TestDoomLoopDetection(unittest.TestCase):
         for _ in range(2):
             signal = self.gate.check_before_execution("rename_function", params, [])
             self.assertEqual(signal, ExecutionSignal.CONTINUE)
-        
+
         # Third call should trigger
         signal = self.gate.check_before_execution("rename_function", params, [])
         self.assertEqual(signal, ExecutionSignal.PAUSE)
@@ -215,26 +219,20 @@ class TestHighRiskToolGate(unittest.TestCase):
     def test_rename_triggers_when_enabled(self):
         """rename_function should trigger PAUSE when gate_on_high_risk_tool=True."""
         gate = ExecutionGatekeeper(MockConfig(gate_on_high_risk_tool=True))
-        signal = gate.check_before_execution(
-            "rename_function", {"name": "malicious_init"}, []
-        )
+        signal = gate.check_before_execution("rename_function", {"name": "malicious_init"}, [])
         self.assertEqual(signal, ExecutionSignal.PAUSE)
         self.assertEqual(gate.get_gate_reason().trigger, "high_risk")
 
     def test_rename_no_trigger_when_disabled(self):
         """rename_function should NOT trigger when gate_on_high_risk_tool=False (default)."""
         gate = ExecutionGatekeeper(MockConfig(gate_on_high_risk_tool=False))
-        signal = gate.check_before_execution(
-            "rename_function", {"name": "malicious_init"}, []
-        )
+        signal = gate.check_before_execution("rename_function", {"name": "malicious_init"}, [])
         self.assertEqual(signal, ExecutionSignal.CONTINUE)
 
     def test_safe_tool_no_trigger(self):
         """Non-destructive tools should never trigger high-risk gate."""
         gate = ExecutionGatekeeper(MockConfig(gate_on_high_risk_tool=True))
-        signal = gate.check_before_execution(
-            "decompile_function", {"address": "0x401000"}, []
-        )
+        signal = gate.check_before_execution("decompile_function", {"address": "0x401000"}, [])
         self.assertEqual(signal, ExecutionSignal.CONTINUE)
 
 
@@ -249,13 +247,13 @@ class TestGateDisabled(unittest.TestCase):
         for _ in range(5):
             self.assertEqual(
                 gate.check_before_execution("rename_function", {"name": "x"}, []),
-                ExecutionSignal.CONTINUE
+                ExecutionSignal.CONTINUE,
             )
 
         # Post-exec: artifact
         self.assertEqual(
             gate.check_after_execution("decompile_function", "SeTakeOwnershipPrivilege", []),
-            ExecutionSignal.CONTINUE
+            ExecutionSignal.CONTINUE,
         )
 
 
@@ -304,9 +302,9 @@ class TestReset(unittest.TestCase):
         # Repetition tracker should be cleared (first call returns CONTINUE)
         self.assertEqual(
             gate.check_before_execution("rename_function", {"name": "test"}, []),
-            ExecutionSignal.CONTINUE
+            ExecutionSignal.CONTINUE,
         )
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

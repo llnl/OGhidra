@@ -23,7 +23,7 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import requests
@@ -296,11 +296,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     p = argparse.ArgumentParser(description="Compare Ollama embedding models for prompt similarity")
     p.add_argument(
         "--session",
-        default=str(
-            Path("analysis_sessions")
-            / "session_1771713926_c8f3fc0f"
-            / "session.json"
-        ),
+        default=str(Path("analysis_sessions") / "session_1771713926_c8f3fc0f" / "session.json"),
         help="Path to session.json",
     )
     p.add_argument(
@@ -383,7 +379,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 args.target_addr = str(k)
                 break
     if target_entry is None:
-        print(f"ERROR: Target address not found in session: {args.target_addr}", file=sys.stderr)
+        print(
+            f"ERROR: Target address not found in session: {args.target_addr}",
+            file=sys.stderr,
+        )
         return 2
 
     target_text = build_function_text(target_entry, include_name=args.include_name)
@@ -460,7 +459,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 kept_addrs.append(addr)
 
             if not embs:
-                print(f"WARN: no corpus embeddings produced for model={model}", file=sys.stderr)
+                print(
+                    f"WARN: no corpus embeddings produced for model={model}",
+                    file=sys.stderr,
+                )
             else:
                 mat = np.vstack([x.astype(np.float32) for x in embs])
                 # Normalize rows.
@@ -496,14 +498,20 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     row.target_rank = r
                     row.total_ranked = total
                 except Exception as e:
-                    print(f"WARN: rank compute failed for model={model}: {e}", file=sys.stderr)
+                    print(
+                        f"WARN: rank compute failed for model={model}: {e}",
+                        file=sys.stderr,
+                    )
             rows.append(row)
 
     # Print summary: best prompt per model.
     print("Per-model stats (cosine similarity to target):")
     models_in_rows = sorted({r.model for r in rows})
     for model in models_in_rows:
-        scores = np.asarray([r.score for r in rows if r.model == model and not math.isnan(r.score)], dtype=np.float32)
+        scores = np.asarray(
+            [r.score for r in rows if r.model == model and not math.isnan(r.score)],
+            dtype=np.float32,
+        )
         if scores.size == 0:
             continue
         mx = float(np.max(scores))
@@ -523,7 +531,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             print(f"  {r.score:.4f}{rank_s} | {r.prompt}")
 
     # Optional: dump a top-N table for the overall best scores.
-    rows_sorted = sorted([r for r in rows if not math.isnan(r.score)], key=lambda r: r.score, reverse=True)
+    rows_sorted = sorted(
+        [r for r in rows if not math.isnan(r.score)],
+        key=lambda r: r.score,
+        reverse=True,
+    )
     top_n = min(20, len(rows_sorted))
     if top_n:
         print("")

@@ -12,7 +12,7 @@ For more accurate parsing, consider integrating with tree-sitter or clang.
 import logging
 import re
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
 from .extractor import FunctionGroundTruth
 
@@ -268,11 +268,56 @@ class SourceCodeParser:
 
         # Domain detection
         tag_patterns = {
-            "crypto": ["encrypt", "decrypt", "aes", "rsa", "hash", "sha", "md5", "cipher", "key"],
-            "network": ["socket", "connect", "send", "recv", "http", "tcp", "udp", "port", "host"],
-            "file_io": ["fopen", "fread", "fwrite", "fclose", "read", "write", "file", "path"],
-            "memory": ["malloc", "free", "alloc", "realloc", "memcpy", "memset", "buffer"],
-            "string": ["str", "sprintf", "printf", "sscanf", "parse", "format", "concat"],
+            "crypto": [
+                "encrypt",
+                "decrypt",
+                "aes",
+                "rsa",
+                "hash",
+                "sha",
+                "md5",
+                "cipher",
+                "key",
+            ],
+            "network": [
+                "socket",
+                "connect",
+                "send",
+                "recv",
+                "http",
+                "tcp",
+                "udp",
+                "port",
+                "host",
+            ],
+            "file_io": [
+                "fopen",
+                "fread",
+                "fwrite",
+                "fclose",
+                "read",
+                "write",
+                "file",
+                "path",
+            ],
+            "memory": [
+                "malloc",
+                "free",
+                "alloc",
+                "realloc",
+                "memcpy",
+                "memset",
+                "buffer",
+            ],
+            "string": [
+                "str",
+                "sprintf",
+                "printf",
+                "sscanf",
+                "parse",
+                "format",
+                "concat",
+            ],
             "error_handling": ["error", "exception", "fail", "errno", "perror"],
             "init": ["init", "setup", "create", "new", "construct"],
             "cleanup": ["cleanup", "destroy", "free", "close", "release", "delete"],

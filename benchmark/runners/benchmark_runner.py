@@ -15,8 +15,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from ..ground_truth.extractor import FunctionGroundTruth, GroundTruthDataset
-from ..metrics.evaluator import EvaluationResult, SemanticEvaluator
-from .oghidra_runner import OGhidraResult, OGhidraRunner
+from ..metrics.evaluator import SemanticEvaluator
+from .oghidra_runner import OGhidraRunner
 
 logger = logging.getLogger("oghidra.benchmark.runner")
 

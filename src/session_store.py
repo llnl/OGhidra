@@ -5,9 +5,9 @@ Session history storage and retrieval.
 import datetime
 import json
 import os
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
-from .memory_models import SessionRecord, ToolCallRecord
+from .memory_models import SessionRecord
 
 
 class SessionHistoryStore:

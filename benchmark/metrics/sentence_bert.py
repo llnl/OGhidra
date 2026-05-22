@@ -9,7 +9,7 @@ Reference: https://www.sbert.net/
 """
 
 import logging
-from typing import List, Optional
+from typing import List
 
 from .evaluator import BaseMetric
 

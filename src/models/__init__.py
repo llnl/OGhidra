@@ -10,7 +10,7 @@ from .memory import (
     CAGContext,
     PromptSection,
     StructuredPrompt,
-    SessionMemory
+    SessionMemory,
 )
 
 __all__ = [
@@ -21,7 +21,5 @@ __all__ = [
     "CAGContext",
     "PromptSection",
     "StructuredPrompt",
-    "SessionMemory"
+    "SessionMemory",
 ]
-
-

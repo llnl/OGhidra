@@ -215,4 +215,4 @@ This workplan outlines strategies for progressively analyzing a binary to build 
 
 4. **Verify Deployment Risks**:
    - Check manifest for execution level (e.g., `requireAdministrator`).
-   - Check for unquoted service paths if strings suggest a service configuration. 
+   - Check for unquoted service paths if strings suggest a service configuration.

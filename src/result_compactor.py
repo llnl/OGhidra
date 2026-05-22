@@ -10,7 +10,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Iterable
 import json
-import re
 
 
 _DEFAULT_KEYWORDS = [
@@ -65,7 +64,11 @@ class CompactionConfig:
 
 
 class ResultCompactor:
-    def __init__(self, config: CompactionConfig | None = None, keywords: Iterable[str] | None = None):
+    def __init__(
+        self,
+        config: CompactionConfig | None = None,
+        keywords: Iterable[str] | None = None,
+    ):
         self.config = config or CompactionConfig()
         self.keywords = [k.lower() for k in (keywords or _DEFAULT_KEYWORDS)]
 

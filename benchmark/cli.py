@@ -175,7 +175,6 @@ def cmd_evaluate(args):
 def cmd_report(args):
     """Generate reports from existing results."""
     from benchmark.reports import ReportGenerator
-    from benchmark.runners.benchmark_runner import BenchmarkResults
 
     logger.info(f"Loading results: {args.results}")
 
@@ -183,7 +182,10 @@ def cmd_report(args):
         data = json.load(f)
 
     # Reconstruct results object (simplified)
-    from benchmark.runners.benchmark_runner import BenchmarkConfig, FunctionBenchmarkResult
+    from benchmark.runners.benchmark_runner import (
+        BenchmarkConfig,
+        FunctionBenchmarkResult,
+    )
 
     config = BenchmarkConfig(**data["config"])
     function_results = [FunctionBenchmarkResult(**r) for r in data["function_results"]]
@@ -232,7 +234,12 @@ def main():
     extract_parser.add_argument("--binary", "-b", help="Path to compiled binary")
     extract_parser.add_argument("--optimization", default="O2", help="Optimization level")
     extract_parser.add_argument("--compiler", default="gcc", help="Compiler used")
-    extract_parser.add_argument("--generate-summaries", "-g", action="store_true", help="Generate LLM summaries from source")
+    extract_parser.add_argument(
+        "--generate-summaries",
+        "-g",
+        action="store_true",
+        help="Generate LLM summaries from source",
+    )
 
     # Run command
     run_parser = subparsers.add_parser("run", help="Run benchmark on dataset")
@@ -255,7 +262,11 @@ def main():
     report_parser.add_argument("--results", "-r", required=True, help="Results JSON file")
     report_parser.add_argument("--output", "-o", help="Output directory/file")
     report_parser.add_argument(
-        "--format", "-f", choices=["all", "markdown", "html", "csv"], default="all", help="Report format"
+        "--format",
+        "-f",
+        choices=["all", "markdown", "html", "csv"],
+        default="all",
+        help="Report format",
     )
 
     args = parser.parse_args()

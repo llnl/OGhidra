@@ -170,7 +170,7 @@ def test_read_bytes_boundary_conditions():
 
         if "Error" in result:
             if "Length must be" in result and length > 4096:
-                print(f"[PASS] Correctly rejected length > 4096")
+                print("[PASS] Correctly rejected length > 4096")
             else:
                 print(f"[FAIL] {result}")
                 all_passed = False

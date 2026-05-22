@@ -6,27 +6,30 @@ styled vulnerability analysis reports. Based on the WiseDiskCleaner report templ
 """
 
 from dataclasses import dataclass, field
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 from datetime import datetime
 import html
-import json
 
 # ============================================================================
 # DATA STRUCTURES
 # ============================================================================
 
+
 @dataclass
 class ReportSection:
     """A section in the HTML report."""
-    id: str                     # e.g., "executive_summary"
-    title: str                  # e.g., "Executive Summary"
-    icon: str                   # e.g., "📋"
-    content_type: str           # "html", "table", "flow_diagram", "timeline", "cards"
-    content: str                # HTML content or JSON data for structured types
+
+    id: str  # e.g., "executive_summary"
+    title: str  # e.g., "Executive Summary"
+    icon: str  # e.g., "📋"
+    content_type: str  # "html", "table", "flow_diagram", "timeline", "cards"
+    content: str  # HTML content or JSON data for structured types
+
 
 @dataclass
 class ReportMetadata:
     """Metadata for the HTML report."""
+
     binary_name: str
     analysis_date: str = field(default_factory=lambda: datetime.now().strftime("%B %d, %Y"))
     report_id: str = field(default_factory=lambda: f"OGH-{datetime.now().strftime('%Y%m%d-%H%M%S')}")
@@ -34,6 +37,7 @@ class ReportMetadata:
     subtitle: str = "Binary Analysis Report"
     tool_name: str = "OGhidra MCP"
     duration: str = ""
+
 
 # ============================================================================
 # CSS STYLES
@@ -1036,45 +1040,42 @@ td {
 # HTML TEMPLATE
 # ============================================================================
 
+
 def _get_severity_icon(severity: str) -> str:
     """Get icon for severity level."""
-    icons = {
-        "CRITICAL": "🔥",
-        "HIGH": "⚠️",
-        "MEDIUM": "🔶",
-        "LOW": "ℹ️"
-    }
+    icons = {"CRITICAL": "🔥", "HIGH": "⚠️", "MEDIUM": "🔶", "LOW": "ℹ️"}
     return icons.get(severity.upper(), "📊")
+
 
 def generate_html_report(sections: List[ReportSection], metadata: ReportMetadata) -> str:
     """
     Generate a complete HTML report from sections and metadata.
-    
+
     Args:
         sections: List of ReportSection objects
         metadata: ReportMetadata with binary info
-        
+
     Returns:
         Complete HTML document as string
     """
     severity_lower = metadata.severity.lower()
     severity_icon = _get_severity_icon(metadata.severity)
-    
+
     # Build sections HTML
     sections_html = ""
     for section in sections:
         sections_html += _render_section(section)
-    
+
     # Build meta info items
-    meta_items = f'''
+    meta_items = f"""
         <div class="meta-item">📁 Binary: <span>{html.escape(metadata.binary_name)}</span></div>
         <div class="meta-item">📅 Analyzed: <span>{html.escape(metadata.analysis_date)}</span></div>
         <div class="meta-item">🔧 Tool: <span>{html.escape(metadata.tool_name)}</span></div>
-    '''
+    """
     if metadata.duration:
         meta_items += f'<div class="meta-item">⏱️ Duration: <span>{html.escape(metadata.duration)}</span></div>'
-    
-    html_doc = f'''<!DOCTYPE html>
+
+    html_doc = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -1122,8 +1123,8 @@ def generate_html_report(sections: List[ReportSection], metadata: ReportMetadata
         }}
     </script>
 </body>
-</html>'''
-    
+</html>"""
+
     return html_doc
 
 
@@ -1140,125 +1141,130 @@ def _render_section(section: ReportSection) -> str:
     '''
     return section_html
 
+
 # ============================================================================
 # HELPER FUNCTIONS FOR BUILDING SECTIONS
 # ============================================================================
 
+
 def build_stats_grid(stats: List[Dict[str, Any]]) -> str:
     """
     Build a statistics grid from a list of stat items.
-    
+
     Args:
         stats: List of dicts with 'icon', 'value', 'label' keys
-        
+
     Returns:
         HTML for stats grid with neon styling
     """
     cards = ""
     for stat in stats:
-        cards += f'''
+        cards += f"""
             <div class="stat-card">
-                <div class="stat-icon">{stat.get('icon', '📊')}</div>
-                <div class="stat-value">{html.escape(str(stat.get('value', '0')))}</div>
-                <div class="stat-label">{html.escape(str(stat.get('label', '')))}</div>
+                <div class="stat-icon">{stat.get("icon", "📊")}</div>
+                <div class="stat-value">{html.escape(str(stat.get("value", "0")))}</div>
+                <div class="stat-label">{html.escape(str(stat.get("label", "")))}</div>
             </div>
-        '''
+        """
     return f'<div class="stats-grid">{cards}</div>'
 
 
 def build_attack_vectors(vectors: List[Dict[str, Any]]) -> str:
     """
     Build attack vector cards.
-    
+
     Args:
         vectors: List of dicts with 'title', 'severity', 'description', 'apis' keys
-        
+
     Returns:
         HTML for attack vectors section
     """
     cards = ""
     for vec in vectors:
-        severity = vec.get('severity', 'medium').lower()
+        severity = vec.get("severity", "medium").lower()
         apis_html = ""
-        for api in vec.get('apis', []):
+        for api in vec.get("apis", []):
             apis_html += f'<span class="api-tag">{html.escape(api)}</span>'
-        
-        cards += f'''
+
+        cards += f"""
             <div class="attack-card {severity}">
-                <h4>{html.escape(vec.get('title', ''))}</h4>
-                <p>{html.escape(vec.get('description', ''))}</p>
+                <h4>{html.escape(vec.get("title", ""))}</h4>
+                <p>{html.escape(vec.get("description", ""))}</p>
                 <div class="api-list">{apis_html}</div>
             </div>
-        '''
+        """
     return f'<div class="attack-vectors">{cards}</div>'
+
 
 def build_timeline(items: List[Dict[str, Any]]) -> str:
     """
     Build a timeline of investigation steps.
-    
+
     Args:
         items: List of dicts with 'step', 'title', 'content', 'reasoning' keys
-        
+
     Returns:
         HTML for timeline
     """
     timeline_html = ""
     for item in items:
         reasoning_html = ""
-        if item.get('reasoning'):
+        if item.get("reasoning"):
             reasoning_html = f'<div class="timeline-reasoning">💭 {html.escape(item["reasoning"])}</div>'
-        
-        timeline_html += f'''
+
+        timeline_html += f"""
             <div class="timeline-item">
-                <div class="timeline-step">{html.escape(str(item.get('step', '')))}</div>
-                <div class="timeline-title">{html.escape(item.get('title', ''))}</div>
-                <div class="timeline-content">{html.escape(item.get('content', ''))}</div>
+                <div class="timeline-step">{html.escape(str(item.get("step", "")))}</div>
+                <div class="timeline-title">{html.escape(item.get("title", ""))}</div>
+                <div class="timeline-content">{html.escape(item.get("content", ""))}</div>
                 {reasoning_html}
             </div>
-        '''
+        """
     return f'<div class="timeline">{timeline_html}</div>'
+
 
 def build_key_findings(findings: List[Dict[str, Any]]) -> str:
     """
     Build key findings cards with severity indicators.
-    
+
     Args:
         findings: List of dicts with 'title', 'severity', 'description', 'apis' keys
-        
+
     Returns:
         HTML for key findings section
     """
     cards = ""
     for finding in findings:
-        severity = finding.get('severity', 'medium').lower()
+        severity = finding.get("severity", "medium").lower()
         apis_html = ""
-        for api in finding.get('apis', []):
+        for api in finding.get("apis", []):
             apis_html += f'<span class="finding-api">{html.escape(str(api))}</span>'
-        
-        cards += f'''
+
+        cards += f"""
             <div class="finding-card {severity}">
                 <div class="finding-header">
-                    <div class="finding-title">{html.escape(finding.get('title', ''))}</div>
+                    <div class="finding-title">{html.escape(finding.get("title", ""))}</div>
                     <span class="finding-badge {severity}">{severity.upper()}</span>
                 </div>
-                <div class="finding-desc">{html.escape(finding.get('description', ''))}</div>
+                <div class="finding-desc">{html.escape(finding.get("description", ""))}</div>
                 <div class="finding-apis">{apis_html}</div>
             </div>
-        '''
+        """
     return f'<div class="findings-grid">{cards}</div>'
+
 
 def build_risk_meter(score: float, label: str = "Risk Score") -> str:
     """
     Build a circular risk meter gauge.
-    
+
     Args:
         score: Risk score (0-10)
         label: Label for the risk level (e.g., "MEDIUM-HIGH RISK")
-        
+
     Returns:
         HTML for risk meter
     """
-    return f'''
+    return f"""
         <div class="risk-meter">
             <div class="risk-circle">
                 <div class="risk-inner">
@@ -1270,33 +1276,34 @@ def build_risk_meter(score: float, label: str = "Risk Score") -> str:
                 {html.escape(label)}
             </p>
         </div>
-    '''
+    """
+
 
 def build_security_imports(imports: List[Dict[str, Any]]) -> str:
     """
     Build a styled security imports table.
-    
+
     Args:
         imports: List of dicts with 'api', 'address', 'category', 'risk' keys
-        
+
     Returns:
         HTML for security imports table
     """
     rows_html = ""
     for imp in imports:
-        risk = imp.get('risk', 'low').lower()
-        risk_class = f"tag-{risk}" if risk in ['critical', 'high', 'medium', 'low'] else "tag-info"
-        
-        rows_html += f'''
+        risk = imp.get("risk", "low").lower()
+        risk_class = f"tag-{risk}" if risk in ["critical", "high", "medium", "low"] else "tag-info"
+
+        rows_html += f"""
             <tr>
-                <td><span class="address">{html.escape(str(imp.get('address', '')))}</span></td>
-                <td><code class="api-tag">{html.escape(str(imp.get('api', '')))}</code></td>
-                <td>{html.escape(str(imp.get('category', '')))}</td>
-                <td><span class="tag {risk_class}">{html.escape(str(imp.get('risk', '')))}</span></td>
+                <td><span class="address">{html.escape(str(imp.get("address", "")))}</span></td>
+                <td><code class="api-tag">{html.escape(str(imp.get("api", "")))}</code></td>
+                <td>{html.escape(str(imp.get("category", "")))}</td>
+                <td><span class="tag {risk_class}">{html.escape(str(imp.get("risk", "")))}</span></td>
             </tr>
-        '''
-    
-    return f'''
+        """
+
+    return f"""
         <table>
             <thead>
                 <tr>
@@ -1308,25 +1315,25 @@ def build_security_imports(imports: List[Dict[str, Any]]) -> str:
             </thead>
             <tbody>{rows_html}</tbody>
         </table>
-    '''
+    """
+
 
 def build_table(headers: List[str], rows: List[List[str]], address_columns: List[int] = None) -> str:
-
     """
     Build an HTML table.
-    
+
     Args:
         headers: List of header strings
         rows: List of row data (each row is a list of cell strings)
         address_columns: Indices of columns that should be styled as addresses
-        
+
     Returns:
         HTML for table
     """
     address_columns = address_columns or []
-    
+
     headers_html = "".join(f"<th>{html.escape(h)}</th>" for h in headers)
-    
+
     rows_html = ""
     for row in rows:
         cells_html = ""
@@ -1334,24 +1341,25 @@ def build_table(headers: List[str], rows: List[List[str]], address_columns: List
             if i in address_columns:
                 cells_html += f'<td class="address">{html.escape(str(cell))}</td>'
             else:
-                cells_html += f'<td>{html.escape(str(cell))}</td>'
+                cells_html += f"<td>{html.escape(str(cell))}</td>"
         rows_html += f"<tr>{cells_html}</tr>"
-    
-    return f'''
+
+    return f"""
         <table>
             <thead><tr>{headers_html}</tr></thead>
             <tbody>{rows_html}</tbody>
         </table>
-    '''
+    """
+
 
 def build_flow_diagram(nodes: List[Dict[str, Any]], layout: str = "linear") -> str:
     """
     Build a CSS flow diagram.
-    
+
     Args:
         nodes: List of node dicts with 'label', 'type' (start/danger/warning/normal)
         layout: "linear" or "branched"
-        
+
     Returns:
         HTML for flow diagram
     """
@@ -1363,19 +1371,21 @@ def build_flow_diagram(nodes: List[Dict[str, Any]], layout: str = "linear") -> s
             flow_html += f'<div class="{node_class}">{html.escape(node.get("label", ""))}</div>'
             if i < len(nodes) - 1:
                 flow_html += '<div class="flow-arrow">→</div>'
-        flow_html += '</div>'
+        flow_html += "</div>"
         return f'<div class="flow-diagram">{flow_html}</div>'
     else:
         # Content is passed through as-is for complex diagrams
-        return '<div class="flow-diagram">' + "".join(
-            f'<div class="flow-node {n.get("type", "")}">{html.escape(n.get("label", ""))}</div>'
-            for n in nodes
-        ) + '</div>'
+        return (
+            '<div class="flow-diagram">'
+            + "".join(f'<div class="flow-node {n.get("type", "")}">{html.escape(n.get("label", ""))}</div>' for n in nodes)
+            + "</div>"
+        )
+
 
 def build_vulnerability_discovery(discoveries: List[Dict[str, Any]]) -> str:
     """
     Build vulnerability discovery accordion cards.
-    
+
     Args:
         discoveries: List of discovery dicts with:
             - title: str
@@ -1385,71 +1395,71 @@ def build_vulnerability_discovery(discoveries: List[Dict[str, Any]]) -> str:
             - evidence: List[Dict] with type, value, address
             - code: Optional Dict with filename, address, content
             - impact: Dict with title, description
-            
+
     Returns:
         HTML for discovery section
     """
     cards_html = ""
     for i, disc in enumerate(discoveries):
-        severity = disc.get('severity', 'medium').lower()
+        severity = disc.get("severity", "medium").lower()
         open_class = " open" if i == 0 else ""
-        
+
         # Investigation path
         path_html = ""
-        inv_path = disc.get('investigation_path', [])
+        inv_path = disc.get("investigation_path", [])
         for j, step in enumerate(inv_path):
             is_last = j == len(inv_path) - 1
             line_html = "" if is_last else '<div class="inv-line"></div>'
-            path_html += f'''
+            path_html += f"""
                 <div class="inv-step">
                     <div class="inv-timeline"><div class="inv-dot"></div>{line_html}</div>
                     <div class="inv-content">
-                        <div class="inv-header"><span class="inv-tool">{html.escape(step.get('tool', ''))}</span><span class="inv-time">{html.escape(step.get('time', ''))}</span></div>
-                        <div class="inv-params">{html.escape(step.get('params', ''))}</div>
-                        <div class="inv-result">{step.get('result', '')}</div>
+                        <div class="inv-header"><span class="inv-tool">{html.escape(step.get("tool", ""))}</span><span class="inv-time">{html.escape(step.get("time", ""))}</span></div>
+                        <div class="inv-params">{html.escape(step.get("params", ""))}</div>
+                        <div class="inv-result">{step.get("result", "")}</div>
                     </div>
                 </div>
-            '''
-        
+            """
+
         # Evidence grid
         evidence_html = ""
-        for ev in disc.get('evidence', []):
-            evidence_html += f'''
+        for ev in disc.get("evidence", []):
+            evidence_html += f"""
                 <div class="evidence-item">
-                    <div class="evidence-type">{html.escape(ev.get('type', ''))}</div>
-                    <div class="evidence-value">{html.escape(ev.get('value', ''))}</div>
-                    <div class="evidence-addr">{html.escape(ev.get('address', ''))}</div>
+                    <div class="evidence-type">{html.escape(ev.get("type", ""))}</div>
+                    <div class="evidence-value">{html.escape(ev.get("value", ""))}</div>
+                    <div class="evidence-addr">{html.escape(ev.get("address", ""))}</div>
                 </div>
-            '''
-        
+            """
+
         # Code block (optional)
         code_html = ""
-        if disc.get('code'):
-            code = disc['code']
-            code_html = f'''
+        if disc.get("code"):
+            code = disc["code"]
+            code_html = f"""
                 <div class="section-label">Vulnerable Code</div>
                 <div class="code-snippet">
-                    <div class="code-snippet-header"><span class="code-snippet-filename">{html.escape(code.get('filename', ''))}</span><span class="code-snippet-addr">{html.escape(code.get('address', ''))}</span></div>
-                    <div class="code-snippet-content"><pre>{code.get('content', '')}</pre></div>
+                    <div class="code-snippet-header"><span class="code-snippet-filename">{html.escape(code.get("filename", ""))}</span><span class="code-snippet-addr">{html.escape(code.get("address", ""))}</span></div>
+                    <div class="code-snippet-content"><pre>{code.get("content", "")}</pre></div>
                 </div>
-            '''
-        
+            """
+
         # Impact box
-        impact = disc.get('impact', {})
-        impact_html = f'''
+        impact = disc.get("impact", {})
+        impact_html = f"""
             <div class="impact-box">
-                <div class="impact-title">🔥 {html.escape(impact.get('title', 'Security Impact'))}</div>
-                <div class="impact-desc">{impact.get('description', '')}</div>
+                <div class="impact-title">🔥 {html.escape(impact.get("title", "Security Impact"))}</div>
+                <div class="impact-desc">{impact.get("description", "")}</div>
             </div>
-        '''
-        
-        cards_html += f'''
+        """
+
+        cards_html += f"""
             <div class="discovery-card{open_class}">
                 <div class="discovery-header" onclick="toggleDiscovery(this)">
                     <div class="discovery-severity {severity}"></div>
                     <div class="discovery-info">
-                        <div class="discovery-title">{html.escape(disc.get('title', ''))}</div>
-                        <div class="discovery-subtitle">{html.escape(disc.get('subtitle', ''))}</div>
+                        <div class="discovery-title">{html.escape(disc.get("title", ""))}</div>
+                        <div class="discovery-subtitle">{html.escape(disc.get("subtitle", ""))}</div>
                     </div>
                     <span class="tag tag-{severity}">{severity.upper()}</span>
                     <span class="discovery-toggle">▼</span>
@@ -1463,17 +1473,18 @@ def build_vulnerability_discovery(discoveries: List[Dict[str, Any]]) -> str:
                     {impact_html}
                 </div>
             </div>
-        '''
-    
+        """
+
     return f'<div class="discovery-section">{cards_html}</div>'
+
 
 def get_discovery_javascript() -> str:
     """Return JavaScript for discovery accordion toggle."""
-    return '''
+    return """
     <script>
         function toggleDiscovery(header) {
             const card = header.parentElement;
             card.classList.toggle('open');
         }
     </script>
-    '''
+    """

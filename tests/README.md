@@ -61,4 +61,4 @@ EXECUTE: list_strings(offset=0, limit=10)
 EXECUTE: decompile_function(name="main")
 ```
 
-The AI's response will be augmented with the result of the tool call. 
+The AI's response will be augmented with the result of the tool call.
