@@ -3,8 +3,8 @@
 Main entry point for the Ollama-GhidraMCP Bridge application.
 """
 
-import argparse
 import json
+import argparse
 import sys
 
 from dotenv import load_dotenv
@@ -1296,7 +1296,7 @@ def main():
 
         # Launch GUI mode
         try:
-            from src.ui import launch_ui
+            from src.gui.ui import launch_ui
 
             launch_ui(bridge, config)
         except ImportError as e:
