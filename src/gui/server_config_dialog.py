@@ -5,6 +5,7 @@ from ..config import BridgeConfig
 import threading
 
 import logging
+
 logger = logging.getLogger(__name__)
 
 
@@ -469,4 +470,3 @@ class ServerConfigDialog:
         """Cancel the dialog."""
         self.result = False
         self.dialog.destroy()
-

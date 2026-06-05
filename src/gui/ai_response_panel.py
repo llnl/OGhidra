@@ -5,6 +5,7 @@ from tkinter import messagebox, scrolledtext, ttk, filedialog
 import json
 from datetime import datetime
 
+
 class AIResponsePanel:
     """Panel for displaying AI agent responses."""
 
@@ -54,7 +55,6 @@ class AIResponsePanel:
         # Tool/action styling
         self.response_text.tag_config("tool", foreground=colors.warning, font=("Consolas", 11, "italic"))
         self.response_text.tag_config("reasoning", foreground="#a0a0a0")  # Subtle gray for reasoning
-
 
     def add_response(self, response_type: str, content: str, timestamp: Optional[datetime] = None):
         """Add a new AI response to the display."""

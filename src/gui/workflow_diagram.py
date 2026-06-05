@@ -1,6 +1,7 @@
 import tkinter as tk
 from ttkbootstrap import Style
 
+
 # Enhanced WorkflowDiagram class with RAG vector creation stage
 class WorkflowDiagram:
     """Visual representation of the agentic workflow stages."""
@@ -15,7 +16,7 @@ class WorkflowDiagram:
             "Review": colors.secondary,  # Purple-ish
             "idle": "#4a4a4a",
         }
-            
+
         self.canvas = tk.Canvas(parent, width=width, height=height, relief="flat", bd=0, highlightthickness=0)
         self.width = width
         self.height = height
@@ -95,7 +96,6 @@ class WorkflowDiagram:
                 font=("Arial", 9, "bold"),
             )
 
-
         # Draw RAG status text below workflow if active
         if self.rag_active and self.rag_status_text:
             self.canvas.create_text(
@@ -130,4 +130,3 @@ class WorkflowDiagram:
     def get_widget(self):
         """Return the canvas widget."""
         return self.canvas
-

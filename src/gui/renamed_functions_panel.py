@@ -4,7 +4,9 @@ from tkinter import ttk, messagebox, scrolledtext, filedialog
 from datetime import datetime
 import json
 import logging
+
 logger = logging.getLogger(__name__)
+
 
 class RenamedFunctionsPanel:
     """Panel displaying renamed functions with their addresses and behavior summaries."""
@@ -1039,4 +1041,3 @@ class RenamedFunctionsPanel:
     def get_widget(self):
         """Return the main frame widget."""
         return self.frame
-

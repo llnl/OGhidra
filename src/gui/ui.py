@@ -5,7 +5,6 @@ OGhidra UI Module
 Comprehensive GUI interface for the Ollama-GhidraMCP Bridge application.
 """
 
-
 import logging
 import threading
 import tkinter as tk
@@ -25,6 +24,7 @@ from .tool_buttons_panel import ToolButtonsPanel
 from .workflow_diagram import WorkflowDiagram
 
 logger = logging.getLogger("ollama-ghidra-bridge.ui")
+
 
 class OGhidraUI:
     """Main UI class for the OGhidra application."""

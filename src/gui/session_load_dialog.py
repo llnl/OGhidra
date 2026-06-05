@@ -1,5 +1,7 @@
 import tkinter as tk
 from tkinter import ttk
+
+
 class SessionLoadDialog:
     """Improved session loading dialog with proper positioning."""
 
@@ -55,7 +57,6 @@ class SessionLoadDialog:
         scrollbar = ttk.Scrollbar(list_frame)
         scrollbar.pack(side="right", fill="y")
 
-
         self.session_listbox = tk.Listbox(
             list_frame,
             yscrollcommand=scrollbar.set,
@@ -104,4 +105,3 @@ class SessionLoadDialog:
         """Cancel the dialog."""
         self.selected_session = None
         self.dialog.destroy()
-

@@ -3,7 +3,9 @@ from tkinter import ttk, scrolledtext, messagebox
 from ..bridge import Bridge
 
 import logging
+
 logger = logging.getLogger(__name__)
+
 
 class MemoryInfoPanel:
     """Panel for displaying memory and system information."""

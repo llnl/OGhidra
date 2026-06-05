@@ -11,7 +11,9 @@ from typing import Dict, Any
 
 
 import logging
+
 logger = logging.getLogger(__name__)
+
 
 class ToolButtonsPanel:
     """Panel with buttons for commonly used tools."""

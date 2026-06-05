@@ -6,7 +6,9 @@ from ..bridge import Bridge
 from .ai_response_panel import AIResponsePanel
 from .workflow_diagram import WorkflowDiagram
 import logging
+
 logger = logging.getLogger(__name__)
+
 
 class QueryInputPanel:
     """Panel for AI agent query input."""
