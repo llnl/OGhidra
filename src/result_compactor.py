@@ -96,7 +96,7 @@ class ResultCompactor:
             body = body[1:]
 
         # Prefer lines matching keywords
-        kw_hits = [l for l in body if self._line_has_keyword(l)]
+        kw_hits = [line for line in body if self._line_has_keyword(line)]
 
         # Build a compact set: header + keyword hits + head + tail
         max_items = self.config.max_list_items
@@ -104,27 +104,27 @@ class ResultCompactor:
         out.extend(header)
 
         # Keyword hits first (bounded)
-        for l in kw_hits:
+        for line in kw_hits:
             if len(out) >= max_items:
                 break
-            if l not in out:
-                out.append(l)
+            if line not in out:
+                out.append(line)
 
         # Then head
-        for l in body[: max(0, max_items - len(out))]:
+        for line in body[: max(0, max_items - len(out))]:
             if len(out) >= max_items:
                 break
-            if l not in out:
-                out.append(l)
+            if line not in out:
+                out.append(line)
 
         # Then tail (only if we still have space)
         if len(out) < max_items and len(body) > 0:
             tail = body[-min(5, len(body)) :]
-            for l in tail:
+            for line in tail:
                 if len(out) >= max_items:
                     break
-                if l not in out:
-                    out.append(l)
+                if line not in out:
+                    out.append(line)
 
         # Add a note if we dropped content
         dropped = max(0, len(lines) - len(out))
@@ -153,9 +153,9 @@ class ResultCompactor:
         tail = lines[-self.config.tail_lines :]
 
         kw_lines: list[str] = []
-        for l in lines[self.config.head_lines : -self.config.tail_lines]:
-            if self._line_has_keyword(l):
-                kw_lines.append(l)
+        for line in lines[self.config.head_lines : -self.config.tail_lines]:
+            if self._line_has_keyword(line):
+                kw_lines.append(line)
                 if len(kw_lines) >= 30:
                     break
 

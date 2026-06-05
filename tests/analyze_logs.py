@@ -1,6 +1,8 @@
 import json
 import os
+import logging
 
+logger = logging.getLogger("analyze_logs.py")
 script_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(script_dir)
 log_path = os.path.join(project_root, "logs", "llm_interactions.log")
@@ -15,7 +17,8 @@ for line in lines:
         data = json.loads(line.strip())
         if data.get("interaction_type") == "generate":
             generates.append(data)
-    except:
+    except Exception as e:
+        logger.warning(f"Failed to parse the json data: {e}\nSkipping line...")
         pass
 
 # Print last 10 generate calls with key stats

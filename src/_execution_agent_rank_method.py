@@ -1,3 +1,7 @@
+from typing import Any
+import json
+
+
 # Helper method for execution-phase ranking
 def _execution_agent_rank(self, tool_name: str, result: Any, goal: str, max_items: int = 20) -> Any:
     """
@@ -69,7 +73,7 @@ Output ONLY valid JSON matching the input structure. No markdown. No explanation
         cleaned = response.strip()
         if cleaned.startswith("```"):
             lines = cleaned.split("\n")
-            lines = [l for l in lines if not l.startswith("```")]
+            lines = [line for line in lines if not line.startswith("```")]
             cleaned = "\n".join(lines).strip()
 
         # Parse filtered result

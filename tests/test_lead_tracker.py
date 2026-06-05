@@ -15,7 +15,7 @@ class TestLeadTracker(unittest.TestCase):
         # Test default priority
         self.assertTrue(self.tracker.add_lead("Lead D", "INVALID_PRIO"))
         # After sorting (HIGH, MEDIUM, MEDIUM, LOW), Lead D (MEDIUM) should be present
-        lead_d = next(l for l in self.tracker.leads if l.description == "Lead D")
+        lead_d = next(lead for lead in self.tracker.leads if lead.description == "Lead D")
         self.assertEqual(lead_d.priority, "MEDIUM")
 
     def test_duplicate_leads(self):

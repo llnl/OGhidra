@@ -13,9 +13,9 @@ from dotenv import load_dotenv
 load_dotenv(override=True)
 
 # Import after loading environment variables
-from src.bridge import Bridge
-from src.config import BridgeConfig, get_config
-from src.ghidra_client import GhidraMCPClient
+from src.bridge import Bridge  # noqa: E402
+from src.config import BridgeConfig, get_config  # noqa: E402
+from src.ghidra_client import GhidraMCPClient  # noqa: E402
 
 
 def print_header():
@@ -754,10 +754,12 @@ Tool Output:
                                                     context["callers_code"].append(
                                                         {"address": caller_addr, "code": caller_code}
                                                     )
-                                            except:
-                                                pass
-                                except:
-                                    pass
+                                            except Exception as e:
+                                                bridge.logger.warning(
+                                                    f"Failed to decompile function at address {caller_addr}: {e}"
+                                                )
+                                except Exception as e:
+                                    bridge.logger.warning(f"Failed to get callers to {address}: {e}")
 
                                 # Get callees (what does this function call?)
                                 try:
@@ -792,10 +794,12 @@ Tool Output:
                                                     context["callees_code"].append(
                                                         {"address": callee_addr, "code": callee_code}
                                                     )
-                                            except:
-                                                pass
-                                except:
-                                    pass
+                                            except Exception as e:
+                                                bridge.logger.warning(
+                                                    f"Failed to decompile the callee function at {callee_addr}: {e}"
+                                                )
+                                except Exception as e:
+                                    bridge.logger.warning(f"Failed to get callees to {address}: {e}")
 
                                 # Calculate context size
                                 context["total_chars"] = sum(len(c["code"]) for c in context["callers_code"])
@@ -923,30 +927,36 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                                     }
 
                                     for match in camel_case_matches:
-                                        if (
-                                            len(match) > 4
-                                            and match.lower() not in excluded_words
-                                            and not match.startswith("FUN_")
-                                            and not any(word in match.lower() for word in ["function", "name", "example"])
-                                        ):
-                                            suggested_name = match
-                                            break
-
-                                    # If still no match, look for any reasonable identifier
-                                    if not suggested_name:
-                                        simple_matches = re.findall(r"\b([a-z][a-zA-Z0-9_]*)\b", ai_response)
-                                        for match in simple_matches:
+                                        if match:
+                                            match_str = match.group()
                                             if (
-                                                len(match) > 6
-                                                and match.lower() not in excluded_words
-                                                and not match.startswith("FUN_")
+                                                len(match_str) > 4
+                                                and match_str.lower() not in excluded_words
+                                                and not match_str.startswith("FUN_")
                                                 and not any(
-                                                    word in match.lower()
-                                                    for word in ["function", "name", "example", "analysis", "response"]
+                                                    word in match_str.lower() for word in ["function", "name", "example"]
                                                 )
                                             ):
-                                                suggested_name = match
+                                                suggested_name = match_str
                                                 break
+
+                                        # If still no match, look for any reasonable identifier
+                                        if not suggested_name:
+                                            simple_matches = re.findall(r"\b([a-z][a-zA-Z0-9_]*)\b", ai_response)
+                                            for match in simple_matches:
+                                                if match:
+                                                    match_str = match.group()
+                                                    if (
+                                                        len(match_str) > 6
+                                                        and match_str.lower() not in excluded_words
+                                                        and not match_str.startswith("FUN_")
+                                                        and not any(
+                                                            word in match_str.lower()
+                                                            for word in ["function", "name", "example", "analysis", "response"]
+                                                        )
+                                                    ):
+                                                        suggested_name = match_str
+                                                        break
 
                                 # Check if function has generic name
                                 is_generic_name = function_name.startswith(("FUN_", "sub_", "loc_", "unk_", "j_"))

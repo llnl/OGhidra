@@ -305,7 +305,8 @@ class EnhancedSessionManager:
                                         ).timestamp()
                                     else:
                                         created_timestamp = created_at or 0
-                                except:
+                                except Exception as e:
+                                    logger.warning(f"Failed to get the timestamp while listing the sessions: {e}")
                                     created_timestamp = 0
 
                                 try:
@@ -315,7 +316,8 @@ class EnhancedSessionManager:
                                         ).timestamp()
                                     else:
                                         modified_timestamp = last_modified or 0
-                                except:
+                                except Exception as e:
+                                    logger.warning(f"Failed to get the timestamp while listing the sessions: {e}")
                                     modified_timestamp = 0
 
                                 sessions.append(

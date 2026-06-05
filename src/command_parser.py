@@ -288,6 +288,10 @@ class CommandParser:
             logger.info(f"xref_lookup mapped to '{command_name}' with params {validated_params}")
 
         # Map of common incorrect parameter names to correct ones for each command
+        # key: Name of the command
+        # value: Mapping of wrong-to-right param renames for this command
+        #       key: Wrong name
+        #       value: The correct name
         param_corrections = {
             "rename_function": {"function_name": "old_name", "name": "old_name"},
             "rename_function_by_address": {"address": "function_address", "functionAddress": "function_address"},

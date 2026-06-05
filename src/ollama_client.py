@@ -594,8 +594,9 @@ class OllamaClient:
                 try:
                     error_detail = response.json()
                     self.logger.error(f"Ollama embed 400 error: {error_detail}")
-                except:
-                    self.logger.error(f"Ollama embed 400 error: {response.text[:500]}")
+                except Exception as e:
+                    error_message = f"Ollama embed 400 error: {response.text[:500]}\n{e}"
+                    self.logger.error(error_message)
             response.raise_for_status()
             data = response.json()
             # New API returns "embeddings" (array) for batch input
@@ -646,8 +647,8 @@ class OllamaClient:
                 try:
                     error_detail = response.json()
                     self.logger.error(f"Ollama embeddings 400 error: {error_detail}")
-                except:
-                    self.logger.error(f"Ollama embeddings 400 error: {response.text[:500]}")
+                except Exception as e:
+                    self.logger.error(f"Ollama embeddings 400 error: {response.text[:500]}\n{e}")
             response.raise_for_status()
             data = response.json()
             embedding = data.get("embedding", [])
@@ -697,19 +698,3 @@ class OllamaClient:
         except Exception as e:
             self.logger.error(f"Ollama health check failed: {e}")
             return False
-
-    def list_models(self) -> list:
-        """
-        List available models on the Ollama server.
-        Returns list of model names.
-        """
-        try:
-            response = requests.get(f"{self.base_url}/api/tags", timeout=5, auth=self.auth)
-            if response.status_code == 200:
-                data = response.json()
-                models = data.get("models", [])
-                return [model.get("name", "") for model in models]
-            return []
-        except Exception as e:
-            self.logger.error(f"Failed to list models: {e}")
-            return []

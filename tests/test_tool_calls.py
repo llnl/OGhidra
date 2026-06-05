@@ -86,7 +86,10 @@ class ToolCapabilityTester:
                             address = method.split("_")[1]
                             if all(c in "0123456789abcdefABCDEF" for c in address):
                                 self.available_addresses.append(address)
-                        except:
+                        except Exception as e:
+                            logger.warning(
+                                f"An error occured in attempting to extract addresses from function names {method}: {e}"
+                            )
                             pass
 
                 # Set sample function name and address for tests
@@ -241,26 +244,23 @@ class ToolCapabilityTester:
         # Special handling for instances_use - find a valid port first
         if "instances_use" in tools_to_test:
             # Parse instances_list result or discover new ones
-            try:
-                # Try to find a port that isn't the current one (usually 8080)
-                # This assumes instances_list returns a string like "Port 8192: ..."
-                discovery_result = self.client.instances_list()
-                import re
+            # Try to find a port that isn't the current one (usually 8080)
+            # This assumes instances_list returns a string like "Port 8192: ..."
+            discovery_result = self.client.instances_list()
+            import re
 
-                # Find all 4-digit ports
-                ports = re.findall(r"Port (\d{4}):", discovery_result)
-                target_port = None
-                for p in ports:
-                    if p != "8080":
-                        target_port = int(p)
-                        break
+            # Find all 4-digit ports
+            ports = re.findall(r"Port (\d{4}):", discovery_result)
+            target_port = None
+            for p in ports:
+                if p != "8080":
+                    target_port = int(p)
+                    break
 
-                if target_port:
-                    self.test_data["port"] = target_port
-                else:
-                    self.test_data["port"] = 8080  # Fallback to current port if no other exists
-            except:
-                self.test_data["port"] = 8080
+            if target_port:
+                self.test_data["port"] = target_port
+            else:
+                self.test_data["port"] = 8080  # Fallback to current port if no other exists
 
         # Special handling for format_table_scan_results - provide dummy data
         if "format_table_scan_results" in tools_to_test:

@@ -5,11 +5,15 @@ import sys
 import os
 import base64
 import struct
+import logging
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.ghidra_client import GhidraMCPClient
 from src.config import GhidraMCPConfig
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+logger = logging.getLogger(__name__)
 
 
 def main():
@@ -28,7 +32,8 @@ def main():
             try:
                 addr = int(parts[1].strip(), 16)
                 function_map[addr] = name
-            except:
+            except Exception as e:
+                logger.warning(f"An error occured in attempting to extract the address from the function line {line}: {e}")
                 pass
 
     print(f"Parsed {len(function_map)} functions")
@@ -135,7 +140,7 @@ def main():
     else:
         print("No function pointers found in scanned region")
         print("\nLet's sample some raw data to see what's there:")
-        raw = c.read_bytes(hex(rdata_start), length=128, format="hex")
+        raw = c.read_bytes(hex(table_start), length=128, format="hex")
         print(raw)
 
 

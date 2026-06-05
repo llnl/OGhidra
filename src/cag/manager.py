@@ -457,19 +457,15 @@ class CAGManager:
 
             vector_db_path = Path("data/vector_db")
             vectors_file = vector_db_path / "vectors.npy"
-            metadata_file = vector_db_path / "metadata.json"
             documents_file = vector_db_path / "documents.json"
 
             # Check if all required files exist
-            if not all(f.exists() for f in [vectors_file, metadata_file, documents_file]):
+            if not all(f.exists() for f in [vectors_file, documents_file]):
                 logging.debug("Vector database files not found")
                 return [], None
 
             # Load the vector database
             vectors = np.load(vectors_file)
-
-            with open(metadata_file, "r") as f:
-                metadata = json.load(f)
 
             with open(documents_file, "r") as f:
                 documents = json.load(f)

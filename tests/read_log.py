@@ -15,12 +15,9 @@ try:
     # Find the last few 'generate' interactions
     generations = []
     for line in lines:
-        try:
-            data = json.loads(line)
-            if data.get("interaction_type") == "generate":
-                generations.append(data)
-        except:
-            continue
+        data = json.loads(line)
+        if data.get("interaction_type") == "generate":
+            generations.append(data)
 
     # Print the last 3 generations with prompt text (Reasoning)
     for i, gen in enumerate(generations[-5:]):

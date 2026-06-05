@@ -175,8 +175,6 @@ Focus on the key insights, findings, or conclusions that would be useful for fut
         Returns:
             A summary of the session, or None if summarization failed.
         """
-        # Create a prompt for the LLM
-        prompt = self._create_summary_prompt(session)
 
         # In a real implementation, you would use your LLM client here
         # For now, we'll return a placeholder summary based on the outcome
@@ -205,9 +203,10 @@ Focus on the key insights, findings, or conclusions that would be useful for fut
 
         # In a real implementation with an LLM client:
         try:
-            # response = self.llm_client.generate(prompt=prompt, max_tokens=150)
-            # return response.text.strip()
-            pass  # Replace with actual LLM call when available
+            # Create a prompt for the LLM
+            prompt = self._create_summary_prompt(session)
+            response = self.llm_client.generate(prompt=prompt, max_tokens=150)
+            return response.text.strip()
         except Exception as e:
             logger.error(f"Error generating summary: {e}")
             return None

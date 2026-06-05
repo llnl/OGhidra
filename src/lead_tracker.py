@@ -97,7 +97,7 @@ class LeadTracker:
 
     def get_active_leads(self, limit: int = 3) -> List[Lead]:
         """Get top N active (new/in_progress) leads."""
-        active = [l for l in self.leads if l.status in ["new", "in_progress"]]
+        active = [lead for lead in self.leads if lead.status in ["new", "in_progress"]]
         return active[:limit]
 
     def mark_completed(self, description_partial: str):

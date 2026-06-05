@@ -172,7 +172,8 @@ class GhidraMCPClient:
             # Try to parse as JSON, fallback to text
             try:
                 return response.json()
-            except:
+            except json.JSONDecodeError as e:
+                logger.info(f"Failed to parse response as JSON: {e}")
                 return response.text
         except Exception as e:
             logger.error(f"Error renaming function {old_name} to {new_name}: {e}")
@@ -195,7 +196,8 @@ class GhidraMCPClient:
             # Try to parse as JSON, fallback to text
             try:
                 return response.json()
-            except:
+            except json.JSONDecodeError as e:
+                logger.info(f"Failed to parse response as JSON: {e}")
                 return response.text
         except Exception as e:
             logger.error(f"Error renaming function at address {function_address} to {new_name}: {e}")
@@ -217,8 +219,9 @@ class GhidraMCPClient:
             # Parse the response - assuming it's JSON
             try:
                 return response.json()
-            except:
+            except json.JSONDecodeError as e:
                 # If the response isn't JSON, try parsing it as text
+                logger.info(f"Failed to parse response as JSON: {e}")
                 return response.text.strip().split("\n")
         except Exception as e:
             logger.error(f"Error listing imports: {e}")
@@ -339,8 +342,10 @@ class GhidraMCPClient:
             # Parse the response - assuming it's JSON
             try:
                 return response.json()
-            except:
-                # If the response isn't JSON, try parsing it as text
+            except json.JSONDecodeError as e:
+                logger.info(f"The segment response could not be parsed as JSON: {e}.")
+                logger.info("Re-attempting parsing as plain text.")
+
                 return response.text.strip().split("\n")
         except Exception as e:
             logger.error(f"Error listing segments: {e}")
@@ -363,8 +368,10 @@ class GhidraMCPClient:
             # Parse the response - assuming it's JSON
             try:
                 return response.json()
-            except:
+            except json.JSONDecodeError as e:
                 # If the response isn't JSON, try parsing it as text
+                logger.info(f"Failed to parse function search response as JSON: {e}")
+                logger.info("Re-attempting parsing as plain text.")
                 return response.text.strip().split("\n")
         except Exception as e:
             logger.error(f"Error searching functions by name: {e}")
@@ -382,8 +389,10 @@ class GhidraMCPClient:
             # Parse the response - assuming it's JSON
             try:
                 return response.json()
-            except:
-                # If the response isn't JSON, return it as text
+            except json.JSONDecodeError as e:
+                # If the response isn't JSON, try parsing it as text
+                logger.info(f"Failed to parse current function response as JSON: {e}")
+                logger.info("Re-attempting parsing as plain text.")
                 return response.text
         except Exception as e:
             logger.error(f"Error getting current function: {e}")
@@ -401,8 +410,10 @@ class GhidraMCPClient:
             # Parse the response - assuming it's JSON
             try:
                 return response.json()
-            except:
-                # If the response isn't JSON, return it as text
+            except json.JSONDecodeError as e:
+                # If the response isn't JSON, try parsing it as text
+                logger.info(f"Failed to parse current address response as JSON: {e}")
+                logger.info("Re-attempting parsing as plain text.")
                 return response.text
         except Exception as e:
             logger.error(f"Error getting current address: {e}")

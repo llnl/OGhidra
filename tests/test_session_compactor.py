@@ -141,7 +141,7 @@ class TestPrune(unittest.TestCase):
         ]
         results = MockExecResults(tool_executions=execs)
 
-        prune_result = compactor.prune(results)
+        compactor.prune(results)
 
         # First result too short to prune
         self.assertEqual(execs[0].result, "short")

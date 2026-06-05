@@ -21,7 +21,6 @@ from src.external_client import ExternalClient
 from src.custom_api_client import CustomAPIClient
 from src.ghidra_client import GhidraMCPClient
 from src.command_parser import CommandParser
-from src import config
 from src.models.memory import (
     SessionMemory,
     MessageRole,
@@ -1623,7 +1622,6 @@ You can help analyze binary files by executing commands through GhidraMCP."""
         """
         try:
             # Handle bridge-level commands FIRST (before Ghidra client validation)
-            bridge_commands = {"get_cached_result", "scan_function_pointer_tables", "search_function_summaries"}
             normalized_bridge_cmd = command_name.lower().replace("-", "_").replace(" ", "_")
 
             if normalized_bridge_cmd == "get_cached_result":
@@ -1814,7 +1812,8 @@ You can help analyze binary files by executing commands through GhidraMCP."""
                         if match:
                             func_name = match.group(1)
                             return f"{command_name}:current:{func_name}"
-                except:
+                except Exception as e:
+                    self.logger.warning(f"Failed to resolve current function for {command_name}: {e}")
                     pass
                 return f"{command_name}:current"
 
@@ -2522,7 +2521,6 @@ You can help analyze binary files by executing commands through GhidraMCP."""
                 executed_commands[cmd_signature] = executed_commands.get(cmd_signature, 0) + 1
 
                 # Track tool usage
-                tool_signature = f"{cmd_name}({cmd_params})"
                 tool_count = self.executed_tools.count(cmd_name)
 
                 # Special validation for rename_function to prevent context mismatches
@@ -3371,7 +3369,7 @@ Output ONLY JSON (same structure), top {max_items} items."""
         try:
             self.logger.info(f"🎯 Ranking {item_count} from {tool_name}")
             resp = self.ollama.generate(prompt=ranking_prompt, system_prompt="Filter. Output JSON only.", phase="execution")
-            cleaned = "\n".join([l for l in resp.strip().split("\n") if not l.startswith("```")]).strip()
+            cleaned = "\n".join([line for line in resp.strip().split("\n") if not line.startswith("```")]).strip()
             filtered = json.loads(cleaned)
             self.logger.info(
                 f"✅ Kept {len(filtered) if isinstance(filtered, list) else len(filtered.get('items', []))}/{item_count}"
@@ -3779,7 +3777,7 @@ Output ONLY valid JSON. No markdown code blocks. No explanations. Just the JSON 
             cleaned = response.strip()
             if cleaned.startswith("```"):
                 lines = cleaned.split("\n")
-                lines = [l for l in lines if not l.startswith("```")]
+                lines = [line for line in lines if not line.startswith("```")]
                 cleaned = "\n".join(lines)
 
             # Try to parse JSON
@@ -4004,7 +4002,7 @@ Output ONLY valid JSON. No markdown code blocks. No explanations. Just the JSON 
             if cleaned.startswith("```"):
                 # Remove markdown code block
                 lines = cleaned.split("\n")
-                lines = [l for l in lines if not l.startswith("```")]
+                lines = [line for line in lines if not line.startswith("```")]
                 cleaned = "\n".join(lines)
 
             # Try to parse JSON
@@ -4206,7 +4204,7 @@ IMPORTANT: You must provide a COMPLETE report with a conclusion. Do not truncate
 
         # Conclusion
         report_lines.append("### Conclusion")
-        high_priority_count = len([l for l in leads if l.get("priority") == "HIGH"])
+        high_priority_count = len([line for line in leads if line.get("priority") == "HIGH"])
         if high_priority_count > 0:
             report_lines.append(f"Found {high_priority_count} high-priority investigation leads that warrant further analysis.")
         report_lines.append(
@@ -5062,7 +5060,7 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
                     # Successful result - summarize and add to tools list
                     result_lines = result_text.split("\n")
                     # Remove the RESULT: prefix if present
-                    result_content = "\n".join([l.replace("RESULT: ", "", 1) for l in result_lines if l.strip()])
+                    result_content = "\n".join([line.replace("RESULT: ", "", 1) for line in result_lines if line.strip()])
                     result_summary = result_content[:150] + ("..." if len(result_content) > 150 else "")
                     tool_results.append(f"{step_info}: {tool_info} -> {result_summary}")
 
@@ -5299,281 +5297,6 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
     def ghidra(self):
         """Property for backward compatibility with code referencing bridge.ghidra."""
         return self.ghidra_client
-
-    def execute_goal(self, goal: str) -> Tuple[bool, List[str]]:
-        """
-        Execute a goal by breaking it down into steps and executing each step.
-
-        Args:
-            goal: The goal to execute
-
-        Returns:
-            Tuple of (success, results)
-        """
-        logging.info(f"Executing goal: {goal}")
-        self.context["goal"] = goal
-        self.current_goal = goal
-        self.executed_tools = set()  # Reset tool tracking for new goal
-        self.step_result_map = {}  # Reset step result map for new goal
-        all_results = []
-        step_count = 0
-        self.goal_achieved = False
-
-        # Use CAG manager to enhance context with knowledge and session data
-        if self.enable_cag and self.cag_manager:
-            # Update session cache with current context
-            self.cag_manager.update_session_from_bridge_context(self.context)
-
-        logging.info("Starting planning phase")
-        planning_prompt = self._build_planning_prompt(goal)
-        planning_response = self.chat_engine.query(planning_prompt)
-        logging.info(f"Received planning response: {planning_response[:100]}...")
-
-        # Extract tools from the plan
-        planned_tools = self._extract_planned_tools(planning_response)
-        logging.info(f"Extracted {len(planned_tools)} planned tools from plan")
-
-        # Add the plan to context
-        self.add_to_context("plan", planning_response)
-
-        logging.info("Planning phase completed")
-        logging.info("Starting execution phase")
-
-        while step_count < self.max_goal_steps and not self.goal_achieved:
-            step_count += 1
-            logging.info(f"Step {step_count}/{self.max_goal_steps}: Sending query to Ollama")
-
-            # Generate prompt based on current context
-            prompt = self._build_execution_prompt()
-
-            # Get response from Ollama
-            response = self.chat_engine.query(prompt)
-            logging.info(f"Received response from Ollama: {response[:100]}...")
-
-            # Update context with the response
-            self.add_to_context("execution_response", response)
-
-            # Process commands in the response
-            commands = self.command_parser.extract_commands(response)
-
-            if self._is_goal_achieved(response):
-                logging.info("Goal achievement indicated in response")
-                self.goal_achieved = True
-                all_results.append(f"Step {step_count} - Goal achievement indicated: {response}")
-                break
-
-            # Execute commands
-            execution_result = ""
-            for cmd_name, cmd_params in commands:
-                try:
-                    # Add tool call to context
-                    tool_call = f"EXECUTE: {cmd_name}({', '.join([f'{k}="{v}"' for k, v in cmd_params.items()])})"
-                    self.add_to_context("tool_call", tool_call)
-
-                    # Track executed tools with full signature for duplicate detection
-                    param_sig = str(sorted(cmd_params.items())) if cmd_params else ""
-                    cmd_signature = f"{cmd_name}:{param_sig}"
-
-                    # Skip if already executed with same params
-                    if cmd_signature in self.executed_tools:
-                        self.logger.warning(f"Skipping duplicate: {cmd_name}")
-                        continue
-
-                    self.executed_tools.add(cmd_signature)
-
-                    # Execute command
-                    result = self.execute_command(cmd_name, cmd_params)
-
-                    # Format result for display
-                    formatted_result = self.command_parser.format_command_results(cmd_name, cmd_params, result)
-                    logging.info(f"Command executed: {cmd_name}")
-                    logging.info(f"Result: {formatted_result[:100]}...")
-
-                    # Add result to context
-                    self.add_to_context("tool_result", formatted_result)
-
-                    # Cache signature for duplicate detection intelligence
-                    sig = f"{cmd_name}({_canonical_params(cmd_name, cmd_params)})"
-                    self.analysis_state["cached_results"][sig] = True
-
-                    # Special logic to re-orient the agent after analysis
-                    if cmd_name == "analyze_function":
-                        # This prompt is a direct instruction, framed as a user follow-up, to force the next action.
-                        reminder_prompt = f"""
-                        Excellent, the analysis is complete. Now, using that analysis, complete the original task: '{self.current_goal}'.
-                        Your final step is to call the `rename_function` tool.
-                        - Find the CURRENT function name from the most recent `get_current_function` output in the history.
-                        - Create a descriptive new name based on the analysis you just performed.
-                        - Then, call the `rename_function` tool with the CURRENT function's old and new names.
-                        - IMPORTANT: Only rename the function that is currently selected in Ghidra, not any other function.
-                        """
-                        self.add_to_context("user", reminder_prompt)  # Use "user" role for higher salience
-                        self.logger.info("Injecting user follow-up prompt to refocus agent on the final rename step.")
-
-                    # Check for context mismatches in rename operations
-                    if cmd_name == "rename_function" and "old_name" in cmd_params:
-                        old_name = cmd_params["old_name"]
-                        # Check if this rename operation might be working on the wrong function
-                        if "✓ Successfully executed" in execution_result and old_name.startswith("FUN_"):
-                            context_check_prompt = f"""
-                            ATTENTION: You just renamed '{old_name}' successfully, but please verify this is the correct function.
-
-                            If your goal is to rename the CURRENT function (the one selected in Ghidra), you should:
-                            1. Use `get_current_function()` to confirm which function is currently selected
-                            2. Only rename that specific function
-
-                            If you've already completed the task successfully, respond with "GOAL ACHIEVED".
-                            """
-                            self.add_to_context("system", context_check_prompt)
-
-                    execution_result = formatted_result
-                    all_results.append(f"Command: {cmd_name}\nResult: {execution_result}\n")
-
-                except Exception as e:
-                    error_msg = f"ERROR: {str(e)}"
-                    logging.error(f"Error executing {cmd_name}: {error_msg}")
-                    execution_result = error_msg
-                    self.add_to_context("tool_error", error_msg)
-                    all_results.append(f"Error executing {cmd_name}: {error_msg}")
-
-            # If no commands found, end the execution phase
-            if not commands:
-                logging.info("No commands found in AI response, ending tool execution loop")
-                all_results.append(f"Step {step_count} - No tool calls: {response}")
-                break
-
-        if step_count >= self.max_goal_steps:
-            logging.info(f"Reached maximum steps ({self.max_goal_steps}), ending tool execution loop")
-            all_results.append(f"Reached maximum steps ({self.max_goal_steps})")
-
-        logging.info("Execution phase completed")
-
-        # Only do review if requested
-        if self.enable_review:
-            all_results.append("\n=== REVIEW PHASE ===\n")
-            all_results.extend(self._perform_review_phase())
-
-        return self.goal_achieved, all_results
-
-    def _is_goal_achieved(self, response: str) -> bool:
-        """
-        Check if the response indicates that the goal has been achieved.
-
-        Args:
-            response: The AI response to check
-
-        Returns:
-            True if the goal is achieved, False otherwise
-        """
-        response_upper = response.upper()
-        goal_indicators = [
-            "GOAL ACHIEVED",
-            "GOAL COMPLETE",
-            "TASK COMPLETED",
-            "SUCCESSFULLY COMPLETED",
-            "OBJECTIVE ACCOMPLISHED",
-        ]
-
-        return any(indicator in response_upper for indicator in goal_indicators)
-
-    def _build_execution_prompt(self) -> str:
-        """
-        Build a prompt for the execution phase.
-
-        Returns:
-            The prompt string
-        """
-        # Include context, goal, and any previous interactions
-        system_prompt, user_prompt = self._build_structured_prompt(phase="execution")
-
-        # Add function call best practices to system prompt
-        if hasattr(config, "FUNCTION_CALL_BEST_PRACTICES") and config.FUNCTION_CALL_BEST_PRACTICES:
-            system_prompt += f"\n\nFunction call best practices:\n{config.FUNCTION_CALL_BEST_PRACTICES}\n"
-
-        # Return both prompts as a tuple
-        return (system_prompt, user_prompt)
-
-    def _build_planning_prompt(self, goal: str) -> str:
-        """
-        Build a prompt for the planning phase.
-
-        Args:
-            goal: The goal to plan for
-
-        Returns:
-            The prompt string (tuple of system_prompt, user_prompt)
-        """
-        # Get system and user prompts
-        system_prompt, user_prompt = self._build_structured_prompt(phase="planning")
-        user_prompt += f"\n\nGoal: {goal}\n"
-
-        # Add previous cycle conclusions if available (hybrid context integration)
-        if hasattr(self, "last_cycle_conclusions") and self.last_cycle_conclusions:
-            conclusions = self.last_cycle_conclusions
-            user_prompt += f"\n\n## Previous Cycle Conclusions (Cycle {conclusions.cycle_number})\n"
-            user_prompt += conclusions.format_for_planning()
-            user_prompt += "\n\n**Use these findings to refine your investigation plan.**\n"
-
-        # Add function call best practices to system prompt
-        if hasattr(config, "FUNCTION_CALL_BEST_PRACTICES") and config.FUNCTION_CALL_BEST_PRACTICES:
-            system_prompt += f"\n\nFunction call best practices:\n{config.FUNCTION_CALL_BEST_PRACTICES}\n"
-
-        # Return both prompts as a tuple
-        return (system_prompt, user_prompt)
-
-    def _build_review_prompt(self) -> str:
-        """
-        Build a prompt for the review phase.
-
-        Returns:
-            The prompt string
-        """
-        system_prompt, user_prompt = self._build_structured_prompt(phase="review")
-
-        # Add function call best practices to system prompt
-        if hasattr(config, "FUNCTION_CALL_BEST_PRACTICES") and config.FUNCTION_CALL_BEST_PRACTICES:
-            system_prompt += f"\n\nFunction call best practices:\n{config.FUNCTION_CALL_BEST_PRACTICES}\n"
-
-        # Return both prompts as a tuple
-        return (system_prompt, user_prompt)
-
-    def _perform_review_phase(self) -> List[str]:
-        """
-        Execute the review phase to analyze the results of the investigation.
-
-        Returns:
-            List of result strings from the review
-        """
-        logging.info("Starting review phase")
-
-        # Build the review prompt
-        prompt = self._build_review_prompt()
-
-        # Query the LLM
-        response = self.chat_engine.query(prompt)
-        logging.info(f"Received review response: {response[:100]}...")
-
-        # REMOVED: Text-based ARTIFACT parsing (never used)
-        # Artifacts now auto-populated from execution gate triggers
-        # self._parse_and_save_artifacts(response)
-
-        return [f"\n=== REVIEW ANALYSIS ===\n{response}"]
-
-    def _run_hardcoded_rename_workflow(self, display_name: str):
-        # Instead of: ai_response = self.bridge.process_query(analysis_query)
-        # Do direct calls:
-
-        # 1. Get current function (already done)
-        # 2. Decompile ONCE
-        decompiled_code = self.bridge.execute_command("decompile_function", {"name": function_name})
-
-        # 3. Create analysis prompt with the decompiled code
-        analysis_prompt = f"Analyze this decompiled function and suggest a name:\n{decompiled_code}"
-
-        # 4. Use Ollama directly (no multi-phase workflow)
-        ai_response = self.bridge.ollama.generate(analysis_prompt)
-
-        # 5. Extract name and rename
 
     def _get_latest_agent_analysis_text(self) -> str:
         """Retrieve the text analysis from the latest agent dump."""
@@ -7287,6 +7010,9 @@ This section provides specific addresses and evidence for key findings identifie
 ### Evidence with Addresses:
 {self._format_address_evidence(analysis)}
 
+Finally here is some context that will be helpful:
+{context}
+
 Now generate the JSON report based on this data.
 """
 
@@ -7416,7 +7142,8 @@ Now generate the JSON report based on this data.
                     if isinstance(content, str):
                         try:
                             content = json.loads(content)
-                        except:
+                        except Exception as e:
+                            self.logger.warning(f"Failed to load JSON for 'stats': {e}")
                             pass
                     if isinstance(content, list):
                         content = build_stats_grid(content)
@@ -7425,7 +7152,8 @@ Now generate the JSON report based on this data.
                     if isinstance(content, str):
                         try:
                             content = json.loads(content)
-                        except:
+                        except Exception as e:
+                            self.logger.warning(f"Failed to load JSON for 'attack_vectors': {e}")
                             pass
                     if isinstance(content, list):
                         content = build_attack_vectors(content)
@@ -7434,7 +7162,8 @@ Now generate the JSON report based on this data.
                     if isinstance(content, str):
                         try:
                             content = json.loads(content)
-                        except:
+                        except Exception as e:
+                            self.logger.warning(f"Failed to load JSON for 'timeline': {e}")
                             pass
                     if isinstance(content, list):
                         content = build_timeline(content)
@@ -7443,7 +7172,8 @@ Now generate the JSON report based on this data.
                     if isinstance(content, str):
                         try:
                             content = json.loads(content)
-                        except:
+                        except Exception as e:
+                            self.logger.warning(f"Failed to load JSON for 'table': {e}")
                             pass
                     if isinstance(content, dict):
                         headers = content.get("headers", [])
@@ -7457,7 +7187,8 @@ Now generate the JSON report based on this data.
                     if isinstance(content, str):
                         try:
                             content = json.loads(content)
-                        except:
+                        except Exception as e:
+                            self.logger.warning(f"Failed to load JSON for 'discovery': {e}")
                             pass
                     if isinstance(content, list):
                         content = build_vulnerability_discovery(content)
@@ -7468,7 +7199,8 @@ Now generate the JSON report based on this data.
                     if isinstance(content, str):
                         try:
                             content = json.loads(content)
-                        except:
+                        except Exception as e:
+                            self.logger.warning(f"Failed to load JSON for 'key_findings': {e}")
                             pass
                     if isinstance(content, list):
                         content = build_key_findings(content)
@@ -7479,7 +7211,8 @@ Now generate the JSON report based on this data.
                     if isinstance(content, str):
                         try:
                             content = json.loads(content)
-                        except:
+                        except Exception as e:
+                            self.logger.warning(f"Failed to load JSON for 'security_imports': {e}")
                             pass
                     if isinstance(content, list):
                         content = build_security_imports(content)

@@ -8,7 +8,6 @@ Comprehensive GUI interface for the Ollama-GhidraMCP Bridge application.
 import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox, filedialog
 import ttkbootstrap as tb
-from ttkbootstrap.constants import *
 import threading
 import json
 import time
@@ -338,7 +337,8 @@ class ServerConfigDialog:
                             try:
                                 error_detail = response.json()
                                 results.append(f"Error: {error_detail}")
-                            except:
+                            except Exception as e:
+                                logger.warning(f"Failed to extract the error response body: {e}")
                                 pass
                 except Exception as e:
                     results.append(f"Custom API: ❌ {str(e)}")
@@ -944,7 +944,8 @@ class MemoryInfoPanel:
                     # Save session before disabling
                     try:
                         self.bridge.cag_manager.save_session()
-                    except:
+                    except Exception as e:
+                        logger.warning(f"Failed to save session for the CAG manager: {e}")
                         pass
                     self.bridge.cag_manager = None
                     self.bridge.memory_manager = None
@@ -1265,7 +1266,8 @@ class RenamedFunctionsPanel:
                 renamed_functions = self.bridge.analysis_state.get("functions_renamed", {})
                 function_address_mapping = getattr(self.bridge, "function_address_mapping", {})
                 function_count = len(set(list(renamed_functions.keys()) + list(function_address_mapping.keys())))
-        except:
+        except Exception as e:
+            logger.warning(f"Failed to get the function_count: {e}")
             function_count = 0
 
         if function_count == 0:
@@ -1683,7 +1685,7 @@ class RenamedFunctionsPanel:
                     )
 
                     # Insert into tree with summary_key as a hidden column
-                    item_id = self.tree.insert("", "end", values=(display_address, old_name, new_name, summary, summary_key))
+                    self.tree.insert("", "end", values=(display_address, old_name, new_name, summary, summary_key))
 
                 # Process any remaining functions from renamed_functions that weren't in address mapping
                 for identifier, new_name in renamed_functions.items():
@@ -1713,7 +1715,7 @@ class RenamedFunctionsPanel:
                     )
 
                     # Insert into tree
-                    item_id = self.tree.insert("", "end", values=(address, old_name, new_name, summary, summary_key))
+                    self.tree.insert("", "end", values=(address, old_name, new_name, summary, summary_key))
 
             except Exception as e:
                 # During streaming loads, tree updates can fail due to rapid changes
@@ -2876,7 +2878,7 @@ class ToolButtonsPanel:
                 self.workflow_diagram.set_current_stage(None)
 
             except Exception as e:
-                error_msg = f"Error running {display_name}: {e}"
+                error_msg = f"Error running worker for '_run_ai_agent_query()': {e}"
                 logger.error(error_msg)
                 self.response_panel.add_response("Error", error_msg)
                 self.workflow_diagram.set_current_stage(None)
@@ -4027,9 +4029,11 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                                 if len(caller_code) > 1000:
                                     caller_code = caller_code[:1000] + "...[truncated]"
                                 context["callers_code"].append({"address": caller_addr, "code": caller_code})
-                        except:
+                        except Exception as e:
+                            logger.warning(f"Failed to decompile the caller {caller_addr}: {e}")
                             pass  # Skip if can't decompile caller
-            except:
+            except Exception as e:
+                logger.warning(f"Failed to get the callers to function {function_name} at {address}: {e}")
                 pass  # Skip if can't get callers
 
             # Get callees (what does this function call?)
@@ -4065,9 +4069,11 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                                 if len(callee_code) > 1000:
                                     callee_code = callee_code[:1000] + "...[truncated]"
                                 context["callees_code"].append({"address": callee_addr, "code": callee_code})
-                        except:
+                        except Exception as e:
+                            logger.warning(f"Failed to decompile the callee {callee_addr}: {e}")
                             pass  # Skip if can't decompile callee
-            except:
+            except Exception as e:
+                logger.warning(f"Failed to get the callee to function {function_name} at {address}: {e}")
                 pass  # Skip if can't get callees
 
             # Calculate total context size
@@ -5222,8 +5228,10 @@ Please provide:
                     try:
                         segments = self.bridge.ghidra.list_segments()
                         seg_info = "\n".join(f"  {s}" for s in segments[:8])
-                    except:
-                        seg_info = "  (Could not retrieve segment info)"
+                    except Exception as e:
+                        error_message = "  (Could not retrieve segment info)"
+                        logger.warning(f"{error_message}: {e}")
+                        seg_info = error_message
 
                     self.response_panel.add_response(
                         "Scan Complete: No Tables Found",
@@ -5609,7 +5617,7 @@ class OGhidraUI:
 
                     # Create new session
                     try:
-                        session_id = self.session_manager.create_session(
+                        self.session_manager.create_session(
                             session_name=session_name, description=description if description else None
                         )
                     except Exception as e:
@@ -5875,15 +5883,6 @@ class OGhidraUI:
 
             result = {"loaded": False}
 
-            def on_session_select(event):
-                """Handle session selection."""
-                selection = session_tree.selection()
-                if selection and selection[0] in session_items:
-                    session = session_items[selection[0]]
-                    # Could show session details here
-
-            session_tree.bind("<<TreeviewSelect>>", on_session_select)
-
             def load_selected_session():
                 selection = session_tree.selection()
                 if not selection:
@@ -5914,7 +5913,6 @@ class OGhidraUI:
 
                     if session_data:
                         functions_loaded = 0
-                        vectors_loaded = 0
 
                         # Restore analyzed functions to UI (deduplicated)
                         if hasattr(self, "renamed_functions_panel") and self.renamed_functions_panel:
@@ -5982,7 +5980,6 @@ class OGhidraUI:
                         # Skip RAG vector restoration during session loading to prevent HuggingFace API calls
                         # Vectors will be loaded on-demand via the "Load Vectors" button
                         rag_vectors = session_data.get("rag_vectors", [])
-                        vectors_loaded = 0  # Don't count vectors as loaded since we're not loading them
 
                         # Note: RAG vectors are available in session data but not loaded automatically
                         # Use "Load Vectors" button in Analyzed Functions panel to create embeddings
@@ -6285,7 +6282,8 @@ class OGhidraUI:
                 if vector_store and hasattr(vector_store, "embeddings") and vector_store.embeddings is not None:
                     try:
                         count = len(vector_store.embeddings)
-                    except:
+                    except Exception as e:
+                        logger.warning(f"Failed to get the vector count from the vector store embeddings : {e}")
                         pass
             return count
 

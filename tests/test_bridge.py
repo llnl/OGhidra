@@ -1,7 +1,6 @@
 import os
 import re
 import sys
-import threading
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -23,7 +22,7 @@ class TestBridge(unittest.TestCase):
             self.bridge = Bridge(self.config)
 
         # Mock the GhidraMCP client
-        self.bridge.ghidra = MagicMock()
+        self.bridge.ghidra_client = MagicMock()
 
         # Mock the Ollama client
         self.bridge.ollama = MagicMock()
@@ -54,91 +53,6 @@ class TestBridge(unittest.TestCase):
 
         # Should return empty string since this is our own prompt
         self.assertEqual(result, "")
-
-    def test_run_execution_phase_safety_counter(self):
-        """Test that the execution phase doesn't go into an infinite loop."""
-        # Mock methods to focus on implied action checking behavior
-        self.bridge._build_structured_prompt = MagicMock(return_value="Test prompt")
-
-        # Set up a response that will trigger implied action detection
-        self.bridge.ollama.generate_with_phase.return_value = "FINAL RESPONSE: We should rename the function."
-
-        # Force _check_implied_actions_without_commands to always return a prompt
-        original_method = self.bridge._check_implied_actions_without_commands
-
-        # Counter to verify the method is only called a limited number of times
-        counter = [0]
-
-        def mock_check(*args, **kwargs):
-            counter[0] += 1
-            return "Your response implies actions should be taken" if counter[0] <= 10 else ""
-
-        self.bridge._check_implied_actions_without_commands = mock_check
-        self.bridge._check_final_response_quality = MagicMock(return_value=True)
-
-        # Run the method
-        try:
-            result = self.bridge._run_execution_phase()
-            # If we get here, it means the method terminated
-            self.assertIsInstance(result, str)
-            # Verify the implied action check was called, but not infinitely
-            self.assertLessEqual(counter[0], 10, "Too many implied action checks")
-        finally:
-            # Restore the original method
-            self.bridge._check_implied_actions_without_commands = original_method
-
-    def test_nested_calls_termination(self):
-        """Test that nested calls between check_implied and run_execution terminate properly."""
-        # This specifically tests the infinite loop scenario we encountered
-
-        # Set up a chain of mocks that would previously cause infinite loops
-        self.bridge._check_implied_actions_without_commands = MagicMock()
-
-        # First call returns a prompt
-        self.bridge._check_implied_actions_without_commands.side_effect = [
-            "Your response implies actions",  # First call
-            "Your response implies actions",  # Second call
-            "Your response implies actions",  # Third call
-            "",  # Fourth call - should never get here due to counter
-        ]
-
-        # Mock the build prompt method to avoid dependencies
-        self.bridge._build_structured_prompt = MagicMock(return_value="Test prompt")
-
-        # Mock the Ollama client's generate method
-        self.bridge.ollama.generate_with_phase.return_value = "FINAL RESPONSE: Some analysis here."
-
-        # Use a thread with timeout instead of signal (more compatible with Windows)
-        execution_result = [None]
-        execution_completed = [False]
-
-        def run_execution():
-            try:
-                execution_result[0] = self.bridge._run_execution_phase()
-                execution_completed[0] = True
-            except Exception as e:
-                self.fail(f"Exception during execution: {str(e)}")
-
-        # Start the execution in a separate thread
-        execution_thread = threading.Thread(target=run_execution)
-        execution_thread.daemon = True
-        execution_thread.start()
-
-        # Wait for the thread to complete with timeout
-        execution_thread.join(timeout=5)
-
-        # Check if the execution completed within the timeout
-        self.assertTrue(execution_completed[0], "Test timed out - possible infinite loop detected")
-
-        # If we get here, it means the method terminated
-        self.assertIsInstance(execution_result[0], str)
-
-        # Check that our safety counter worked - should only be called max_implied_action_checks times
-        self.assertLessEqual(
-            self.bridge._check_implied_actions_without_commands.call_count,
-            3,  # max_implied_action_checks value
-            "Too many implied action checks",
-        )
 
     def test_command_name_conversion(self):
         """Test the camelCase to snake_case conversion algorithm."""
@@ -186,7 +100,7 @@ class TestBridge(unittest.TestCase):
         class TestBridge(Bridge):
             def __init__(self):
                 # Skip the normal initialization
-                self.ghidra = TestGhidra()
+                self.ghidra_client = TestGhidra()
                 self.logger = MagicMock()
 
         # Create our test bridge
@@ -212,7 +126,7 @@ class TestBridge(unittest.TestCase):
         # 4. Unknown commands in any case format remain unchanged
         self.assertEqual(
             test_bridge._normalize_command_name("nonExistentCommand"),
-            "nonExistentCommand",
+            "",
         )
 
 

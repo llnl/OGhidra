@@ -315,7 +315,8 @@ class ExternalClient:
                 try:
                     error_body = e.response.text
                     error_detail = f"{str(e)} | Response: {error_body[:1000]}"
-                except:
+                except Exception as inner_exception:
+                    self.logger.warning(f"Failed to get the error detail while parsing exception {e}: {inner_exception}")
                     pass
 
             self.logger.error(f"Error calling External API (Google): {error_detail}")
@@ -442,5 +443,6 @@ class ExternalClient:
                 # Try a lightweight call or just return True if API key valid format
                 return bool(self.api_key)
             return True
-        except:
+        except Exception as e:
+            self.logger.warning(f"Failed external client health check: {e}")
             return False

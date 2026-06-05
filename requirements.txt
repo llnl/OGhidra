@@ -1,6 +1,7 @@
 flask>=3.0.3,<3.1
 httpx>=0.24.0
 ijson>=3.2.0              # Optional: for streaming large JSON files (large sessions)
+matplotlib-stubs>=0.3.11  # Optional: For making mypy type checker satisfied.
 numpy>=1.24.0             # Required: for vector operations with Ollama embeddings
 psutil>=5.9.0             # For system memory and CPU statistics in system information
 pydantic-settings>=2.2.1

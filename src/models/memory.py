@@ -301,8 +301,6 @@ class ExecutionPhaseResults(BaseModel):
             f"\n## Execution Results ({self.total_steps} steps)\n",
         ]
 
-        total = len(self.tool_executions)
-
         for i, exec_result in enumerate(self.tool_executions, 1):
             sections.append(f"\n### Step {i}: {exec_result.tool_name}")
             sections.append(f"Parameters: {exec_result.parameters}")

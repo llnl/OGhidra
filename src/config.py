@@ -1439,9 +1439,6 @@ class BridgeConfig(BaseSettings):
     # Knowledge Base directory
     knowledge_base_dir: str = Field(default="knowledge_base", description="Knowledge base directory path")
 
-    # Enable or disable review phase
-    enable_review: bool = True
-
     @validator("log_level")
     def validate_log_level(cls, v):
         """Validate log level."""

@@ -44,7 +44,8 @@ class GhidraMCPTester:
                         address = method.split("_")[1]
                         if all(c in "0123456789abcdefABCDEF" for c in address):
                             self.available_addresses.append(address)
-                    except:
+                    except Exception as e:
+                        logger.warning(f"An error occured in attempting to extract addresses from function names {method}: {e}")
                         pass
 
             return {

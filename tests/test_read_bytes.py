@@ -21,8 +21,8 @@ import warnings
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
 
-from src.config import GhidraMCPConfig
-from src.ghidra_client import GhidraMCPClient
+from src.config import GhidraMCPConfig  # noqa: E402
+from src.ghidra_client import GhidraMCPClient  # noqa: E402
 
 
 def test_read_bytes_hex_format():

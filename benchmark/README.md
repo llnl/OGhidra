@@ -70,8 +70,7 @@ benchmark/
 │   ├── benchmark_runner.py   # Main benchmark orchestrator
 │   └── oghidra_runner.py     # OGhidra integration
 └── reports/              # Report generation
-    ├── report_generator.py   # Markdown, HTML, CSV reports
-    └── visualizations.py     # Charts and figures
+    └── report_generator.py   # Markdown, HTML, CSV reports
 ```
 
 ## Metrics

@@ -255,10 +255,10 @@ class SessionCompactor:
         # Simple extraction: just compress the results text
         lines = prompt.split("\n")
         key_lines = [
-            l
-            for l in lines
+            line
+            for line in lines
             if any(
-                kw in l.lower()
+                kw in line.lower()
                 for kw in [
                     "step",
                     "found",
