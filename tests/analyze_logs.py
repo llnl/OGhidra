@@ -2,7 +2,7 @@ import json
 import os
 import logging
 
-logger = logging.getLogger("analyze_logs.py")
+logger = logging.getLogger(__name__)
 script_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(script_dir)
 log_path = os.path.join(project_root, "logs", "llm_interactions.log")
