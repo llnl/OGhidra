@@ -1,4 +1,6 @@
 import tkinter as tk
+from queue import Queue
+from typing import Literal, Tuple, Union
 from ttkbootstrap import Style
 
 
@@ -16,7 +18,6 @@ class WorkflowDiagram:
             "Review": colors.secondary,  # Purple-ish
             "idle": "#4a4a4a",
         }
-
         self.canvas = tk.Canvas(parent, width=width, height=height, relief="flat", bd=0, highlightthickness=0)
         self.width = width
         self.height = height
@@ -29,10 +30,22 @@ class WorkflowDiagram:
         self.rag_active = False
         self.rag_status_text = ""
 
-        self._draw_workflow()
+        # Queue for thread-safe UI updates
+        self.ui_update_queue: Queue[
+            Tuple[Literal["stage", "rag_progress", "rag_complete"], Union[str, Tuple[int, int, bool], None]]
+        ] = Queue()
+
+        # Start UI callback loop for processing the queue
+        self._check_ui_update_queue()
+
+        # Queue the initial workflow drawing request
+        self.ui_update_queue.put(("stage", self.current_stage))
 
     def _draw_workflow(self):
-        """Draw the workflow diagram."""
+        """Draw the workflow diagram.
+
+        TRICKY: This method should ONLY be called from the main thread via the queue processor.
+        """
         self.canvas.delete("all")
 
         # Calculate positions
@@ -96,37 +109,72 @@ class WorkflowDiagram:
                 font=("Arial", 9, "bold"),
             )
 
-        # Draw RAG status text below workflow if active
-        if self.rag_active and self.rag_status_text:
-            self.canvas.create_text(
-                self.width // 2, self.height - 15, text=self.rag_status_text, fill="#e74c3c", font=("Arial", 9, "bold")
-            )
-
     def set_current_stage(self, stage: str | None):
-        """Set the current active stage."""
-        self.current_stage = stage.lower().replace(" ", "_") if stage else None
-        if stage != "rag_vectors":
-            self.rag_active = False
-        self._draw_workflow()
+        """Set the current active stage in a thread-safe way."""
+        # Add to queue instead of updating UI directly
+        self.ui_update_queue.put(("stage", stage))
 
     def set_rag_progress(self, current: int, total: int, active: bool = True):
-        """Set RAG vector creation progress."""
-        self.rag_progress = current
-        self.rag_total = total
-        self.rag_active = active
-        if active and total > 0:
-            percentage = int((current / total) * 100)
-            self.rag_status_text = f"Saving RAG vectors: {current}/{total} ({percentage}%)"
-        else:
-            self.rag_status_text = ""
-        self._draw_workflow()
+        """Set RAG vector creation progress in a thread-safe way."""
+        # Add to queue instead of updating UI directly
+        self.ui_update_queue.put(("rag_progress", (current, total, active)))
 
     def complete_rag_stage(self):
-        """Mark RAG vector creation as complete."""
-        self.rag_active = False
-        self.rag_status_text = ""
-        self._draw_workflow()
+        """Mark RAG vector creation as complete in a thread-safe way."""
+        # Add to queue instead of updating UI directly
+        self.ui_update_queue.put(("rag_complete", None))
 
     def get_widget(self):
         """Return the canvas widget."""
         return self.canvas
+
+    def _check_ui_update_queue(self):
+        """Process items from the UI update queue on the main thread."""
+        try:
+            # Process all current items in the queue
+            while not self.ui_update_queue.empty():
+                item = self.ui_update_queue.get_nowait()
+                update_type = item[0]
+
+                # Handle stage updates
+                if update_type == "stage":
+                    stage = item[1]
+                    if isinstance(stage, str) or stage is None:
+                        self.current_stage = stage.lower().replace(" ", "_") if stage else None
+                        if stage != "rag_vectors":
+                            self.rag_active = False
+                        # Directly call _draw_workflow as we're on the main thread now
+                        self._draw_workflow()
+
+                # Handle RAG progress updates
+                elif update_type == "rag_progress":
+                    progress_data = item[1]
+                    if isinstance(progress_data, tuple) and len(progress_data) == 3:
+                        current, total, active = progress_data
+                        self.rag_progress = current
+                        self.rag_total = total
+                        self.rag_active = active
+                        if active and total > 0:
+                            percentage = int((current / total) * 100)
+                            self.rag_status_text = f"Saving RAG vectors: {current}/{total} ({percentage}%)"
+                        else:
+                            self.rag_status_text = ""
+                        # Directly call _draw_workflow as we're on the main thread now
+                        self._draw_workflow()
+
+                # Handle RAG completion
+                elif update_type == "rag_complete":
+                    self.rag_active = False
+                    self.rag_status_text = ""
+                    # Directly call _draw_workflow as we're on the main thread now
+                    self._draw_workflow()
+
+                # Mark item as processed
+                self.ui_update_queue.task_done()
+
+        except Exception as e:
+            print(f"Error processing UI update queue: {e}")
+
+        finally:
+            # Schedule next check after 100ms
+            self.canvas.after(100, self._check_ui_update_queue)

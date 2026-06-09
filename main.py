@@ -6,7 +6,6 @@ Main entry point for the Ollama-GhidraMCP Bridge application.
 import json
 import argparse
 import sys
-
 from dotenv import load_dotenv
 
 # Load environment variables from .env file if present

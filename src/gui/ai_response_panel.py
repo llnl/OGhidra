@@ -1,9 +1,10 @@
-from typing import Optional
-from ttkbootstrap import Style
-import tkinter as tk
-from tkinter import messagebox, scrolledtext, ttk, filedialog
 import json
+import tkinter as tk
 from datetime import datetime
+from queue import Queue
+from tkinter import filedialog, messagebox, scrolledtext, ttk
+from typing import Literal, Optional, Tuple, Union
+from ttkbootstrap import Style
 
 
 class AIResponsePanel:
@@ -12,12 +13,22 @@ class AIResponsePanel:
     def __init__(self, parent, generate_callback=None):
         self.frame = ttk.LabelFrame(parent, text="AI Agent Responses", padding=10)
         self.generate_callback = generate_callback
+        self.response_history: list[dict[str, str]] = []
+
+        # Queues for the asynchronous workers to post results
+        self.response_queue: Queue[Union[Tuple[Literal["regular"], str], Tuple[Literal["cot"], str, str]]] = Queue()
+
+        # Setup the GUI
         self._setup_widgets()
         self._setup_text_tags()
-        self.response_history = []
+
+        # Start UI callback loops for displaying the results from asynchronous workers.
+        self._check_queue()
 
     def _setup_widgets(self):
         """Setup the AI response widgets."""
+
+        # Response display with dark theme and better font
         self.response_text = scrolledtext.ScrolledText(
             self.frame,
             height=15,
@@ -57,22 +68,26 @@ class AIResponsePanel:
         self.response_text.tag_config("reasoning", foreground="#a0a0a0")  # Subtle gray for reasoning
 
     def add_response(self, response_type: str, content: str, timestamp: Optional[datetime] = None):
-        """Add a new AI response to the display."""
+        """Add a new AI response to the display via queue for thread safety."""
         if timestamp is None:
             timestamp = datetime.now()
 
         # Store in history
-        response_entry = {"type": response_type, "content": content, "timestamp": timestamp.isoformat()}
+        response_entry = {
+            "type": response_type,
+            "content": content,
+            "timestamp": timestamp.isoformat(),
+        }
         self.response_history.append(response_entry)
 
-        # Display in text widget
+        # Format the response
         formatted_response = f"\n{'=' * 60}\n"
         formatted_response += f"[{timestamp.strftime('%H:%M:%S')}] {response_type.upper()}\n"
         formatted_response += f"{'=' * 60}\n"
         formatted_response += f"{content}\n"
 
-        self.response_text.insert(tk.END, formatted_response)
-        self.response_text.see(tk.END)
+        # Add to queue instead of updating UI directly
+        self.response_queue.put(("regular", formatted_response))
 
     def add_cot_update(self, update_type: str, content: str, timestamp: Optional[datetime] = None):
         """Add a chain of thought update to the display (streaming during agentic loop).
@@ -89,7 +104,11 @@ class AIResponsePanel:
             timestamp = datetime.now()
 
         # Store in history with cot prefix
-        response_entry = {"type": f"cot_{update_type.lower()}", "content": content, "timestamp": timestamp.isoformat()}
+        response_entry = {
+            "type": f"cot_{update_type.lower()}",
+            "content": content,
+            "timestamp": timestamp.isoformat(),
+        }
         self.response_history.append(response_entry)
 
         # Format based on update type for visual distinction
@@ -116,8 +135,8 @@ class AIResponsePanel:
             # Default format
             formatted = f"[{time_str}] [{update_type}] {content}\n"
 
-        self.response_text.insert(tk.END, formatted)
-        self.response_text.see(tk.END)
+        # Add to queue with update type for potential tag application
+        self.response_queue.put(("cot", formatted, update_type.upper()))
 
     def _clear_responses(self):
         """Clear all responses."""
@@ -131,7 +150,9 @@ class AIResponsePanel:
             return
 
         filename = filedialog.asksaveasfilename(
-            title="Save AI Responses", defaultextension=".txt", filetypes=[("Text files", "*.txt"), ("All files", "*.*")]
+            title="Save AI Responses",
+            defaultextension=".txt",
+            filetypes=[("Text files", "*.txt"), ("All files", "*.*")],
         )
 
         if filename:
@@ -171,6 +192,105 @@ class AIResponsePanel:
             self.generate_callback()
         else:
             messagebox.showinfo("Info", "Report generation callback not linked.")
+
+    def _check_queue(self):
+        """Process items from the response queue on the main thread."""
+        try:
+            # Process all current items in the queue
+            while not self.response_queue.empty():
+                item = self.response_queue.get_nowait()
+
+                # Handle regular responses
+                if item[0] == "regular":
+                    self.response_text.insert(tk.END, item[1])
+                    self.response_text.see(tk.END)
+
+                # Handle chain of thought updates
+                elif item[0] == "cot":
+                    formatted, update_type = item[1], item[2]
+                    self.response_text.insert(tk.END, formatted)
+
+                    # Apply appropriate tag based on update type
+                    if update_type == "REASONING":
+                        last_line_start = self.response_text.index(f"{tk.END} linestart-1c")
+                        self.response_text.tag_add("reasoning", last_line_start, tk.END)
+                    elif update_type == "TOOL":
+                        last_line_start = self.response_text.index(f"{tk.END} linestart-1c")
+                        self.response_text.tag_add("tool", last_line_start, tk.END)
+
+                    self.response_text.see(tk.END)
+
+                # Handle update to an existing response
+                elif item[0] == "update":
+                    response_type, formatted = item[1], item[2]
+
+                    # Search for existing response of this type to replace it
+                    found = False
+                    text_content = self.response_text.get(1.0, tk.END)
+                    lines = text_content.split("\n")
+
+                    for i in range(len(lines)):
+                        if f"] {response_type.upper()}" in lines[i]:
+                            # Found the header line - now we need to find the end of this response section
+                            # to determine the range to replace
+                            start_line = i - 1  # Include the separator line above
+                            if start_line < 0:
+                                start_line = 0
+
+                            # Find the end of this section (next separator or end of text)
+                            end_line = i + 1
+                            while end_line < len(lines) and not lines[end_line].startswith("="):
+                                end_line += 1
+
+                            # We've found the range, now replace it
+                            self.response_text.delete(f"{start_line + 1}.0", f"{end_line + 1}.0")
+                            self.response_text.insert(f"{start_line + 1}.0", formatted)
+                            found = True
+                            break
+
+                    # If not found, just append it
+                    if not found:
+                        self.response_text.insert(tk.END, formatted)
+
+                    self.response_text.see(tk.END)
+
+                # Mark as done
+                self.response_queue.task_done()
+
+        except Exception as e:
+            print(f"Error processing response queue: {e}")
+
+        finally:
+            # Schedule next check after 100ms
+            self.response_text.after(100, self._check_queue)
+
+    def update_response(self, response_type: str, content: str):
+        """Update the most recent response of the given type with new content.
+        This is useful for streaming updates where content is incrementally added.
+        """
+        # Find the most recent entry of this type in history
+        found = False
+        for i in range(len(self.response_history) - 1, -1, -1):
+            if self.response_history[i]["type"] == response_type:
+                # Update the content in history
+                self.response_history[i]["content"] = content
+                found = True
+                break
+
+        if not found:
+            # If no matching response was found, add a new one
+            self.add_response(response_type, content)
+            return
+
+        # Use a special queue item type for updates
+        formatted_response = f"\n{'=' * 60}\n"
+        timestamp = datetime.now()
+        formatted_response += f"[{timestamp.strftime('%H:%M:%S')}] {response_type.upper()} (UPDATED)\n"
+        formatted_response += f"{'=' * 60}\n"
+        formatted_response += f"{content}\n"
+
+        # Use a special update type in the queue for the _check_queue method
+        self.response_queue.put(("update", response_type, formatted_response))
 
     def get_widget(self):
         """Return the frame widget."""

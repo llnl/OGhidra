@@ -5,18 +5,19 @@ OGhidra UI Module
 Comprehensive GUI interface for the Ollama-GhidraMCP Bridge application.
 """
 
+import time
 import logging
 import threading
 import tkinter as tk
-from tkinter import messagebox, scrolledtext, ttk
+from tkinter import messagebox, scrolledtext, ttk, Toplevel, Label, Button
 from typing import Any, Dict
-
+from datetime import datetime
 import ttkbootstrap as tb
 
 from ..bridge import Bridge
 from ..config import BridgeConfig
-from .memory_info_panel import MemoryInfoPanel
 from .ai_response_panel import AIResponsePanel
+from .memory_info_panel import MemoryInfoPanel
 from .query_input_panel import QueryInputPanel
 from .renamed_functions_panel import RenamedFunctionsPanel
 from .server_config_dialog import ServerConfigDialog
@@ -98,7 +99,7 @@ class OGhidraUI:
         """Setup the main UI layout."""
         # Main paned window
         main_paned = ttk.PanedWindow(self.root, orient="horizontal")
-        main_paned.pack(fill="both", expand=True, padx=5, pady=5)
+        main_paned.after(0, lambda: main_paned.pack(fill="both", expand=True, padx=5, pady=5))
 
         # Left panel - Main focus: Query and AI Response (larger)
         main_frame = ttk.Frame(main_paned)
@@ -118,25 +119,28 @@ class OGhidraUI:
         """Setup the main panel with query input and AI responses (primary focus)."""
         # Query input panel
         self.query_panel = QueryInputPanel(parent, self.bridge, None, None)  # workflow_diagram set later
-        self.query_panel.get_widget().pack(fill="x", pady=(0, 10))
+        self.query_panel.get_widget().after(0, lambda: self.query_panel.get_widget().pack(fill="x", pady=(0, 10)))
 
         # AI Response panel (main content area)
         # Pass the generate report callback from main UI
         self.response_panel = AIResponsePanel(parent, generate_callback=self._menu_generate_report)
-        self.response_panel.get_widget().pack(fill="both", expand=True)
+        self.response_panel.get_widget().after(0, lambda: self.response_panel.get_widget().pack(fill="both", expand=True))
 
     def _setup_sidebar_panel(self, parent):
         """Setup the sidebar with analyzed functions (secondary, slimmer)."""
         # Workflow status tracker (above analyzed functions)
         workflow_frame = ttk.LabelFrame(parent, text="Workflow Status", padding=8)
-        workflow_frame.pack(fill="x", pady=(0, 10))
+        workflow_frame.after(0, lambda: workflow_frame.pack(fill="x", pady=(0, 10)))
 
         self.workflow_diagram = WorkflowDiagram(workflow_frame, width=500, height=100)
-        self.workflow_diagram.get_widget().pack()
+        self.workflow_diagram.get_widget().after(0, lambda: self.workflow_diagram.get_widget().pack())
 
         # Analyzed Functions panel
         self.renamed_functions_panel = RenamedFunctionsPanel(parent, self.bridge)
-        self.renamed_functions_panel.get_widget().pack(fill="both", expand=True)
+        self.renamed_functions_panel.get_widget().after(
+            0,
+            lambda: self.renamed_functions_panel.get_widget().pack(fill="both", expand=True),
+        )
         # Start auto-refresh for renamed functions
         self.renamed_functions_panel._start_auto_refresh()
 
@@ -144,7 +148,11 @@ class OGhidraUI:
         # accurately reflect whether summaries are available.
         try:
             if hasattr(self, "query_panel") and self.query_panel:
-                setattr(self.query_panel, "renamed_functions_panel", self.renamed_functions_panel)
+                setattr(
+                    self.query_panel,
+                    "renamed_functions_panel",
+                    self.renamed_functions_panel,
+                )
                 if hasattr(self.query_panel, "_on_grep_layer_change"):
                     self.query_panel._on_grep_layer_change()
         except Exception:
@@ -170,7 +178,7 @@ class OGhidraUI:
     def _setup_menu(self):
         """Setup the application menu."""
         menubar = tk.Menu(self.root)
-        self.root.config(menu=menubar)
+        self.root.after(0, lambda: self.root.config(menu=menubar))
 
         # File menu
         file_menu = tk.Menu(menubar, tearoff=0)
@@ -237,10 +245,6 @@ class OGhidraUI:
     def _save_session(self):
         """Save the current session with enhanced session management."""
         try:
-            import time
-            from datetime import datetime
-            import tkinter.messagebox as messagebox
-
             # Import the enhanced session manager with absolute import
             try:
                 from src.enhanced_session_manager import EnhancedSessionManager
@@ -253,7 +257,10 @@ class OGhidraUI:
                 try:
                     self.session_manager = EnhancedSessionManager()
                 except Exception as e:
-                    messagebox.showerror("Initialization Error", f"Could not initialize session manager: {e}")
+                    messagebox.showerror(
+                        "Initialization Error",
+                        f"Could not initialize session manager: {e}",
+                    )
                     return
 
             # Create session name dialog
@@ -273,13 +280,19 @@ class OGhidraUI:
                 logger.warning(f"Could not center dialog: {e}")
 
             main_frame = ttk.Frame(session_dialog, padding=20)
-            main_frame.pack(fill="both", expand=True)
+            main_frame.after(0, lambda: main_frame.pack(fill="both", expand=True))
 
             # Title
-            ttk.Label(main_frame, text="💾 Save Analysis Session", font=("TkDefaultFont", 14, "bold")).pack(pady=(0, 15))
+            title_label = ttk.Label(
+                main_frame,
+                text="💾 Save Analysis Session",
+                font=("TkDefaultFont", 14, "bold"),
+            )
+            title_label.after(0, lambda: title_label.pack(pady=(0, 15)))
 
             # Session name
-            ttk.Label(main_frame, text="Session Name:").pack(anchor="w")
+            session_name_label = ttk.Label(main_frame, text="Session Name:")
+            session_name_label.after(0, lambda: session_name_label.pack(anchor="w"))
             session_name_var = tk.StringVar(value=f"Analysis_{int(time.time())}")
             session_name_entry = ttk.Entry(main_frame, textvariable=session_name_var, width=50)
             session_name_entry.pack(fill="x", pady=(5, 10))
@@ -339,7 +352,10 @@ class OGhidraUI:
                 rag_count = 0
 
             ttk.Label(info_frame, text=f"• RAG Vectors: {rag_count}").pack(anchor="w")
-            ttk.Label(info_frame, text=f"• Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}").pack(anchor="w")
+            ttk.Label(
+                info_frame,
+                text=f"• Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+            ).pack(anchor="w")
 
             # Buttons
             button_frame = ttk.Frame(main_frame)
@@ -359,7 +375,8 @@ class OGhidraUI:
                     # Create new session
                     try:
                         self.session_manager.create_session(
-                            session_name=session_name, description=description if description else None
+                            session_name=session_name,
+                            description=description if description else None,
                         )
                     except Exception as e:
                         messagebox.showerror("Session Creation Error", f"Could not create session: {e}")
@@ -369,7 +386,10 @@ class OGhidraUI:
                     analyzed_functions = {}
                     try:
                         if hasattr(self.bridge, "function_summaries") and self.bridge.function_summaries:
-                            for address, summary in self.bridge.function_summaries.items():
+                            for (
+                                address,
+                                summary,
+                            ) in self.bridge.function_summaries.items():
                                 analyzed_functions[address] = {
                                     "address": address,
                                     "old_name": "Unknown",
@@ -381,7 +401,10 @@ class OGhidraUI:
                         # Also try to get data from the renamed functions panel
                         if hasattr(self, "renamed_functions_panel") and self.renamed_functions_panel:
                             if hasattr(self.renamed_functions_panel, "function_summaries"):
-                                for key, summary in self.renamed_functions_panel.function_summaries.items():
+                                for (
+                                    key,
+                                    summary,
+                                ) in self.renamed_functions_panel.function_summaries.items():
                                     if key not in analyzed_functions:
                                         analyzed_functions[key] = {
                                             "address": key,
@@ -494,9 +517,11 @@ class OGhidraUI:
                                 "Success",
                                 f"Session '{session_name}' saved successfully!\n\nSaved {len(analyzed_functions)} analyzed functions and {len(rag_vectors)} RAG vectors.",
                             )
-                        else:
-                            messagebox.showerror("Error", "Failed to save session. Check logs for details.")
                     except Exception as e:
+                        messagebox.showerror(
+                            "Error",
+                            "Failed to save session. Check logs for details.",
+                        )
                         messagebox.showerror("Save Error", f"Error saving session: {e}")
 
                 except Exception as e:
@@ -523,9 +548,6 @@ class OGhidraUI:
     def _load_session(self):
         """Load a session with enhanced session management."""
         try:
-            from datetime import datetime
-            import tkinter.messagebox as messagebox
-
             # Import the enhanced session manager with absolute import
             from src.enhanced_session_manager import EnhancedSessionManager
 
@@ -556,7 +578,11 @@ class OGhidraUI:
             main_frame.pack(fill="both", expand=True)
 
             # Title
-            ttk.Label(main_frame, text="📂 Load Analysis Session", font=("TkDefaultFont", 14, "bold")).pack(pady=(0, 15))
+            ttk.Label(
+                main_frame,
+                text="📂 Load Analysis Session",
+                font=("TkDefaultFont", 14, "bold"),
+            ).pack(pady=(0, 15))
 
             # Sessions list
             list_frame = ttk.LabelFrame(main_frame, text="Available Sessions", padding=10)
@@ -593,7 +619,14 @@ class OGhidraUI:
                     functions_count = session.get("analyzed_functions_count", 0)
 
                     item_id = session_tree.insert(
-                        "", "end", values=(session["name"], functions_count, created_str, modified_str)
+                        "",
+                        "end",
+                        values=(
+                            session["name"],
+                            functions_count,
+                            created_str,
+                            modified_str,
+                        ),
                     )
                     session_items[item_id] = session
                 except Exception as e:
@@ -670,7 +703,10 @@ class OGhidraUI:
                                 addr = func_data.get("address")
                                 if not addr or not self.renamed_functions_panel._looks_like_address(addr):
                                     # Address sometimes stored in name fields – pick whichever looks like an address
-                                    for cand in (func_data.get("old_name"), func_data.get("new_name")):
+                                    for cand in (
+                                        func_data.get("old_name"),
+                                        func_data.get("new_name"),
+                                    ):
                                         if cand and self.renamed_functions_panel._looks_like_address(cand):
                                             addr = cand
                                             break
@@ -695,9 +731,15 @@ class OGhidraUI:
                                 else:
                                     existing = unique_funcs[addr]
                                     # Merge names preferring non-Unknown values
-                                    if existing.get("old_name") in [None, "Unknown"] and func_data.get("old_name"):
+                                    if existing.get("old_name") in [
+                                        None,
+                                        "Unknown",
+                                    ] and func_data.get("old_name"):
                                         existing["old_name"] = func_data["old_name"]
-                                    if existing.get("new_name") in [None, "Unknown"] and func_data.get("new_name"):
+                                    if existing.get("new_name") in [
+                                        None,
+                                        "Unknown",
+                                    ] and func_data.get("new_name"):
                                         existing["new_name"] = func_data["new_name"]
                                     # Merge summary if existing entry lacks one
                                     if not existing.get("behavior_summary"):
@@ -775,9 +817,6 @@ class OGhidraUI:
     def _load_session_streaming(self, session_data: Dict[str, Any], session_info: Dict[str, Any]):
         """Load a large session using streaming to prevent UI freezing."""
         try:
-            import threading
-            from tkinter import messagebox, Toplevel, Label, Button, ttk
-
             # Create progress dialog - larger size to accommodate all elements
             progress_dialog = Toplevel(self.root)
             progress_dialog.title("Loading Large Session")
@@ -801,7 +840,11 @@ class OGhidraUI:
             title_label.pack(pady=(0, 10))
 
             # Session name
-            session_label = Label(content_frame, text=f"Session: {session_info['name']}", font=("Arial", 11))
+            session_label = Label(
+                content_frame,
+                text=f"Session: {session_info['name']}",
+                font=("Arial", 11),
+            )
             session_label.pack(pady=2)
 
             # File size
@@ -881,7 +924,10 @@ class OGhidraUI:
                                         address=address,
                                         old_name=func_data.get("old_name", "Unknown"),
                                         new_name=func_data.get("new_name", "Unknown"),
-                                        summary=func_data.get("behavior_summary", func_data.get("summary", "")),
+                                        summary=func_data.get(
+                                            "behavior_summary",
+                                            func_data.get("summary", ""),
+                                        ),
                                         update_state=False,
                                     )
                                     functions_loaded += 1
@@ -943,35 +989,31 @@ class OGhidraUI:
 
     def _health_check(self):
         """Perform a health check."""
+        results = []
 
-        def check():
-            results = []
+        # Check Ollama
+        try:
+            ollama_health = self.bridge.ollama.check_health()
+            results.append(f"Ollama API: {'OK ✅' if ollama_health else 'NOT OK ❌'}")
+        except Exception as e:
+            results.append(f"Ollama API: ERROR - {e}")
 
-            # Check Ollama
-            try:
-                ollama_health = self.bridge.ollama.check_health()
-                results.append(f"Ollama API: {'OK ✅' if ollama_health else 'NOT OK ❌'}")
-            except Exception as e:
-                results.append(f"Ollama API: ERROR - {e}")
+        # Check Ghidra
+        try:
+            ghidra_health = self.bridge.ghidra.check_health()
+            results.append(f"GhidraMCP API: {'OK ✅' if ghidra_health else 'NOT OK ❌'}")
+        except Exception as e:
+            results.append(f"GhidraMCP API: ERROR - {e}")
 
-            # Check Ghidra
-            try:
-                ghidra_health = self.bridge.ghidra.check_health()
-                results.append(f"GhidraMCP API: {'OK ✅' if ghidra_health else 'NOT OK ❌'}")
-            except Exception as e:
-                results.append(f"GhidraMCP API: ERROR - {e}")
+        # Check CAG
+        try:
+            cag_enabled = getattr(self.bridge, "enable_cag", False)
+            results.append(f"CAG System: {'Enabled ✅' if cag_enabled else 'Disabled ❌'}")
+        except Exception as e:
+            results.append(f"CAG System: ERROR - {e}")
 
-            # Check CAG
-            try:
-                cag_enabled = getattr(self.bridge, "enable_cag", False)
-                results.append(f"CAG System: {'Enabled ✅' if cag_enabled else 'Disabled ❌'}")
-            except Exception as e:
-                results.append(f"CAG System: ERROR - {e}")
-
-            # Show results
-            messagebox.showinfo("Health Check", "\n".join(results))
-
-        threading.Thread(target=check, daemon=True).start()
+        # Show results
+        messagebox.showinfo("Health Check", "\n".join(results))
 
     def _show_system_info(self):
         """Show system information dialog with CAG/RAG controls and memory stats."""
@@ -996,7 +1038,9 @@ class OGhidraUI:
 
         cag_enabled = getattr(self.bridge, "enable_cag", False)
         cag_status = ttk.Label(
-            cag_frame, text=f"Status: {'Enabled' if cag_enabled else 'Disabled'}", foreground="green" if cag_enabled else "gray"
+            cag_frame,
+            text=f"Status: {'Enabled' if cag_enabled else 'Disabled'}",
+            foreground="green" if cag_enabled else "gray",
         )
         cag_status.pack(anchor="w")
 
@@ -1004,8 +1048,12 @@ class OGhidraUI:
 
         def toggle_cag():
             self.bridge.enable_cag = cag_var.get()
-            cag_status.config(
-                text=f"Status: {'Enabled' if cag_var.get() else 'Disabled'}", foreground="green" if cag_var.get() else "gray"
+            cag_status.after(
+                0,
+                lambda: cag_status.config(
+                    text=f"Status: {'Enabled' if cag_var.get() else 'Disabled'}",
+                    foreground="green" if cag_var.get() else "gray",
+                ),
             )
 
         cag_check = ttk.Checkbutton(cag_frame, text="Enable CAG", variable=cag_var, command=toggle_cag)
@@ -1047,9 +1095,12 @@ class OGhidraUI:
                 self.bridge.cag_manager.use_vector_store_for_prompts = rag_var.get()
             # Refresh vector count when toggling
             current_count = get_vector_count()
-            rag_status.config(
-                text=f"Status: {'Enabled' if rag_var.get() else 'Disabled'} ({current_count} vectors)",
-                foreground="green" if rag_var.get() else "gray",
+            rag_status.after(
+                0,
+                lambda: rag_status.config(
+                    text=f"Status: {'Enabled' if rag_var.get() else 'Disabled'} ({current_count} vectors)",
+                    foreground="green" if rag_var.get() else "gray",
+                ),
             )
 
         rag_check = ttk.Checkbutton(rag_frame, text="Enable RAG", variable=rag_var, command=toggle_rag)
@@ -1059,9 +1110,12 @@ class OGhidraUI:
         def refresh_rag_status():
             current_count = get_vector_count()
             is_enabled = rag_var.get()
-            rag_status.config(
-                text=f"Status: {'Enabled' if is_enabled else 'Disabled'} ({current_count} vectors)",
-                foreground="green" if is_enabled else "gray",
+            rag_status.after(
+                0,
+                lambda: rag_status.config(
+                    text=f"Status: {'Enabled' if is_enabled else 'Disabled'} ({current_count} vectors)",
+                    foreground="green" if is_enabled else "gray",
+                ),
             )
 
         ttk.Button(rag_frame, text="Refresh Count", command=refresh_rag_status).pack(anchor="w", pady=(5, 0))
@@ -1132,7 +1186,7 @@ class OGhidraUI:
                 # Configuration was saved successfully
 
                 # Dynamically reload the LLM client to reflect changes (e.g. switching providers)
-                if hasattr(self.bridge, "reload_llm_client"):
+                if hasattr(self.bridge, "reload_ollama"):
                     self.bridge.reload_llm_client()
                 else:
                     # Fallback for manual updates if method missing
@@ -1140,8 +1194,8 @@ class OGhidraUI:
                     self.bridge.ollama.default_model = self.config.ollama.model
 
                 # Update Ghidra client configuration (always manual update as it's less complex)
-                if hasattr(self.bridge, "ghidra_client") and self.bridge.ghidra_client:
-                    self.bridge.ghidra_client.config.base_url = str(self.config.ghidra.base_url).rstrip("/")
+                if hasattr(self.bridge, "ghidra") and self.bridge.ghidra:
+                    self.bridge.ghidra.config.base_url = str(self.config.ghidra.base_url).rstrip("/")
 
                 messagebox.showinfo(
                     "Configuration Updated",
@@ -1153,7 +1207,10 @@ class OGhidraUI:
 
     def _clear_all_data(self):
         """Clear all data."""
-        if messagebox.askyesno("Confirm", "Are you sure you want to clear all data? This action cannot be undone."):
+        if messagebox.askyesno(
+            "Confirm",
+            "Are you sure you want to clear all data? This action cannot be undone.",
+        ):
             try:
                 # Clear response panel
                 self.response_panel._clear_responses()

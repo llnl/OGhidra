@@ -65,8 +65,8 @@ class SessionLoadDialog:
             borderwidth=1,
             highlightthickness=0,
         )
-        self.session_listbox.pack(side="left", fill="both", expand=True)
-        scrollbar.config(command=self.session_listbox.yview)
+        self.session_listbox.after(0, lambda: self.session_listbox.pack(side="left", fill="both", expand=True))
+        scrollbar.after(0, lambda: scrollbar.config(command=self.session_listbox.yview))
 
         # Populate sessions
         for session in self.sessions:

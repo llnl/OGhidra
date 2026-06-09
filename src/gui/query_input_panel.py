@@ -1,11 +1,13 @@
-import tkinter as tk
-from tkinter import ttk, messagebox
+import logging
 import threading
 import time
+import tkinter as tk
+from queue import Queue
+from tkinter import messagebox, ttk
+
 from ..bridge import Bridge
 from .ai_response_panel import AIResponsePanel
 from .workflow_diagram import WorkflowDiagram
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -13,14 +15,28 @@ logger = logging.getLogger(__name__)
 class QueryInputPanel:
     """Panel for AI agent query input."""
 
-    def __init__(self, parent, bridge: Bridge, response_panel: AIResponsePanel, workflow_diagram: WorkflowDiagram):
+    def __init__(
+        self,
+        parent,
+        bridge: Bridge,
+        response_panel: AIResponsePanel,
+        workflow_diagram: WorkflowDiagram,
+    ):
         self.frame = ttk.LabelFrame(parent, text="AI Query", padding=10)
         self.bridge = bridge
         self.response_panel = response_panel
         self.workflow_diagram = workflow_diagram
         self.query_running = False
         self.should_stop = False  # Flag to control stopping
+
+        # Queues for the asynchronous workers to post results
+        self.workflow_stage_queue: Queue[str] = Queue()
+
+        # Setup the GUI
         self._setup_widgets()
+
+        # Start UI callback loops for displaying the results from asynchronous workers.
+        self._check_workflow_stage_queue()
 
     def _setup_widgets(self):
         """Setup the query input widgets."""
@@ -105,7 +121,10 @@ class QueryInputPanel:
             pass
 
         self.grep_check = ttk.Checkbutton(
-            grep_frame, text="Enable Hybrid Search", variable=self.grep_enabled_var, command=self._on_grep_layer_change
+            grep_frame,
+            text="Enable Hybrid Search",
+            variable=self.grep_enabled_var,
+            command=self._on_grep_layer_change,
         )
         self.grep_check.grid(row=0, column=0, sticky="w")
 
@@ -146,7 +165,7 @@ class QueryInputPanel:
         self.rename_button.pack(side="left")
 
         # Status and progress
-        self.status_label = ttk.Label(self.frame, text="Ready", foreground="green")
+        self.status_label = ttk.Label(self.frame, text="Ready", foreground="#2BC72B")
         self.status_label.grid(row=5, column=0, columnspan=2, pady=(10, 0))
 
         # Progress bar and stop button frame
@@ -157,7 +176,13 @@ class QueryInputPanel:
         self.progress = ttk.Progressbar(progress_frame, mode="indeterminate")
         self.progress.grid(row=0, column=0, sticky="ew", padx=(0, 5))
 
-        self.stop_button = ttk.Button(progress_frame, text="Stop", command=self._stop_query, state="disabled", width=8)
+        self.stop_button = ttk.Button(
+            progress_frame,
+            text="Stop",
+            command=self._stop_query,
+            state="disabled",
+            width=8,
+        )
         self.stop_button.grid(row=0, column=1)
 
         # Configure grid weights
@@ -186,7 +211,6 @@ class QueryInputPanel:
                 # Start monitoring workflow in a separate thread
                 monitor_thread = threading.Thread(target=self._monitor_workflow_stage, daemon=True)
                 monitor_thread.start()
-
                 # Process query with full AI agent workflow
                 # Apply task mode (if enabled) to bridge before processing
                 try:
@@ -196,7 +220,6 @@ class QueryInputPanel:
                         self.bridge.set_task_mode(enabled=enabled, mode=mode)
                 except Exception:
                     pass
-
                 result = self.bridge.process_query(query)
 
                 # Add result to response panel
@@ -253,14 +276,35 @@ class QueryInputPanel:
         # Update status label
         if enabled:
             if has_summaries:
-                self.grep_status.config(text=f"On - {summary_count} function(s) indexed", foreground="green")
+                self.grep_status.after(
+                    0,
+                    lambda: self.grep_status.config(
+                        text=f"On - {summary_count} function(s) indexed",
+                        foreground="#2BC72B",
+                    ),
+                )
             else:
-                self.grep_status.config(text="On - Waiting for summaries", foreground="orange")
+                self.grep_status.after(
+                    0,
+                    lambda: self.grep_status.config(
+                        text="On - Waiting for summaries",
+                        foreground="#FFA500",  # Using hex color instead of named color for better compatibility
+                    ),
+                )
         else:
             if has_summaries:
-                self.grep_status.config(text=f"Off - {summary_count} function(s) available", foreground="gray")
+                self.grep_status.after(
+                    0,
+                    lambda: self.grep_status.config(
+                        text=f"Off - {summary_count} function(s) available",
+                        foreground="gray",
+                    ),
+                )
             else:
-                self.grep_status.config(text="Off - No summaries loaded", foreground="gray")
+                self.grep_status.after(
+                    0,
+                    lambda: self.grep_status.config(text="Off - No summaries loaded", foreground="gray"),
+                )
 
         # Update bridge
         try:
@@ -305,28 +349,35 @@ class QueryInputPanel:
 
         # Update button states
         state = "disabled" if running else "normal"
-        self.send_button.config(state=state)
-        self.analyze_button.config(state=state)
-        self.rename_button.config(state=state)
-        self.stop_button.config(state="normal" if running else "disabled")
+        self.send_button.after(0, lambda: self.send_button.config(state=state))
+        self.analyze_button.after(0, lambda: self.analyze_button.config(state=state))
+        self.rename_button.after(0, lambda: self.rename_button.config(state=state))
+        self.stop_button.after(
+            0,
+            lambda: self.stop_button.config(state="normal" if running else "disabled"),
+        )
 
         # Update status and progress
         if running:
             self.should_stop = False  # Reset stop flag for new query
-            self.status_label.config(text="Processing query...", foreground="orange")
-            self.progress.start()
+            self.status_label.after(
+                0,
+                self.status_label.config(text="Processing query...", foreground="#FFA500"),
+            )
+            self.progress.after(0, self.progress.start)
         else:
-            self.status_label.config(text="Ready", foreground="green")
-            self.progress.stop()
+            self.status_label.after(0, lambda: self.status_label.config(text="Ready", foreground="#2BC72B"))
+            self.progress.after(0, self.progress.stop)
 
     def _monitor_workflow_stage(self):
-        """Monitor the bridge's workflow stage and update the diagram."""
+        """Monitor the bridge's workflow stage and add updates to the queue."""
         previous_stage = None
         while self.query_running:
             try:
                 current_stage = getattr(self.bridge, "current_workflow_stage", None)
                 if current_stage != previous_stage:
-                    self.workflow_diagram.set_current_stage(current_stage)
+                    # Add the stage change to the queue instead of updating UI directly
+                    self.workflow_stage_queue.put(current_stage)
                     previous_stage = current_stage
 
                 # Break if workflow is complete
@@ -337,6 +388,26 @@ class QueryInputPanel:
             except Exception as e:
                 logger.error(f"Error monitoring workflow stage: {e}")
                 break
+
+    def _check_workflow_stage_queue(self):
+        """Process items from the workflow stage queue on the main thread."""
+        try:
+            # Process all current items in the queue
+            while not self.workflow_stage_queue.empty():
+                # Get the current stage from the queue
+                current_stage = self.workflow_stage_queue.get_nowait()
+
+                # Update the workflow diagram on the main thread
+                self.workflow_diagram.set_current_stage(current_stage)
+
+                # Mark as done
+                self.workflow_stage_queue.task_done()
+
+        except Exception as e:
+            logger.error(f"Error processing workflow stage queue: {e}")
+
+        finally:
+            self.frame.after(100, self._check_workflow_stage_queue)
 
     def get_widget(self):
         """Return the frame widget."""

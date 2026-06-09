@@ -1,8 +1,8 @@
-import tkinter as tk
-from tkinter import ttk, scrolledtext, messagebox
-from ..bridge import Bridge
-
 import logging
+import tkinter as tk
+from tkinter import messagebox, scrolledtext, ttk
+
+from ..bridge import Bridge
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +30,12 @@ class MemoryInfoPanel:
         self.cag_status.pack(side="left", padx=(10, 15))
 
         self.cag_var = tk.BooleanVar()
-        self.cag_checkbox = ttk.Checkbutton(cag_frame, text="Enable CAG", variable=self.cag_var, command=self._toggle_cag)
+        self.cag_checkbox = ttk.Checkbutton(
+            cag_frame,
+            text="Enable CAG",
+            variable=self.cag_var,
+            command=self._toggle_cag,
+        )
         self.cag_checkbox.pack(side="left")
 
         # RAG/Vector Store Controls
@@ -42,7 +47,12 @@ class MemoryInfoPanel:
         self.vector_status.pack(side="left", padx=(10, 15))
 
         self.rag_var = tk.BooleanVar()
-        self.rag_checkbox = ttk.Checkbutton(rag_frame, text="Enable RAG", variable=self.rag_var, command=self._toggle_rag)
+        self.rag_checkbox = ttk.Checkbutton(
+            rag_frame,
+            text="Enable RAG",
+            variable=self.rag_var,
+            command=self._toggle_rag,
+        )
         self.rag_checkbox.pack(side="left")
 
         # Memory Stats
@@ -78,12 +88,18 @@ class MemoryInfoPanel:
             # Skip expensive operations during session loading
             if getattr(self, "_session_loading", False):
                 self.memory_text.delete(1.0, tk.END)
-                self.memory_text.insert(1.0, "Session loading... Memory info will update after loading completes.")
+                self.memory_text.insert(
+                    1.0,
+                    "Session loading... Memory info will update after loading completes.",
+                )
                 return
 
             # CAG Status
             cag_enabled = getattr(self.bridge, "enable_cag", False)
-            self.cag_status.config(text="Enabled ✅" if cag_enabled else "Disabled ❌")
+            self.cag_status.after(
+                0,
+                lambda: self.cag_status.config(text="Enabled ✅" if cag_enabled else "Disabled ❌"),
+            )
             self.cag_var.set(cag_enabled)
 
             # RAG/Vector Store Status
@@ -130,18 +146,25 @@ class MemoryInfoPanel:
                         cag_vector_count = len(vector_store.documents)
                         vector_count = max(vector_count, cag_vector_count)
 
-            self.vector_status.config(text=f"{'Enabled' if rag_enabled else 'Disabled'} ({vector_count} vectors)")
+            self.vector_status.after(
+                0,
+                lambda: self.vector_status.config(text=f"{'Enabled' if rag_enabled else 'Disabled'} ({vector_count} vectors)"),
+            )
             self.rag_var.set(rag_enabled)
 
             # Memory Stats
             stats_text = self._get_memory_stats()
-            self.memory_text.delete(1.0, tk.END)
-            self.memory_text.insert(1.0, stats_text)
+            self.memory_text.after(0, lambda: self.memory_text.delete(1.0, tk.END))
+            self.memory_text.after(0, lambda: self.memory_text.insert(1.0, stats_text))
 
         except Exception as e:
-            logger.error(f"Error updating memory info: {e}")
-            self.memory_text.delete(1.0, tk.END)
-            self.memory_text.insert(1.0, f"Error updating memory info: {e}")
+            error_msg = f"Error updating memory info: {e}"
+            logger.error(error_msg)
+            self.memory_text.after(0, lambda: self.memory_text.delete(1.0, tk.END))
+            self.memory_text.after(
+                0,
+                lambda: self.memory_text.insert(1.0, error_msg),
+            )
 
     def _toggle_cag(self):
         """Toggle CAG system on/off."""
@@ -179,7 +202,7 @@ class MemoryInfoPanel:
                     try:
                         self.bridge.cag_manager.save_session()
                     except Exception as e:
-                        logger.warning(f"Failed to save session for the CAG manager: {e}")
+                        logger.warning(f"The CAG manager failed to save the CAG session: {e}")
                         pass
                     self.bridge.cag_manager = None
                     self.bridge.memory_manager = None
@@ -220,7 +243,8 @@ class MemoryInfoPanel:
                         self._toggle_cag()
                     elif response is False:  # No - RAG only
                         messagebox.showwarning(
-                            "Limited RAG", "RAG enabled without CAG. Functionality will be limited to basic vector embeddings."
+                            "Limited RAG",
+                            "RAG enabled without CAG. Functionality will be limited to basic vector embeddings.",
                         )
                     else:  # Cancel
                         self.rag_var.set(False)
@@ -255,7 +279,8 @@ class MemoryInfoPanel:
             status = "enabled" if new_state else "disabled"
             if new_state and not getattr(self.bridge, "enable_cag", False):
                 messagebox.showinfo(
-                    "RAG System", f"RAG system {status} (basic mode - consider enabling CAG for full functionality)."
+                    "RAG System",
+                    f"RAG system {status} (basic mode - consider enabling CAG for full functionality).",
                 )
             else:
                 messagebox.showinfo("RAG System", f"RAG system {status}.")
@@ -380,7 +405,10 @@ class MemoryInfoPanel:
         if loading:
             # Show loading message immediately
             self.memory_text.delete(1.0, tk.END)
-            self.memory_text.insert(1.0, "Session loading... Memory info will update after loading completes.")
+            self.memory_text.insert(
+                1.0,
+                "Session loading... Memory info will update after loading completes.",
+            )
         else:
             # Refresh memory info when loading is complete
             self._update_memory_info()

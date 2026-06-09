@@ -1,10 +1,12 @@
-import tkinter as tk
-from tkinter import ttk, messagebox
-import os
-from ..config import BridgeConfig
-import threading
-
 import logging
+import threading
+import tkinter as tk
+from pathlib import Path
+from queue import Queue
+from tkinter import messagebox, ttk
+from typing import Any, Literal, Tuple
+
+from ..bridge import BridgeConfig
 
 logger = logging.getLogger(__name__)
 
@@ -15,6 +17,9 @@ class ServerConfigDialog:
     def __init__(self, parent, config: BridgeConfig):
         self.config = config
         self.result = None
+
+        # Queue for thread-safe UI updates
+        self.ui_update_queue: Queue[Tuple[Literal["messagebox"], Any]] = Queue()
 
         # Create the dialog window
         self.dialog = tk.Toplevel(parent)
@@ -39,6 +44,9 @@ class ServerConfigDialog:
         self.dialog.geometry(f"{dialog_width}x{dialog_height}+{x}+{y}")
 
         self._setup_widgets()
+
+        # Start processing the UI update queue
+        self._check_ui_update_queue()
 
         # Wait for dialog to close
         self.dialog.wait_window()
@@ -79,7 +87,11 @@ class ServerConfigDialog:
         ttk.Label(self.external_frame, text="Provider Type:").grid(row=0, column=0, sticky="w", pady=5)
         self.ext_provider_var = tk.StringVar(value=getattr(self.config.external, "provider", "google"))
         self.ext_provider_combo = ttk.Combobox(
-            self.external_frame, textvariable=self.ext_provider_var, values=["google"], state="readonly", width=47
+            self.external_frame,
+            textvariable=self.ext_provider_var,
+            values=["google"],
+            state="readonly",
+            width=47,
         )
         self.ext_provider_combo.grid(row=0, column=1, sticky="ew", padx=(10, 0), pady=5)
 
@@ -105,14 +117,25 @@ class ServerConfigDialog:
 
         ttk.Label(self.custom_api_frame, text="API URL:").grid(row=0, column=0, sticky="w", pady=5)
         self.custom_api_url_var = tk.StringVar(
-            value=str(getattr(self.config.custom_api, "api_url", "https://api.example.com/v1/chat/completions"))
+            value=str(
+                getattr(
+                    self.config.custom_api,
+                    "api_url",
+                    "https://api.example.com/v1/chat/completions",
+                )
+            )
         )
         custom_url_entry = ttk.Entry(self.custom_api_frame, textvariable=self.custom_api_url_var, width=50)
         custom_url_entry.grid(row=0, column=1, sticky="ew", padx=(10, 0), pady=5)
 
         ttk.Label(self.custom_api_frame, text="API Key:").grid(row=1, column=0, sticky="w", pady=5)
         self.custom_api_key_var = tk.StringVar(value=getattr(self.config.custom_api, "api_key", ""))
-        custom_key_entry = ttk.Entry(self.custom_api_frame, textvariable=self.custom_api_key_var, width=50, show="*")
+        custom_key_entry = ttk.Entry(
+            self.custom_api_frame,
+            textvariable=self.custom_api_key_var,
+            width=50,
+            show="*",
+        )
         custom_key_entry.grid(row=1, column=1, sticky="ew", padx=(10, 0), pady=5)
 
         ttk.Label(self.custom_api_frame, text="Model:").grid(row=2, column=0, sticky="w", pady=5)
@@ -214,13 +237,25 @@ class ServerConfigDialog:
         # Show the selected provider frame
         if provider == "external":
             # External API selected
-            self.external_frame.pack(fill="x", pady=(0, 10), after=self.dialog.winfo_children()[0].winfo_children()[1])
+            self.external_frame.pack(
+                fill="x",
+                pady=(0, 10),
+                after=self.dialog.winfo_children()[0].winfo_children()[1],
+            )
         elif provider == "custom_api":
             # Custom API selected
-            self.custom_api_frame.pack(fill="x", pady=(0, 10), after=self.dialog.winfo_children()[0].winfo_children()[1])
+            self.custom_api_frame.pack(
+                fill="x",
+                pady=(0, 10),
+                after=self.dialog.winfo_children()[0].winfo_children()[1],
+            )
         else:
             # Ollama selected
-            self.ollama_frame.pack(fill="x", pady=(0, 10), after=self.dialog.winfo_children()[0].winfo_children()[1])
+            self.ollama_frame.pack(
+                fill="x",
+                pady=(0, 10),
+                after=self.dialog.winfo_children()[0].winfo_children()[1],
+            )
 
     def _test_connections(self):
         """Test the connections to the configured servers."""
@@ -270,14 +305,23 @@ class ServerConfigDialog:
                         results.append("Custom API: ❌ API URL is missing")
                     else:
                         # Test with a minimal request
-                        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+                        headers = {
+                            "Authorization": f"Bearer {api_key}",
+                            "Content-Type": "application/json",
+                        }
                         test_payload = {
                             "model": self.custom_api_model_var.get(),
                             "messages": [{"role": "user", "content": "test"}],
                             "max_tokens": 1,
                         }
 
-                        response = requests.post(api_url, headers=headers, json=test_payload, timeout=10, verify=False)
+                        response = requests.post(
+                            api_url,
+                            headers=headers,
+                            json=test_payload,
+                            timeout=10,
+                            verify=False,
+                        )
                         if response.status_code == 200:
                             results.append("Custom API: ✅ Connected")
                             results.append(f"Model ({self.custom_api_model_var.get()}): ✅ Available")
@@ -287,7 +331,7 @@ class ServerConfigDialog:
                                 error_detail = response.json()
                                 results.append(f"Error: {error_detail}")
                             except Exception as e:
-                                logger.warning(f"Failed to extract the error response body: {e}")
+                                logger.warning(f"Failed to read the error details from the server response: {e}")
                                 pass
                 except Exception as e:
                     results.append(f"Custom API: ❌ {str(e)}")
@@ -322,7 +366,10 @@ class ServerConfigDialog:
                                 try:
                                     embed_response = requests.post(
                                         f"{self.ollama_url_var.get()}/api/embeddings",
-                                        json={"model": embedding_model, "prompt": "test"},
+                                        json={
+                                            "model": embedding_model,
+                                            "prompt": "test",
+                                        },
                                         timeout=10,
                                     )
                                     if embed_response.status_code == 200:
@@ -342,7 +389,11 @@ class ServerConfigDialog:
             try:
                 import requests
 
-                response = requests.get(f"{self.ghidra_url_var.get()}/methods", params={"offset": 0, "limit": 1}, timeout=5)
+                response = requests.get(
+                    f"{self.ghidra_url_var.get()}/methods",
+                    params={"offset": 0, "limit": 1},
+                    timeout=5,
+                )
                 if response.status_code == 200:
                     results.append("GhidraMCP: ✅ Connected")
                 else:
@@ -350,8 +401,8 @@ class ServerConfigDialog:
             except Exception as e:
                 results.append(f"GhidraMCP: ❌ {str(e)}")
 
-            # Show results
-            messagebox.showinfo("Connection Test", "\n".join(results))
+            # Add results to queue for thread-safe UI update
+            self.ui_update_queue.put(("messagebox", ("Connection Test", "\n".join(results))))
 
         threading.Thread(target=test, daemon=True).start()
 
@@ -434,9 +485,10 @@ class ServerConfigDialog:
 
     def _update_env_file(self, updates: dict):
         """Update or insert keys in the .env file."""
-        env_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")
+        env_path = Path.cwd() / ".env"
         try:
-            if not os.path.exists(env_path):
+            if not env_path.exists():
+                logger.info(f"The .env file was not found at {env_path} and it will now be created...")
                 # If .env does not exist, create it with the updates
                 with open(env_path, "w", encoding="utf-8") as f:
                     for k, v in updates.items():
@@ -465,6 +517,28 @@ class ServerConfigDialog:
                 f.writelines(new_lines)
         except Exception as e:
             logger.error(f"Failed to update .env file: {e}")
+
+    def _check_ui_update_queue(self):
+        """Process items from the UI update queue on the main thread."""
+        try:
+            # Process all current items in the queue
+            while not self.ui_update_queue.empty():
+                update_type, params = self.ui_update_queue.get_nowait()
+
+                if update_type == "messagebox":
+                    title, message = params
+                    messagebox.showinfo(title, message)
+
+                # Mark as done
+                self.ui_update_queue.task_done()
+
+        except Exception as e:
+            logger.error(f"Error processing UI update queue: {e}")
+
+        finally:
+            # Schedule next check after 100ms
+            if hasattr(self, "dialog") and self.dialog.winfo_exists():
+                self.dialog.after(100, self._check_ui_update_queue)
 
     def _cancel(self):
         """Cancel the dialog."""

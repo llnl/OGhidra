@@ -1,9 +1,15 @@
-from ..bridge import Bridge
-import tkinter as tk
-from tkinter import ttk, messagebox, scrolledtext, filedialog
-from datetime import datetime
 import json
 import logging
+import threading
+import tkinter as tk
+from datetime import datetime
+from queue import Queue
+from tkinter import filedialog, messagebox, scrolledtext, ttk
+from typing import Any, Literal, Tuple
+
+from src.cag.vector_store import SimpleVectorStore
+
+from ..bridge import Bridge
 
 logger = logging.getLogger(__name__)
 
@@ -12,16 +18,26 @@ class RenamedFunctionsPanel:
     """Panel displaying renamed functions with their addresses and behavior summaries."""
 
     def __init__(self, parent, bridge: Bridge):
-        import threading
-
         self.frame = ttk.LabelFrame(parent, text="Analyzed Functions", padding=10)
         self.bridge = bridge
-        self.function_summaries = {}  # Store behavior summaries for functions
+        self.function_summaries: dict[str, str] = {}  # Store behavior summaries for functions
         self._streaming_load_active = False  # Flag to prevent updates during streaming
         self.batch_operation_in_progress = False  # Flag to prevent auto-refresh during batch operations
         self.dict_lock = threading.RLock()  # Thread-safe lock for dictionary access
+
+        # Queue for thread-safe UI updates
+        self.ui_update_queue: Queue[
+            Tuple[Literal["button", "label", "progress", "dialog", "add_button", "memory_update", "tree_operation"], Any]
+        ] = Queue()
+
+        # Queue for returning data from the main thread to worker threads
+        self.data_result_queue: Queue[Any] = Queue()
+
         self._setup_widgets()
         self._update_function_list()
+
+        # Start processing the UI update queue
+        self._check_ui_update_queue()
 
     def _setup_widgets(self):
         """Setup the renamed functions widgets."""
@@ -34,7 +50,11 @@ class RenamedFunctionsPanel:
         ttk.Button(control_frame, text="Clear All", command=self._clear_all_functions).pack(side="left", padx=(0, 5))
 
         # Add Load Vectors button
-        self.load_vectors_button = ttk.Button(control_frame, text="Load Vectors", command=self._load_vectors_from_functions)
+        self.load_vectors_button = ttk.Button(
+            control_frame,
+            text="Load Vectors",
+            command=self._load_vectors_from_functions,
+        )
         self.load_vectors_button.pack(side="left", padx=(0, 5))
 
         # Function count label
@@ -94,9 +114,6 @@ class RenamedFunctionsPanel:
 
     def _load_vectors_from_functions(self):
         """Load all analyzed functions into the vector store for RAG enhancement."""
-        import tkinter.messagebox as messagebox
-        import threading
-
         # Check if CAG/RAG is available
         if not (
             hasattr(self.bridge, "enable_cag")
@@ -119,7 +136,7 @@ class RenamedFunctionsPanel:
                 function_address_mapping = getattr(self.bridge, "function_address_mapping", {})
                 function_count = len(set(list(renamed_functions.keys()) + list(function_address_mapping.keys())))
         except Exception as e:
-            logger.warning(f"Failed to get the function_count: {e}")
+            logger.warning(f"Failed to calculate the function count: {e}")
             function_count = 0
 
         if function_count == 0:
@@ -154,7 +171,11 @@ class RenamedFunctionsPanel:
         progress_frame = ttk.Frame(progress_dialog, padding=20)
         progress_frame.pack(fill="both", expand=True)
 
-        progress_label = ttk.Label(progress_frame, text="Loading functions into vector store...", font=("Arial", 11, "bold"))
+        progress_label = ttk.Label(
+            progress_frame,
+            text="Loading functions into vector store...",
+            font=("Arial", 11, "bold"),
+        )
         progress_label.pack(pady=(0, 10))
 
         progress_status = ttk.Label(progress_frame, text="Initializing...", foreground="blue")
@@ -171,37 +192,45 @@ class RenamedFunctionsPanel:
         results_label.pack(pady=(10, 0))
 
         def load_vectors_worker():
-            """Background worker to load vectors."""
+            """Background worker to load vectors.
+            TRICKY: There should NEVER be any UI updates called from this worker.
+            Any updates should be done on the main thread otherwise the app crashes on Linux.
+            """
             vectors_loaded = 0
             vectors_failed = 0
 
             try:
-                # Disable the button during loading
-                self.load_vectors_button.config(state="disabled", text="Loading...")
+                # Disable the button during loading - add to queue
+                self.ui_update_queue.put(("button", (self.load_vectors_button, "disabled", "Loading...")))
 
-                # Get all function data
-                progress_status.config(text="Collecting function data...")
-                progress_dialog.update()
+                # Get all function data - add to queue
+                self.ui_update_queue.put(("label", (progress_status, "Collecting function data...", "blue")))
 
                 functions_to_process = []
 
-                # PRIMARY SOURCE: Collect from the tree widget (has ALL functions with summaries)
-                for item in self.tree.get_children():
-                    try:
-                        values = self.tree.item(item, "values")
-                        if len(values) >= 4:
-                            address = values[0]
-                            old_name = values[1]
-                            new_name = values[2]
-                            summary = values[3]
+                # Request tree data from main thread via queue
+                self.ui_update_queue.put(("tree_operation", "get_tree_data"))
 
-                            if summary and summary.strip():  # Only process functions with summaries
-                                functions_to_process.append(
-                                    {"address": address, "old_name": old_name, "new_name": new_name, "summary": summary}
-                                )
-                    except Exception as e:
-                        logger.warning(f"Error reading tree item: {e}")
-                        continue
+                # Wait for the main thread to process the request and provide data
+                tree_data = self.data_result_queue.get()
+                self.data_result_queue.task_done()
+
+                # Process the data we got from the main thread
+                for item_data in tree_data:
+                    address = item_data["address"]
+                    old_name = item_data["old_name"]
+                    new_name = item_data["new_name"]
+                    summary = item_data["summary"]
+
+                    if summary and summary.strip():  # Only process functions with summaries
+                        functions_to_process.append(
+                            {
+                                "address": address,
+                                "old_name": old_name,
+                                "new_name": new_name,
+                                "summary": summary,
+                            }
+                        )
 
                 # FALLBACK: If tree is empty, try bridge.function_address_mapping
                 if not functions_to_process and hasattr(self.bridge, "function_address_mapping"):
@@ -221,7 +250,12 @@ class RenamedFunctionsPanel:
 
                         if summary:  # Only process functions with summaries
                             functions_to_process.append(
-                                {"address": address, "old_name": old_name, "new_name": new_name, "summary": summary}
+                                {
+                                    "address": address,
+                                    "old_name": old_name,
+                                    "new_name": new_name,
+                                    "summary": summary,
+                                }
                             )
 
                 # SECONDARY FALLBACK: Try analysis_state
@@ -234,41 +268,39 @@ class RenamedFunctionsPanel:
                         if summary:
                             functions_to_process.append(
                                 {
-                                    "address": identifier if self._looks_like_address(identifier) else "Unknown",
-                                    "old_name": identifier if not self._looks_like_address(identifier) else "Unknown",
+                                    "address": (identifier if self._looks_like_address(identifier) else "Unknown"),
+                                    "old_name": (identifier if not self._looks_like_address(identifier) else "Unknown"),
                                     "new_name": new_name,
                                     "summary": summary,
                                 }
                             )
 
                 total_functions = len(functions_to_process)
-                progress_bar.config(maximum=total_functions)
+                self.ui_update_queue.put(("progress", (progress_bar, total_functions, True)))
 
-                progress_status.config(text=f"Loading {total_functions} functions into vectors...")
-                progress_dialog.update()
+                self.ui_update_queue.put(
+                    ("label", (progress_status, f"Loading {total_functions} functions into vectors...", "blue"))
+                )
 
                 # **OPTIMIZED: Batch processing approach with embeddings**
-                progress_status.config(text="Initializing embedding service...")
-                progress_dialog.update()
+                self.ui_update_queue.put(("label", (progress_status, "Initializing embedding service...", "blue")))
 
-                # ✅ FIXED: Use generic embeddings from Bridge
+                # Use generic embeddings from Bridge
                 try:
-                    from src.bridge import Bridge
-
                     # Test embeddings availability
                     test_embeddings = Bridge.get_embeddings(["test"])
                     if not test_embeddings:
                         # Get the configured embedding model name
-                        client_config = getattr(Bridge._ollama_client, "config", None)
+                        client_config = getattr(Bridge._llm_embedding_client, "config", None)
                         emb_model = getattr(client_config, "embedding_model", "nomic-embed-text")
-                        provider = getattr(Bridge._ollama_client, "provider", "LLM")
+                        provider = getattr(Bridge._llm_embedding_client, "provider", "LLM")
                         raise Exception(
                             f"{provider} embedding model ({emb_model}) not available.\n\nPlease ensure your configuration is correct."
                         )
 
-                    client_config = getattr(Bridge._ollama_client, "config", None)
+                    client_config = getattr(Bridge._llm_embedding_client, "config", None)
                     emb_model = getattr(client_config, "embedding_model", "nomic-embed-text")
-                    provider = getattr(Bridge._ollama_client, "provider", "Ollama")
+                    provider = getattr(Bridge._llm_embedding_client, "provider", "Ollama")
                     logger.info(f"✅ Using {provider} embeddings ({emb_model}) for vector creation")
                 except Exception as e:
                     raise Exception(f"Embedding service not available: {e}")
@@ -282,8 +314,9 @@ class RenamedFunctionsPanel:
                     batch_end = min(batch_start + BATCH_SIZE, total_functions)
                     batch = functions_to_process[batch_start:batch_end]
 
-                    progress_status.config(text=f"Processing batch {batch_num + 1} of {num_batches}")
-                    progress_dialog.update()
+                    self.ui_update_queue.put(
+                        ("label", (progress_status, f"Processing batch {batch_num + 1} of {num_batches}", "blue"))
+                    )
 
                     # ✅ FIXED: Use generic batch embeddings
                     # Filter out empty summaries which cause 400 errors
@@ -323,12 +356,10 @@ class RenamedFunctionsPanel:
 
                             # Update progress
                             overall_progress = batch_start + i + 1
-                            progress_bar.config(value=overall_progress)
-                            progress_detail.config(text=f"Added: {func_data['new_name']}")
-
+                            self.ui_update_queue.put(("progress", (progress_bar, overall_progress, False)))
+                            self.ui_update_queue.put(("label", (progress_detail, f"Added: {func_data['new_name']}", "gray")))
                             if overall_progress % 10 == 0:
                                 progress_dialog.update()
-
                         except Exception as e:
                             logger.warning(f"Failed to add {func_data['new_name']}: {e}")
                             vectors_failed += 1
@@ -339,16 +370,17 @@ class RenamedFunctionsPanel:
                     time.sleep(0.1)
 
                 # Update results
-                progress_status.config(text="Vector loading completed!")
+                self.ui_update_queue.put(("label", (progress_status, "Vector loading completed!", "blue")))
+
                 results_text = f"✅ Successfully loaded: {vectors_loaded} vectors\n"
                 if vectors_failed > 0:
                     results_text += f"❌ Failed to load: {vectors_failed} vectors\n"
                 results_text += f"📊 Total processed: {total_functions} functions"
 
-                results_label.config(text=results_text, foreground="green")
+                self.ui_update_queue.put(("label", (results_label, results_text, "#2BC72B")))
 
                 # Update vector status label
-                self.vector_status_label.config(text=f"Vectors: {vectors_loaded} loaded", foreground="green")
+                self.ui_update_queue.put(("label", (self.vector_status_label, f"Vectors: {vectors_loaded} loaded", "#2BC72B")))
 
                 # Update memory panel if available
                 if hasattr(self.bridge, "cag_manager") and self.bridge.cag_manager:
@@ -359,42 +391,38 @@ class RenamedFunctionsPanel:
                             f"Vector store after loading: {len(vector_store.embeddings) if vector_store.embeddings else 0} vectors"
                         )
 
-                    # Trigger memory panel update by finding it in the UI hierarchy
-                    root = self.frame.winfo_toplevel()
-                    # Look for memory panel in the UI - it's typically in the left panel
-                    for widget in root.winfo_children():
-                        if hasattr(widget, "winfo_children"):
-                            for child in widget.winfo_children():
-                                if hasattr(child, "_update_memory_info"):
-                                    child._update_memory_info()
-                                    break
+                    # Trigger memory panel update via queue
+                    self.ui_update_queue.put(("memory_update", None))
 
-                # Add close button
+                # Add close button - via queue for thread safety
                 def close_dialog():
-                    progress_dialog.destroy()
-                    self.load_vectors_button.config(state="normal", text="Load Vectors")
+                    # Use queue to destroy dialog and update button
+                    self.ui_update_queue.put(("dialog", ("destroy", progress_dialog)))
+                    self.ui_update_queue.put(("button", (self.load_vectors_button, "normal", "Load Vectors")))
 
-                close_button = ttk.Button(progress_frame, text="Close", command=close_dialog)
-                close_button.pack(pady=(10, 0))
+                # Create close button via queue
+                self.ui_update_queue.put(("add_button", (progress_frame, "Close", close_dialog, (10, 0))))
 
-                # Auto-close after 3 seconds if successful
+                # Auto-close after 3 seconds if successful - via queue
                 if vectors_failed == 0:
-                    progress_dialog.after(3000, close_dialog)
+                    self.ui_update_queue.put(("dialog", ("auto_close", (3000, close_dialog))))
 
             except Exception as e:
-                progress_status.config(text="Error occurred during vector loading!")
-                results_label.config(text=f"❌ Error: {str(e)}", foreground="red")
+                self.ui_update_queue.put(("label", (progress_status, "Error occurred during vector loading!", "blue")))
+                self.ui_update_queue.put(("label", (results_label, f"❌ Error: {str(e)}", "#FF0000")))
                 logger.error(f"Vector loading error: {e}")
 
-                # Add close button
+                # Add close button - via queue for thread safety
                 def close_dialog():
-                    progress_dialog.destroy()
-                    self.load_vectors_button.config(state="normal", text="Load Vectors")
+                    # Use queue to destroy dialog and update button
+                    self.ui_update_queue.put(("dialog", ("destroy", progress_dialog)))
+                    self.ui_update_queue.put(("button", (self.load_vectors_button, "normal", "Load Vectors")))
 
-                close_button = ttk.Button(progress_frame, text="Close", command=close_dialog)
-                close_button.pack(pady=(10, 0))
+                # Create close button via queue
+                self.ui_update_queue.put(("add_button", (progress_frame, "Close", close_dialog, (10, 0))))
 
         # Start loading in background thread
+        # TRICKY: Never invoke tkinter UI elements directly from worker threads otherwise it crashes on Linux.
         threading.Thread(target=load_vectors_worker, daemon=True).start()
 
     def _add_function_to_vector_store_direct(self, func_data, embedding):
@@ -406,7 +434,11 @@ class RenamedFunctionsPanel:
             "text": f"Function: {func_data['new_name']}\nOriginal: {func_data['old_name']}\nAddress: {func_data['address']}\nBehavior: {func_data['summary']}",
             "type": "function_analysis",
             "name": func_data["new_name"],
-            "metadata": {"address": func_data["address"], "old_name": func_data["old_name"], "new_name": func_data["new_name"]},
+            "metadata": {
+                "address": func_data["address"],
+                "old_name": func_data["old_name"],
+                "new_name": func_data["new_name"],
+            },
         }
 
         # Add to vector store
@@ -417,8 +449,6 @@ class RenamedFunctionsPanel:
             # Create a new vector store if one doesn't exist
             if vector_store is None:
                 try:
-                    from src.cag.vector_store import SimpleVectorStore
-
                     # Create empty vector store
                     vector_store = SimpleVectorStore(documents=[], embeddings=[])
                     # Set it directly on the cag_manager
@@ -453,7 +483,7 @@ class RenamedFunctionsPanel:
                     self.tree.delete(item)
 
                 if not hasattr(self.bridge, "analysis_state"):
-                    self.count_label.config(text="Functions: 0")
+                    self.count_label.after(0, lambda: self.count_label.config(text="Functions: 0"))
                     return
 
                 renamed_functions = self.bridge.analysis_state.get("functions_renamed", {})
@@ -462,30 +492,29 @@ class RenamedFunctionsPanel:
                 function_address_mapping = getattr(self.bridge, "function_address_mapping", {})
                 bridge_summaries = getattr(self.bridge, "function_summaries", {})
 
-                # Debug logging
-                logger.info(
-                    f"DEBUG: Updating function list - renamed_functions: {len(renamed_functions)}, address_mapping: {len(function_address_mapping)}"
+                logger.debug(
+                    f"Updating function list - renamed_functions: {len(renamed_functions)}, address_mapping: {len(function_address_mapping)}"
                 )
                 if renamed_functions:
-                    logger.info(f"DEBUG: Renamed functions keys: {list(renamed_functions.keys())}")
-                    logger.info(f"DEBUG: Renamed functions values: {list(renamed_functions.values())}")
+                    logger.debug(f"Renamed functions keys: {list(renamed_functions.keys())}")
+                    logger.debug(f"Renamed functions values: {list(renamed_functions.values())}")
                 if function_address_mapping:
-                    logger.info(f"DEBUG: Address mappings keys: {list(function_address_mapping.keys())}")
+                    logger.debug(f"Address mappings keys: {list(function_address_mapping.keys())}")
                     for addr, info in function_address_mapping.items():
-                        logger.info(f"DEBUG: Address {addr} -> {info}")
+                        logger.debug(f"Address {addr} -> {info}")
 
                 # Also check if bridge has the expected attributes
                 if hasattr(self.bridge, "analysis_state"):
-                    logger.info(f"DEBUG: Bridge analysis_state exists with keys: {list(self.bridge.analysis_state.keys())}")
+                    logger.debug(f"Bridge analysis_state exists with keys: {list(self.bridge.analysis_state.keys())}")
                 else:
-                    logger.warning("DEBUG: Bridge has no analysis_state attribute!")
+                    logger.warning("Bridge has no analysis_state attribute!")
 
                 if hasattr(self.bridge, "function_address_mapping"):
-                    logger.info(
-                        f"DEBUG: Bridge function_address_mapping exists with {len(self.bridge.function_address_mapping)} entries"
+                    logger.debug(
+                        f"Bridge function_address_mapping exists with {len(self.bridge.function_address_mapping)} entries"
                     )
                 else:
-                    logger.warning("DEBUG: Bridge has no function_address_mapping attribute!")
+                    logger.warning("Bridge has no function_address_mapping attribute!")
 
                 # Update count with total unique functions - use address mapping as primary source
                 # to avoid duplicates between renamed_functions and function_address_mapping
@@ -508,7 +537,10 @@ class RenamedFunctionsPanel:
                         unique_functions.add(identifier)
 
                 total_functions = len(unique_functions)
-                self.count_label.config(text=f"Functions: {total_functions}")
+                self.count_label.after(
+                    0,
+                    lambda: self.count_label.config(text=f"Functions: {total_functions}"),
+                )
 
                 # Use the function address mapping as the primary source to avoid duplicates
                 processed_functions = set()
@@ -537,7 +569,17 @@ class RenamedFunctionsPanel:
                     )
 
                     # Insert into tree with summary_key as a hidden column
-                    self.tree.insert("", "end", values=(display_address, old_name, new_name, summary, summary_key))
+                    self.tree.insert(
+                        "",
+                        "end",
+                        values=(
+                            display_address,
+                            old_name,
+                            new_name,
+                            summary,
+                            summary_key,
+                        ),
+                    )
 
                 # Process any remaining functions from renamed_functions that weren't in address mapping
                 for identifier, new_name in renamed_functions.items():
@@ -567,7 +609,11 @@ class RenamedFunctionsPanel:
                     )
 
                     # Insert into tree
-                    self.tree.insert("", "end", values=(address, old_name, new_name, summary, summary_key))
+                    self.tree.insert(
+                        "",
+                        "end",
+                        values=(address, old_name, new_name, summary, summary_key),
+                    )
 
             except Exception as e:
                 # During streaming loads, tree updates can fail due to rapid changes
@@ -606,7 +652,10 @@ class RenamedFunctionsPanel:
             self._edit_summary_by_function_data(address, old_name, new_name)
         except tk.TclError:
             # Item was deleted, ignore
-            messagebox.showwarning("Warning", "The selected function is no longer available. The list may have been refreshed.")
+            messagebox.showwarning(
+                "Warning",
+                "The selected function is no longer available. The list may have been refreshed.",
+            )
             return
 
     def _on_right_click(self, event):
@@ -628,14 +677,16 @@ class RenamedFunctionsPanel:
         # Create context menu with safer callbacks
         context_menu = tk.Menu(self.tree, tearoff=0)
         context_menu.add_command(
-            label="Edit Summary", command=lambda: self._edit_summary_by_function_data(address, old_name, new_name)
+            label="Edit Summary",
+            command=lambda: self._edit_summary_by_function_data(address, old_name, new_name),
         )
         context_menu.add_separator()
         context_menu.add_command(label="Copy Address", command=lambda: self._copy_to_clipboard(address))
         context_menu.add_command(label="Copy Name", command=lambda: self._copy_to_clipboard(new_name))
         context_menu.add_separator()
         context_menu.add_command(
-            label="Remove Function", command=lambda: self._remove_function_by_data(address, old_name, new_name)
+            label="Remove Function",
+            command=lambda: self._remove_function_by_data(address, old_name, new_name),
         )
 
         try:
@@ -649,7 +700,10 @@ class RenamedFunctionsPanel:
             values = self.tree.item(item, "values")
         except tk.TclError:
             # Item was deleted, ignore
-            messagebox.showwarning("Warning", "The selected function is no longer available. The list may have been refreshed.")
+            messagebox.showwarning(
+                "Warning",
+                "The selected function is no longer available. The list may have been refreshed.",
+            )
             return
 
         # Get the summary key from the hidden column
@@ -787,7 +841,16 @@ class RenamedFunctionsPanel:
                 if target_tree_item:
                     try:
                         values = self.tree.item(target_tree_item, "values")
-                        self.tree.item(target_tree_item, values=(values[0], values[1], values[2], new_summary, summary_key))
+                        self.tree.item(
+                            target_tree_item,
+                            values=(
+                                values[0],
+                                values[1],
+                                values[2],
+                                new_summary,
+                                summary_key,
+                            ),
+                        )
                     except tk.TclError:
                         # Tree item was deleted during update, that's okay - we'll update storage anyway
                         logger.debug(
@@ -832,7 +895,10 @@ class RenamedFunctionsPanel:
                             self.bridge.function_summaries[new_name] = new_summary
 
                     editor_window.destroy()
-                    messagebox.showinfo("Success", "Behavior summary saved to storage (UI will update on next refresh)")
+                    messagebox.showinfo(
+                        "Success",
+                        "Behavior summary saved to storage (UI will update on next refresh)",
+                    )
                 except Exception as inner_e:
                     logger.error(f"Failed to save to storage as well: {inner_e}")
                     messagebox.showerror("Error", f"Failed to save summary: {e}")
@@ -858,7 +924,10 @@ class RenamedFunctionsPanel:
             values = self.tree.item(item, "values")
         except tk.TclError:
             # Item was deleted, ignore
-            messagebox.showwarning("Warning", "The selected function is no longer available. The list may have been refreshed.")
+            messagebox.showwarning(
+                "Warning",
+                "The selected function is no longer available. The list may have been refreshed.",
+            )
             return
 
         if messagebox.askyesno("Confirm", "Remove this function from the renamed list?"):
@@ -896,7 +965,11 @@ class RenamedFunctionsPanel:
             filename = filedialog.asksaveasfilename(
                 title="Export Renamed Functions",
                 defaultextension=".json",
-                filetypes=[("JSON files", "*.json"), ("Text files", "*.txt"), ("All files", "*.*")],
+                filetypes=[
+                    ("JSON files", "*.json"),
+                    ("Text files", "*.txt"),
+                    ("All files", "*.*"),
+                ],
             )
 
             if not filename:
@@ -938,7 +1011,8 @@ class RenamedFunctionsPanel:
     def _clear_all_functions(self):
         """Clear all renamed functions."""
         if messagebox.askyesno(
-            "Confirm", "Are you sure you want to clear all renamed functions? This action cannot be undone."
+            "Confirm",
+            "Are you sure you want to clear all renamed functions? This action cannot be undone.",
         ):
             try:
                 # Clear from bridge analysis state
@@ -946,7 +1020,7 @@ class RenamedFunctionsPanel:
                     self.bridge.analysis_state["functions_renamed"] = {}
 
                 # Clear our summaries
-                self.function_summaries = {}
+                self.function_summaries: dict[str, str] = {}
 
                 # Update the display
                 self._update_function_list()
@@ -975,7 +1049,13 @@ class RenamedFunctionsPanel:
         self.frame.after(5000, refresh)
 
     def add_function_with_summary(
-        self, address: str, old_name: str, new_name: str, summary: str = "", *, update_state: bool = True
+        self,
+        address: str,
+        old_name: str,
+        new_name: str,
+        summary: str = "",
+        *,
+        update_state: bool = True,
     ):
         """Add a function with a summary programmatically."""
         summary_key = f"{address}_{new_name}" if address != "Unknown" else f"{old_name}_{new_name}"
@@ -992,7 +1072,10 @@ class RenamedFunctionsPanel:
                 if not hasattr(self.bridge, "function_address_mapping"):
                     self.bridge.function_address_mapping = {}
 
-                self.bridge.function_address_mapping[address] = {"old_name": old_name, "new_name": new_name}
+                self.bridge.function_address_mapping[address] = {
+                    "old_name": old_name,
+                    "new_name": new_name,
+                }
 
                 # Update bridge's function summaries
                 if not hasattr(self.bridge, "function_summaries"):
@@ -1016,10 +1099,6 @@ class RenamedFunctionsPanel:
                 # Store in analysis_state using only address as key to avoid duplicate name entries
                 self.bridge.analysis_state["functions_renamed"][address] = new_name
 
-                # Debug logging to verify data storage
-                import logging
-
-                logger = logging.getLogger("ollama-ghidra-bridge.ui")
                 logger.info(f"Added function to session: {address} | {old_name} -> {new_name}")
                 logger.info(f"Bridge function_address_mapping now has {len(self.bridge.function_address_mapping)} entries")
                 logger.info(
@@ -1037,6 +1116,96 @@ class RenamedFunctionsPanel:
         if not active:
             # When streaming ends, do a final update
             self._update_function_list()
+
+    def _check_ui_update_queue(self):
+        """Process items from the UI update queue on the main thread."""
+        try:
+            # Process all current items in the queue
+            while not self.ui_update_queue.empty():
+                update_type, params = self.ui_update_queue.get_nowait()
+
+                if update_type == "button":
+                    button, state, text = params
+                    button.config(state=state, text=text)
+
+                elif update_type == "label":
+                    label, text, foreground = params
+                    label.config(text=text, foreground=foreground)
+
+                elif update_type == "progress":
+                    progress_bar, value_or_max, is_max = params
+                    if is_max:
+                        progress_bar.config(maximum=value_or_max)
+                    else:
+                        progress_bar.config(value=value_or_max)
+
+                elif update_type == "dialog":
+                    operation, dialog = params
+                    if operation == "destroy":
+                        dialog.destroy()
+                    elif operation == "auto_close":
+                        delay, close_func = dialog
+                        self.frame.after(delay, close_func)
+
+                elif update_type == "add_button":
+                    parent_frame, button_text, command, padding = params
+                    button = ttk.Button(parent_frame, text=button_text, command=command)
+                    button.pack(pady=padding)
+
+                elif update_type == "memory_update":
+                    # Find and update memory panel from main thread
+                    root = self.frame.winfo_toplevel()
+                    for widget in root.winfo_children():
+                        if hasattr(widget, "winfo_children"):
+                            for child in widget.winfo_children():
+                                if hasattr(child, "_update_memory_info"):
+                                    child._update_memory_info()
+                                    break
+
+                elif update_type == "refresh_functions":
+                    # Refresh function list on the main thread
+                    try:
+                        self._update_function_list()
+                    except Exception as e:
+                        logger.error(f"Error refreshing function list from queue: {e}")
+
+                elif update_type == "tree_operation":
+                    operation = params
+                    if operation == "get_tree_data":
+                        # Collect data from tree on main thread
+                        tree_data = []
+                        try:
+                            for item in self.tree.get_children():
+                                try:
+                                    values = self.tree.item(item, "values")
+                                    if len(values) >= 4:
+                                        tree_data.append(
+                                            {
+                                                "address": values[0],
+                                                "old_name": values[1],
+                                                "new_name": values[2],
+                                                "summary": values[3],
+                                            }
+                                        )
+                                except Exception as e:
+                                    logger.warning(f"Error reading tree item in main thread: {e}")
+
+                            # Put result in the result queue
+                            self.data_result_queue.put(tree_data)
+                        except Exception as e:
+                            logger.error(f"Error getting tree data: {e}")
+                            # Put an empty result in case of error
+                            self.data_result_queue.put([])
+
+                # Mark as done
+                self.ui_update_queue.task_done()
+
+        except Exception as e:
+            logger.error(f"Error processing UI update queue: {e}")
+
+        finally:
+            # Schedule next check after 100ms
+            self.frame.after(100, self._check_ui_update_queue)
 
     def get_widget(self):
         """Return the main frame widget."""

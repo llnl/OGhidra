@@ -1,16 +1,16 @@
+import re
+import json
+import logging
+import threading
+import time
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
+from queue import Queue
+from tkinter import filedialog, messagebox, ttk
+from typing import Any, Dict, Literal, Optional, Tuple
+
 from ..bridge import Bridge
 from .ai_response_panel import AIResponsePanel
 from .workflow_diagram import WorkflowDiagram
-import threading
-import time
-import json
-import re
-from typing import Dict, Any
-
-
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +34,11 @@ class ToolButtonsPanel:
         self.tool_running = False
         self.should_stop = False  # Flag to control stopping
 
+        # Queue for thread-safe UI updates
+        self.workflow_stage_queue: Queue[Optional[str]] = Queue()
+        # Queue for agent query thread UI updates
+        self.agent_ui_queue: Queue[Tuple[Literal["tool_running", "response", "workflow_stage"], Any]] = Queue()
+
         # DECOMPILATION CACHE: LRU cache for frequently accessed functions
         self._decompilation_cache = {}  # address -> decompiled_code
         self._cache_max_size = 1000  # Cache up to 1000 functions
@@ -42,30 +47,113 @@ class ToolButtonsPanel:
 
         self._setup_widgets()
 
+        # Start processing the workflow stage queue
+        self._check_workflow_stage_queue()
+        # Start processing the agent UI queue
+        self._check_agent_ui_queue()
+
     def _setup_widgets(self):
         """Setup the tool button widgets."""
         # Smart tool buttons (use AI agent workflow)
-        smart_tools = [
-            ("analyze-current", "Analyze Current Function", self._analyze_current_function),
-            ("rename-current", "Rename Current Function", self._rename_current_function),
-            ("rename-all", "Rename All Functions", self._rename_all_functions),
-            ("generate-report", "Generate Software Report", self._generate_software_report),
-            ("analyze-imports", "Analyze Imports", self._analyze_imports),
-            ("analyze-strings", "Analyze Strings", self._analyze_strings),
-            ("analyze-exports", "Analyze Exports", self._analyze_exports),
-            ("search-strings", "Search Strings", self._search_strings),
-            ("scan-tables", "Scan Function Tables", self._scan_function_tables),
-        ]
+        # Store all tool buttons in a list for easy management
+        self.tool_buttons = []
 
-        for i, (tool_id, label, command) in enumerate(smart_tools):
-            btn = ttk.Button(self.frame, text=label, command=command, width=25, state="normal")
-            btn.grid(row=i // 2, column=i % 2, padx=5, pady=5, sticky="ew")
+        # Create individual buttons as class attributes
+        self.analyze_current_btn = ttk.Button(
+            self.frame,
+            text="Analyze Current Function",
+            command=self._analyze_current_function,
+            width=25,
+            state="normal",
+        )
+        self.analyze_current_btn.grid(row=0, column=0, padx=5, pady=5, sticky="ew")
+        self.tool_buttons.append(self.analyze_current_btn)
 
-        # Calculate the next row after buttons (buttons use rows 0 to (len-1)//2)
-        next_row = (len(smart_tools) + 1) // 2
+        self.rename_current_btn = ttk.Button(
+            self.frame,
+            text="Rename Current Function",
+            command=self._rename_current_function,
+            width=25,
+            state="normal",
+        )
+        self.rename_current_btn.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
+        self.tool_buttons.append(self.rename_current_btn)
+
+        self.rename_all_btn = ttk.Button(
+            self.frame,
+            text="Rename All Functions",
+            command=self._rename_all_functions,
+            width=25,
+            state="normal",
+        )
+        self.rename_all_btn.grid(row=1, column=0, padx=5, pady=5, sticky="ew")
+        self.tool_buttons.append(self.rename_all_btn)
+
+        self.generate_report_btn = ttk.Button(
+            self.frame,
+            text="Generate Software Report",
+            command=self._generate_software_report,
+            width=25,
+            state="normal",
+        )
+        self.generate_report_btn.grid(row=1, column=1, padx=5, pady=5, sticky="ew")
+        self.tool_buttons.append(self.generate_report_btn)
+
+        self.analyze_imports_btn = ttk.Button(
+            self.frame,
+            text="Analyze Imports",
+            command=self._analyze_imports,
+            width=25,
+            state="normal",
+        )
+        self.analyze_imports_btn.grid(row=2, column=0, padx=5, pady=5, sticky="ew")
+        self.tool_buttons.append(self.analyze_imports_btn)
+
+        self.analyze_strings_btn = ttk.Button(
+            self.frame,
+            text="Analyze Strings",
+            command=self._analyze_strings,
+            width=25,
+            state="normal",
+        )
+        self.analyze_strings_btn.grid(row=2, column=1, padx=5, pady=5, sticky="ew")
+        self.tool_buttons.append(self.analyze_strings_btn)
+
+        self.analyze_exports_btn = ttk.Button(
+            self.frame,
+            text="Analyze Exports",
+            command=self._analyze_exports,
+            width=25,
+            state="normal",
+        )
+        self.analyze_exports_btn.grid(row=3, column=0, padx=5, pady=5, sticky="ew")
+        self.tool_buttons.append(self.analyze_exports_btn)
+
+        self.search_strings_btn = ttk.Button(
+            self.frame,
+            text="Search Strings",
+            command=self._search_strings,
+            width=25,
+            state="normal",
+        )
+        self.search_strings_btn.grid(row=3, column=1, padx=5, pady=5, sticky="ew")
+        self.tool_buttons.append(self.search_strings_btn)
+
+        self.scan_tables_btn = ttk.Button(
+            self.frame,
+            text="Scan Function Tables",
+            command=self._scan_function_tables,
+            width=25,
+            state="normal",
+        )
+        self.scan_tables_btn.grid(row=4, column=0, padx=5, pady=5, sticky="ew")
+        self.tool_buttons.append(self.scan_tables_btn)
+
+        # Next row after the buttons
+        next_row = 5  # We manually positioned buttons in rows 0-4
 
         # Status indicator
-        self.status_label = ttk.Label(self.frame, text="Ready", foreground="green")
+        self.status_label = ttk.Label(self.frame, text="Ready", foreground="#2BC72B")
         self.status_label.grid(row=next_row, column=0, columnspan=2, pady=(10, 0))
 
         # Progress bar and stop button frame
@@ -76,7 +164,13 @@ class ToolButtonsPanel:
         self.progress = ttk.Progressbar(progress_frame, mode="indeterminate")
         self.progress.grid(row=0, column=0, sticky="ew", padx=(0, 5))
 
-        self.stop_button = ttk.Button(progress_frame, text="Stop", command=self._stop_tool, state="disabled", width=8)
+        self.stop_button = ttk.Button(
+            progress_frame,
+            text="Stop",
+            command=self._stop_tool,
+            state="disabled",
+            width=8,
+        )
         self.stop_button.grid(row=0, column=1)
 
         # Configure grid weights
@@ -112,8 +206,8 @@ class ToolButtonsPanel:
             try:
                 self._set_tool_running(True, tool_name)
 
-                # Add query to response panel
-                self.response_panel.add_response(f"Smart Tool: {tool_name}", f"Query: {query}")
+                # Add query to response panel via queue
+                self.agent_ui_queue.put(("response", (f"Smart Tool: {tool_name}", f"Query: {query}")))
 
                 # Start monitoring workflow in a separate thread
                 monitor_thread = threading.Thread(target=self._monitor_workflow_stage, daemon=True)
@@ -122,39 +216,47 @@ class ToolButtonsPanel:
                 # Process query with full AI agent workflow
                 result = self.bridge.process_query(query)
 
-                # Add result to response panel
-                self.response_panel.add_response("AI Agent Response", result)
+                # Add result to response panel via queue
+                self.agent_ui_queue.put(("response", ("AI Agent Response", result)))
 
-                # Final stage update
-                self.workflow_diagram.set_current_stage(None)
+                # Final stage update via queue
+                self.agent_ui_queue.put(("workflow_stage", None))
 
             except Exception as e:
-                error_msg = f"Error running worker for '_run_ai_agent_query()': {e}"
+                error_msg = f"Error running {tool_name}: {e}"
                 logger.error(error_msg)
-                self.response_panel.add_response("Error", error_msg)
-                self.workflow_diagram.set_current_stage(None)
+                # Add error message to queue
+                self.agent_ui_queue.put(("response", ("Error", error_msg)))
+                # Final stage update via queue
+                self.agent_ui_queue.put(("workflow_stage", None))
             finally:
                 # THREAD SAFETY: Clear batch operation flag to re-enable auto-refresh
                 if self.renamed_functions_panel:
-                    self.renamed_functions_panel.batch_operation_in_progress = False
-                    # Trigger a final refresh to show all completed functions
-                    try:
-                        self.renamed_functions_panel._update_function_list()
-                    except Exception as refresh_error:
-                        logger.warning(f"Error refreshing function list after batch operation: {refresh_error}")
+                    # Set flags via atomic operation
+                    with self.renamed_functions_panel.dict_lock:
+                        self.renamed_functions_panel.batch_operation_in_progress = False
+
+                    # Use a queue to update the function list from the main thread
+                    if hasattr(self.renamed_functions_panel, "ui_update_queue"):
+                        try:
+                            # Add a custom operation to the panel's queue to refresh function list
+                            self.renamed_functions_panel.ui_update_queue.put(("refresh_functions", None))
+                        except Exception as refresh_error:
+                            logger.warning(f"Error refreshing function list after batch operation: {refresh_error}")
 
                 self._set_tool_running(False)
 
         threading.Thread(target=worker, daemon=True).start()
 
     def _monitor_workflow_stage(self):
-        """Monitor the bridge's workflow stage and update the diagram."""
+        """Monitor the bridge's workflow stage and add updates to the queue."""
         previous_stage = None
         while self.tool_running:
             try:
                 current_stage = getattr(self.bridge, "current_workflow_stage", None)
                 if current_stage != previous_stage:
-                    self.workflow_diagram.set_current_stage(current_stage)
+                    # Add the stage change to the queue instead of updating UI directly
+                    self.workflow_stage_queue.put(current_stage)
                     previous_stage = current_stage
 
                 # Break if workflow is complete
@@ -172,11 +274,15 @@ class ToolButtonsPanel:
         def worker():
             try:
                 self._set_tool_running(True, display_name)
-                self.workflow_diagram.set_current_stage("execution")
+                # Update workflow stage via queue
+                self.agent_ui_queue.put(("workflow_stage", "execution"))
 
-                # Add initial message to response panel
-                self.response_panel.add_response(
-                    f"Smart Tool: {display_name}", f"Executing {tool_name}() and sending results to AI for analysis..."
+                # Add initial message to response panel via queue
+                self.agent_ui_queue.put(
+                    (
+                        "response",
+                        (f"Smart Tool: {display_name}", f"Executing {tool_name}() and sending results to AI for analysis..."),
+                    )
                 )
 
                 # Step 1: Call the specific Ghidra tool (with pagination for list tools)
@@ -194,8 +300,8 @@ class ToolButtonsPanel:
                         ]
 
                         if is_list_tool:
-                            self.response_panel.add_response(
-                                "Progress", f"Retrieving all {tool_name.split('_')[1]} (paginated)..."
+                            self.agent_ui_queue.put(
+                                ("response", ("Progress", f"Retrieving all {tool_name.split('_')[1]} (paginated)..."))
                             )
 
                             all_items = []
@@ -213,8 +319,8 @@ class ToolButtonsPanel:
 
                                 # Check for error
                                 if isinstance(batch_result, str) and batch_result.lower().startswith("error:"):
-                                    self.response_panel.add_response(
-                                        "Error", f"Failed to get batch at offset {offset}: {batch_result}"
+                                    self.agent_ui_queue.put(
+                                        ("response", ("Error", f"Failed to get batch at offset {offset}: {batch_result}"))
                                     )
                                     break
 
@@ -231,7 +337,9 @@ class ToolButtonsPanel:
                                     break
 
                                 offset += limit
-                                self.response_panel.add_response("Progress", f"Collected {len(all_items)} items so far...")
+                                self.agent_ui_queue.put(
+                                    ("response", ("Progress", f"Collected {len(all_items)} items so far..."))
+                                )
 
                             raw_tool_result = all_items
                         else:
@@ -239,7 +347,7 @@ class ToolButtonsPanel:
                             raw_tool_result = tool_method(**(params or {}))
 
                     except TypeError as te:
-                        self.response_panel.add_response("Error", f"Parameter mismatch: {te}")
+                        self.agent_ui_queue.put(("response", ("Error", f"Parameter mismatch: {te}")))
                         return
 
                     # Check if we got an error
@@ -255,16 +363,14 @@ class ToolButtonsPanel:
                         else:
                             formatted_tool_data = str(raw_tool_result)
 
-                        # Add raw output to response panel
-                        self.response_panel.add_response(f"Raw Output from {tool_name}", formatted_tool_data)
+                        # Add raw output to response panel via queue
+                        self.agent_ui_queue.put(("response", (f"Raw Output from {tool_name}", formatted_tool_data)))
 
                         # --------------------------------------------------
                         # EXTRA CONTEXT FOR STRING SEARCH
                         # --------------------------------------------------
                         extra_context = ""
                         if tool_name == "list_strings" and isinstance(raw_tool_result, list):
-                            import re
-
                             # Extract addresses from list_strings lines
                             addr_pattern = re.compile(r"^([0-9a-fA-F]{6,})[: ]")
                             addresses = []
@@ -315,38 +421,39 @@ class ToolButtonsPanel:
                                         code_snippet = f"Error decompiling {faddr}: {e}"
                                     extra_context += f"\n--- Decompiled caller {faddr} ---\n{code_snippet}\n"
 
-                        # Step 2: Send to AI for analysis
-                        self.workflow_diagram.set_current_stage("analysis")
+                        # Step 2: Send to AI for analysis - update stage via queue
+                        self.agent_ui_queue.put(("workflow_stage", "analysis"))
                         analysis_prompt = self._get_analysis_prompt(tool_name, formatted_tool_data + extra_context)
 
                         try:
                             ai_analysis = self.bridge.ollama.generate(prompt=analysis_prompt)
 
                             if ai_analysis and ai_analysis.strip():
-                                self.response_panel.add_response("AI Analysis", ai_analysis)
+                                self.agent_ui_queue.put(("response", ("AI Analysis", ai_analysis)))
                             else:
-                                self.response_panel.add_response("Warning", "AI analysis returned empty response.")
+                                self.agent_ui_queue.put(("response", ("Warning", "AI analysis returned empty response.")))
 
                         except Exception as e:
                             error_msg = f"Error during AI analysis: {e}"
                             logger.error(error_msg)
-                            self.response_panel.add_response("Error", error_msg)
+                            self.agent_ui_queue.put(("response", ("Error", error_msg)))
                     else:
-                        # Tool returned an error
-                        self.response_panel.add_response("Tool Error", raw_tool_result)
+                        # Tool returned an error - send via queue
+                        self.agent_ui_queue.put(("response", ("Tool Error", raw_tool_result)))
 
                 else:
                     error_msg = f"Tool {tool_name} not found in bridge.ghidra"
-                    self.response_panel.add_response("Error", error_msg)
+                    self.agent_ui_queue.put(("response", ("Error", error_msg)))
 
-                # Final stage update
-                self.workflow_diagram.set_current_stage(None)
+                # Final stage update via queue
+                self.agent_ui_queue.put(("workflow_stage", None))
 
             except Exception as e:
                 error_msg = f"Error running {display_name}: {e}"
                 logger.error(error_msg)
-                self.response_panel.add_response("Error", error_msg)
-                self.workflow_diagram.set_current_stage(None)
+                # Update response panel and workflow diagram via queue
+                self.agent_ui_queue.put(("response", ("Error", error_msg)))
+                self.agent_ui_queue.put(("workflow_stage", None))
             finally:
                 self._set_tool_running(False)
 
@@ -358,22 +465,39 @@ class ToolButtonsPanel:
         def worker():
             try:
                 self._set_tool_running(True, display_name)
-                self.workflow_diagram.set_current_stage("execution")
 
-                # Add initial message to response panel
-                self.response_panel.add_response(
-                    f"Smart Tool: {display_name}",
-                    "Starting 3-step rename workflow: get current function → AI analysis → rename",
+                # Update workflow stage via queue
+                self.workflow_stage_queue.put("execution")
+
+                # Add initial message to response panel via queue
+                self.agent_ui_queue.put(
+                    (
+                        "response",
+                        (
+                            f"Smart Tool: {display_name}",
+                            "Starting 3-step rename workflow: get current function → AI analysis → rename",
+                        ),
+                    )
                 )
 
                 # Step 1: Get current function
                 try:
                     current_function_result = self.bridge.ghidra.get_current_function()
                     if isinstance(current_function_result, str) and current_function_result.lower().startswith("error:"):
-                        self.response_panel.add_response("Error", f"Failed to get current function: {current_function_result}")
+                        # Send error to response panel via queue
+                        self.agent_ui_queue.put(
+                            (
+                                "response",
+                                (
+                                    "Error",
+                                    f"Failed to get current function: {current_function_result}",
+                                ),
+                            )
+                        )
                         return
 
-                    self.response_panel.add_response("Step 1: Current Function", str(current_function_result))
+                    # Send current function info to response panel via queue
+                    self.agent_ui_queue.put(("response", ("Step 1: Current Function", str(current_function_result))))
 
                     # Extract function name from the result
                     function_name = None
@@ -386,18 +510,27 @@ class ToolButtonsPanel:
                             function_name = match.group(1)
 
                     if not function_name:
-                        self.response_panel.add_response(
-                            "Error", "Could not extract function name from current function result"
+                        # Send error to response panel via queue
+                        self.agent_ui_queue.put(
+                            (
+                                "response",
+                                (
+                                    "Error",
+                                    "Could not extract function name from current function result",
+                                ),
+                            )
                         )
                         return
 
                 except Exception as e:
-                    self.response_panel.add_response("Error", f"Error getting current function: {e}")
+                    # Send error to response panel via queue
+                    self.agent_ui_queue.put(("response", ("Error", f"Error getting current function: {e}")))
                     return
 
                 # Step 2: Use AI agent to analyze the function and suggest a new name
                 try:
-                    self.workflow_diagram.set_current_stage("analysis")
+                    # Update workflow stage via queue
+                    self.workflow_stage_queue.put("analysis")
 
                     # Create a detailed query for the AI agent to analyze and suggest rename
                     analysis_query = f"""Analyze the function '{function_name}' and provide a highly descriptive rename suggestion.
@@ -438,12 +571,20 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                     ai_response = self.bridge.ollama.generate(prompt=analysis_query)
 
                     if ai_response and ai_response.strip():
-                        self.response_panel.add_response("Step 2: AI Analysis & Name Suggestion", ai_response)
+                        # Send AI analysis to response panel via queue
+                        self.agent_ui_queue.put(("response", ("Step 2: AI Analysis & Name Suggestion", ai_response)))
 
                         # USE THE ENTIRE AI RESPONSE as the behavior summary
                         function_summary = ai_response.strip()
-                        self.response_panel.add_response(
-                            "Debug", f"📝 Using full AI response as behavior summary (length: {len(function_summary)} chars)"
+                        # Send debug info to response panel via queue
+                        self.agent_ui_queue.put(
+                            (
+                                "response",
+                                (
+                                    "Debug",
+                                    f"📝 Using full AI response as behavior summary (length: {len(function_summary)} chars)",
+                                ),
+                            )
                         )
 
                         # Extract suggested name from AI response
@@ -463,7 +604,10 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                                 # Extract the actual function name (should be camelCase/snake_case)
                                 import re
 
-                                name_match = re.search(r"\b([a-z][a-zA-Z0-9_]*[a-zA-Z0-9]|[a-z][a-zA-Z0-9]*)\b", name_part)
+                                name_match = re.search(
+                                    r"\b([a-z][a-zA-Z0-9_]*[a-zA-Z0-9]|[a-z][a-zA-Z0-9]*)\b",
+                                    name_part,
+                                )
                                 if name_match:
                                     suggested_name = name_match.group(1)
                                     break
@@ -515,19 +659,30 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                                         and not match.startswith("FUN_")
                                         and not any(
                                             word in match.lower()
-                                            for word in ["function", "name", "example", "analysis", "response"]
+                                            for word in [
+                                                "function",
+                                                "name",
+                                                "example",
+                                                "analysis",
+                                                "response",
+                                            ]
                                         )
                                     ):
                                         suggested_name = match
                                         break
 
                         if suggested_name:
-                            self.response_panel.add_response("Step 3a: Extracted Suggested Name", suggested_name)
+                            # Send extracted name to response panel via queue
+                            self.agent_ui_queue.put(("response", ("Step 3a: Extracted Suggested Name", suggested_name)))
 
                             # Step 3: Perform the actual rename using bridge.execute_command to ensure state tracking
                             try:
                                 rename_result = self.bridge.execute_command(
-                                    "rename_function", {"old_name": function_name, "new_name": suggested_name}
+                                    "rename_function",
+                                    {
+                                        "old_name": function_name,
+                                        "new_name": suggested_name,
+                                    },
                                 )
                                 # rename_result is already the result string, not a dict
 
@@ -538,7 +693,10 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                                     if isinstance(current_function_result, str) and "at " in current_function_result:
                                         import re
 
-                                        match = re.search(r"at\s+([0-9a-fA-F]+)", current_function_result)
+                                        match = re.search(
+                                            r"at\s+([0-9a-fA-F]+)",
+                                            current_function_result,
+                                        )
                                         if match:
                                             address = match.group(1)
                                             self.bridge.function_summaries[address] = function_summary
@@ -548,61 +706,106 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                                             if (
                                                 hasattr(self.bridge, "cag_manager")
                                                 and self.bridge.cag_manager
-                                                and hasattr(self.bridge.cag_manager, "vector_store")
+                                                and hasattr(
+                                                    self.bridge.cag_manager,
+                                                    "vector_store",
+                                                )
                                                 and self.bridge.cag_manager.vector_store
                                             ):
                                                 old_vector_count = len(self.bridge.cag_manager.vector_store.documents)
 
-                                            # Show RAG vector creation status
-                                            self.workflow_diagram.set_rag_progress(0, 1, active=True)
-                                            self.response_panel.add_response(
-                                                "Step 3c: RAG Integration", "Adding function analysis to RAG vector space..."
+                                            # Send RAG progress to queue for thread-safe workflow_diagram update
+                                            self.workflow_stage_queue.put("rag_vectors")
+
+                                            # Send RAG integration message to response panel via queue
+                                            self.agent_ui_queue.put(
+                                                (
+                                                    "response",
+                                                    (
+                                                        "Step 3c: RAG Integration",
+                                                        "Adding function analysis to RAG vector space...",
+                                                    ),
+                                                )
                                             )
 
                                             # RAG integration removed - use "Load Vectors" button for vector operations
                                             # self.bridge._add_function_to_rag(address, function_summary)
 
-                                            # Update progress and complete
-                                            self.workflow_diagram.set_rag_progress(1, 1, active=True)
-                                            import time
-
                                             time.sleep(0.2)  # Brief pause to show completion
-                                            self.workflow_diagram.complete_rag_stage()
+
+                                            # Send workflow stage update for RAG completion via queue
+                                            self.workflow_stage_queue.put(None)
 
                                             new_vector_count = 0
                                             if (
                                                 hasattr(self.bridge, "cag_manager")
                                                 and self.bridge.cag_manager
-                                                and hasattr(self.bridge.cag_manager, "vector_store")
+                                                and hasattr(
+                                                    self.bridge.cag_manager,
+                                                    "vector_store",
+                                                )
                                                 and self.bridge.cag_manager.vector_store
                                             ):
                                                 new_vector_count = len(self.bridge.cag_manager.vector_store.documents)
 
-                                            self.response_panel.add_response(
-                                                "Step 3d: Summary & RAG Complete",
-                                                f"📝 Function summary captured and added to RAG\n"
-                                                f"📊 Vector count: {old_vector_count} -> {new_vector_count}\n"
-                                                f"📄 Summary length: {len(function_summary)} characters\n"
-                                                f"🔍 Preview: {function_summary[:150]}...",
+                                            # Send RAG completion info to response panel via queue
+                                            self.agent_ui_queue.put(
+                                                (
+                                                    "response",
+                                                    (
+                                                        "Step 3d: Summary & RAG Complete",
+                                                        f"📝 Function summary captured and added to RAG\n"
+                                                        f"📊 Vector count: {old_vector_count} -> {new_vector_count}\n"
+                                                        f"📄 Summary length: {len(function_summary)} characters\n"
+                                                        f"🔍 Preview: {function_summary[:150]}...",
+                                                    ),
+                                                )
                                             )
                                 else:
-                                    self.response_panel.add_response(
-                                        "Debug",
-                                        f"⚠️ No function summary extracted from AI response. Summary found: {function_summary is not None}",
+                                    # Send debug info to response panel via queue
+                                    self.agent_ui_queue.put(
+                                        (
+                                            "response",
+                                            (
+                                                "Debug",
+                                                f"⚠️ No function summary extracted from AI response. Summary found: {function_summary is not None}",
+                                            ),
+                                        )
                                     )
 
                             except Exception as e:
                                 rename_result = f"Error: {str(e)}"
 
                             if isinstance(rename_result, str) and rename_result.lower().startswith("error:"):
-                                self.response_panel.add_response("Error", f"Failed to rename function: {rename_result}")
-                            else:
-                                self.response_panel.add_response(
-                                    "Step 3b: Rename Result", f"Successfully renamed '{function_name}' to '{suggested_name}'"
+                                # Send error to response panel via queue
+                                self.agent_ui_queue.put(
+                                    (
+                                        "response",
+                                        (
+                                            "Error",
+                                            f"Failed to rename function: {rename_result}",
+                                        ),
+                                    )
                                 )
-                                self.response_panel.add_response(
-                                    "Success",
-                                    f"✅ Rename workflow completed! Function '{function_name}' is now '{suggested_name}'",
+                            else:
+                                # Send success messages to response panel via queue
+                                self.agent_ui_queue.put(
+                                    (
+                                        "response",
+                                        (
+                                            "Step 3b: Rename Result",
+                                            f"Successfully renamed '{function_name}' to '{suggested_name}'",
+                                        ),
+                                    )
+                                )
+                                self.agent_ui_queue.put(
+                                    (
+                                        "response",
+                                        (
+                                            "Success",
+                                            f"✅ Rename workflow completed! Function '{function_name}' is now '{suggested_name}'",
+                                        ),
+                                    )
                                 )
 
                                 # Add to UI renamed functions panel if available
@@ -614,7 +817,10 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                                         if isinstance(current_function_result, str) and "at " in current_function_result:
                                             import re
 
-                                            match = re.search(r"at\s+([0-9a-fA-F]+)", current_function_result)
+                                            match = re.search(
+                                                r"at\s+([0-9a-fA-F]+)",
+                                                current_function_result,
+                                            )
                                             if match:
                                                 address = match.group(1)
 
@@ -625,33 +831,55 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                                             summary=function_summary,
                                         )
                                     except Exception as e:
-                                        self.response_panel.add_response(
-                                            "UI Warning", f"Could not update renamed functions panel: {e}"
+                                        # Send warning to response panel via queue
+                                        self.agent_ui_queue.put(
+                                            (
+                                                "response",
+                                                (
+                                                    "UI Warning",
+                                                    f"Could not update renamed functions panel: {e}",
+                                                ),
+                                            )
                                         )
                         else:
-                            self.response_panel.add_response(
-                                "Debug",
-                                f"⚠️ Could not extract function name from AI response. Response contained: {ai_response[:200]}...",
+                            # Send debug info and error to response panel via queue
+                            self.agent_ui_queue.put(
+                                (
+                                    "response",
+                                    (
+                                        "Debug",
+                                        f"⚠️ Could not extract function name from AI response. Response contained: {ai_response[:200]}...",
+                                    ),
+                                )
                             )
-                            self.response_panel.add_response(
-                                "Error",
-                                "Could not extract a valid function name from AI response. Please try again or rename manually.",
+                            self.agent_ui_queue.put(
+                                (
+                                    "response",
+                                    (
+                                        "Error",
+                                        "Could not extract a valid function name from AI response. Please try again or rename manually.",
+                                    ),
+                                )
                             )
                     else:
-                        self.response_panel.add_response("Error", "AI agent returned empty response for analysis")
+                        # Send error to response panel via queue
+                        self.agent_ui_queue.put(("response", ("Error", "AI agent returned empty response for analysis")))
 
                 except Exception as e:
-                    self.response_panel.add_response("Error", f"Error during AI analysis step: {e}")
+                    # Send error to response panel via queue
+                    self.agent_ui_queue.put(("response", ("Error", f"Error during AI analysis step: {e}")))
                     return
 
-                # Final stage update
-                self.workflow_diagram.set_current_stage(None)
+                # Final stage update via queue
+                self.workflow_stage_queue.put(None)
 
             except Exception as e:
                 error_msg = f"Error running {display_name}: {e}"
                 logger.error(error_msg)
-                self.response_panel.add_response("Error", error_msg)
-                self.workflow_diagram.set_current_stage(None)
+                # Send error to response panel via queue
+                self.agent_ui_queue.put(("response", ("Error", error_msg)))
+                # Update workflow stage via queue
+                self.workflow_stage_queue.put(None)
             finally:
                 self._set_tool_running(False)
 
@@ -664,6 +892,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
         Returns:
             dict with keys: 'success', 'result_type', 'function_data', 'error_msg'
         """
+        import re
         import time
 
         result = {
@@ -780,7 +1009,15 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                     return result
 
                 # FILTER 4: Skip C runtime library and standard library functions
-                crt_patterns = ["_crt_", "__cxx_", "__std_", "__cxa_", "__gnu_", "__gxx_", "_runtim"]
+                crt_patterns = [
+                    "_crt_",
+                    "__cxx_",
+                    "__std_",
+                    "__cxa_",
+                    "__gnu_",
+                    "__gxx_",
+                    "_runtim",
+                ]
                 if any(pattern in function_lower for pattern in crt_patterns):
                     result["result_type"] = "skipped"
                     result["success"] = True
@@ -904,7 +1141,10 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                         if "Suggested Name:" in line:
                             name_part = line.split("Suggested Name:", 1)[1].strip()
                             name_part = name_part.replace("**", "").replace("*", "").strip()
-                            name_match = re.search(r"\b([a-z][a-zA-Z0-9_]*[a-zA-Z0-9]|[a-z][a-zA-Z0-9]*)\b", name_part)
+                            name_match = re.search(
+                                r"\b([a-z][a-zA-Z0-9_]*[a-zA-Z0-9]|[a-z][a-zA-Z0-9]*)\b",
+                                name_part,
+                            )
                             if name_match:
                                 suggested_name = name_match.group(1)
                                 break
@@ -949,7 +1189,13 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                                     and not match.startswith("FUN_")
                                     and not any(
                                         word in match.lower()
-                                        for word in ["function", "name", "example", "analysis", "response"]
+                                        for word in [
+                                            "function",
+                                            "name",
+                                            "example",
+                                            "analysis",
+                                            "response",
+                                        ]
                                     )
                                 ):
                                     suggested_name = match
@@ -967,7 +1213,11 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                             # Generic function with AI-suggested name - rename it
                             try:
                                 rename_result = self.bridge.execute_command(
-                                    "rename_function", {"old_name": function_name, "new_name": suggested_name}
+                                    "rename_function",
+                                    {
+                                        "old_name": function_name,
+                                        "new_name": suggested_name,
+                                    },
                                 )
                                 if isinstance(rename_result, str) and rename_result.lower().startswith("error:"):
                                     result["error_msg"] = f"Rename failed: {rename_result}"
@@ -988,7 +1238,11 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                             # Perform rename
                             try:
                                 rename_result = self.bridge.execute_command(
-                                    "rename_function", {"old_name": function_name, "new_name": suggested_name}
+                                    "rename_function",
+                                    {
+                                        "old_name": function_name,
+                                        "new_name": suggested_name,
+                                    },
                                 )
                                 if isinstance(rename_result, str) and rename_result.lower().startswith("error:"):
                                     result["error_msg"] = f"Rename failed: {rename_result}"
@@ -1015,7 +1269,9 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
 
                         # Extract all metadata
                         metadata = metadata_extractor.extract_all_metadata(
-                            function_decompile_result, suggested_name if suggested_name else function_name, context
+                            function_decompile_result,
+                            suggested_name if suggested_name else function_name,
+                            context,
                         )
 
                         # Parse AI response into structured sections
@@ -1105,12 +1361,19 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
             return 0
 
         total_functions = len(processed_functions_data)
-        self.response_panel.add_response(
-            "🔄 RAG Processing", f"Creating RAG vectors for {total_functions} processed functions..."
+        # Send RAG processing info to response panel via queue
+        self.agent_ui_queue.put(
+            (
+                "response",
+                (
+                    "🔄 RAG Processing",
+                    f"Creating RAG vectors for {total_functions} processed functions...",
+                ),
+            )
         )
 
-        # Initialize RAG progress in workflow diagram
-        self.workflow_diagram.set_rag_progress(0, total_functions, active=True)
+        # Initialize RAG progress in workflow diagram via workflow_stage_queue
+        self.workflow_stage_queue.put("rag_vectors")
 
         # Batch create RAG vectors for all processed functions
         rag_success_count = 0
@@ -1120,12 +1383,23 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
             batch_end = min(batch_start + rag_batch_size, total_functions)
             batch = processed_functions_data[batch_start:batch_end]
 
-            self.response_panel.add_response(
-                "📊 RAG Batch", f"Processing RAG vectors {batch_start + 1}-{batch_end} of {total_functions}"
+            # Send RAG batch info to response panel via queue
+            self.agent_ui_queue.put(
+                (
+                    "response",
+                    (
+                        "📊 RAG Batch",
+                        f"Processing RAG vectors {batch_start + 1}-{batch_end} of {total_functions}",
+                    ),
+                )
             )
 
             for i, func_data in enumerate(batch):
                 try:
+                    # TODO: Figure out whether or not this code chunk (and the entire _create_batch_rag_vectors) is even used anywhere
+                    # TODO: Remove it if it isn't used anywhere.
+                    # TODO: From what I can tell, the code chunk below was commented-out and it seems like
+                    # TODO: it's now orphaned code.
                     # RAG integration removed - use "Load Vectors" button for vector operations
                     # if hasattr(self.bridge, '_add_function_to_rag'):
                     #     self.bridge._add_function_to_rag(
@@ -1134,9 +1408,8 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                     #     )
                     rag_success_count += 1
 
-                    # Update progress bar for each vector created
-                    current_progress = batch_start + i + 1
-                    self.workflow_diagram.set_rag_progress(current_progress, total_functions, active=True)
+                    # No need to update workflow diagram progress for every iteration in thread-safe mode
+                    # The workflow diagram is now updated by setting rag_vectors mode via workflow_stage_queue
 
                     # Small delay to make progress visible (can be removed for production)
                     import time
@@ -1144,21 +1417,36 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                     time.sleep(0.01)  # 10ms delay for visual feedback
 
                 except Exception as e:
-                    logger.warning(f"Could not add function {func_data['old_name']} to RAG: {e}")
+                    self._logger.warning(f"Could not add function {func_data['old_name']} to RAG: {e}")
 
             # Check for stop signal during RAG processing
             if hasattr(self, "should_stop") and self.should_stop:
-                self.response_panel.add_response(
-                    "🛑 RAG Cancelled", f"RAG vector creation stopped by user. Created {rag_success_count} vectors."
+                # Send RAG cancellation message to response panel via queue
+                self.agent_ui_queue.put(
+                    (
+                        "response",
+                        (
+                            "🛑 RAG Cancelled",
+                            f"RAG vector creation stopped by user. Created {rag_success_count} vectors.",
+                        ),
+                    )
                 )
-                # Still mark RAG stage as complete even if cancelled
-                self.workflow_diagram.complete_rag_stage()
+                # Update workflow stage to complete RAG operation
+                self.workflow_stage_queue.put(None)
                 return rag_success_count
 
-        # Mark RAG creation as complete
-        self.workflow_diagram.complete_rag_stage()
-        self.response_panel.add_response(
-            "✅ RAG Complete", f"Successfully created {rag_success_count}/{total_functions} RAG vectors"
+        # Mark RAG creation as complete via queue
+        self.workflow_stage_queue.put(None)
+
+        # Send RAG completion message to response panel via queue
+        self.agent_ui_queue.put(
+            (
+                "response",
+                (
+                    "✅ RAG Complete",
+                    f"Successfully created {rag_success_count}/{total_functions} RAG vectors",
+                ),
+            )
         )
 
         # Update memory panel to reflect new vector count
@@ -1168,7 +1456,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                 if hasattr(self.renamed_functions_panel.bridge, "_ui_memory_panel_refresh"):
                     self.renamed_functions_panel.bridge._ui_memory_panel_refresh()
             except Exception as e:
-                logger.debug(f"Could not refresh memory panel: {e}")
+                self._logger.debug(f"Could not refresh memory panel: {e}")
 
         return rag_success_count
 
@@ -1244,7 +1532,14 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
         Returns:
             dict with keys: 'callers', 'callees', 'callers_code', 'callees_code', 'truncated'
         """
-        context = {"callers": [], "callees": [], "callers_code": [], "callees_code": [], "truncated": False, "total_chars": 0}
+        context = {
+            "callers": [],
+            "callees": [],
+            "callers_code": [],
+            "callees_code": [],
+            "truncated": False,
+            "total_chars": 0,
+        }
 
         try:
             # Get callers (who calls this function?)
@@ -1457,7 +1752,8 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
 
             try:
                 self._set_tool_running(True, display_name)
-                self.workflow_diagram.set_current_stage("planning")
+                # Update workflow stage via queue
+                self.workflow_stage_queue.put("planning")
 
                 # THREAD SAFETY: Set flag to prevent auto-refresh during batch operations
                 if self.renamed_functions_panel:
@@ -1468,18 +1764,30 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                 processed_functions_data = []  # Store all processed functions for batch RAG creation
                 batch_size = 50  # Process functions in batches for better performance
 
-                # Add initial message to response panel
-                self.response_panel.add_response(
-                    f"🚀 Smart Tool: {display_name}", f"Starting OPTIMIZED bulk function analysis with mode: {enumeration_mode}"
+                # Add initial message to response panel via queue
+                self.agent_ui_queue.put(
+                    (
+                        "response",
+                        (
+                            f"🚀 Smart Tool: {display_name}",
+                            f"Starting OPTIMIZED bulk function analysis with mode: {enumeration_mode}",
+                        ),
+                    )
                 )
-                self.response_panel.add_response(
-                    "⚡ Performance Enhancements",
-                    f"• Batch processing (size: {batch_size})\n• Deferred RAG vector creation\n• Optimized AI prompts\n• Enhanced progress tracking",
+                self.agent_ui_queue.put(
+                    (
+                        "response",
+                        (
+                            "⚡ Performance Enhancements",
+                            f"• Batch processing (size: {batch_size})\n• Deferred RAG vector creation\n• Optimized AI prompts\n• Enhanced progress tracking",
+                        ),
+                    )
                 )
 
                 # Step 1: Get all functions (with pagination)
                 try:
-                    self.response_panel.add_response("📋 Step 1", "Retrieving list of all functions (paginated)...")
+                    # Send function retrieval message to response panel via queue
+                    self.agent_ui_queue.put(("response", ("📋 Step 1", "Retrieving list of all functions (paginated)...")))
 
                     all_functions = []
                     offset = 0
@@ -1489,8 +1797,15 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                         batch_result = self.bridge.ghidra.list_functions(offset=offset, limit=limit)
 
                         if isinstance(batch_result, str) and batch_result.lower().startswith("error:"):
-                            self.response_panel.add_response(
-                                "Error", f"Failed to get function list at offset {offset}: {batch_result}"
+                            # Send error message to response panel via queue
+                            self.agent_ui_queue.put(
+                                (
+                                    "response",
+                                    (
+                                        "Error",
+                                        f"Failed to get function list at offset {offset}: {batch_result}",
+                                    ),
+                                )
                             )
                             break
 
@@ -1500,7 +1815,16 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                         elif isinstance(batch_result, str):
                             raw_batch = [f.strip() for f in batch_result.split("\n") if f.strip()]
                         else:
-                            self.response_panel.add_response("Error", f"Unexpected function list format: {type(batch_result)}")
+                            # Send error message to response panel via queue
+                            self.agent_ui_queue.put(
+                                (
+                                    "response",
+                                    (
+                                        "Error",
+                                        f"Unexpected function list format: {type(batch_result)}",
+                                    ),
+                                )
+                            )
                             break
 
                         # IMPROVED: Check for pagination metadata BEFORE filtering
@@ -1535,7 +1859,8 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                             progress_msg = f"Found {len(all_functions)} of {total_count} functions..."
                         else:
                             progress_msg = f"Found {len(all_functions)} functions so far..."
-                        self.response_panel.add_response("Step 1 Progress", progress_msg)
+                        # Send progress message to response panel via queue
+                        self.agent_ui_queue.put(("response", ("Step 1 Progress", progress_msg)))
 
                         # IMPROVED: Use server metadata to determine if more data exists
                         # This is more reliable than checking batch size
@@ -1553,16 +1878,33 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                     valid_functions = [f for f in functions if f and not f.lower().startswith("error")]
 
                     if not valid_functions:
-                        self.response_panel.add_response("Warning", "No valid functions found to rename.")
+                        # Send warning message to response panel via queue
+                        self.agent_ui_queue.put(("response", ("Warning", "No valid functions found to rename.")))
                         return
 
                     total_functions = len(valid_functions)
-                    self.response_panel.add_response("Step 1 Complete", f"Found {total_functions} functions to process")
+                    # Send step 1 complete message to response panel via queue
+                    self.agent_ui_queue.put(
+                        (
+                            "response",
+                            (
+                                "Step 1 Complete",
+                                f"Found {total_functions} functions to process",
+                            ),
+                        )
+                    )
 
                     # PARALLEL PROCESSING CONFIGURATION
                     max_workers = 5  # Process 5 functions concurrently (configurable)
-                    self.response_panel.add_response(
-                        "⚡ Parallel Processing", f"Using {max_workers} concurrent workers for faster processing"
+                    # Send parallel processing message to response panel via queue
+                    self.agent_ui_queue.put(
+                        (
+                            "response",
+                            (
+                                "⚡ Parallel Processing",
+                                f"Using {max_workers} concurrent workers for faster processing",
+                            ),
+                        )
                     )
 
                     # Step 2: Process functions in parallel using ThreadPoolExecutor
@@ -1592,20 +1934,33 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                         for future in as_completed(future_to_function):
                             # Check for stop signal
                             if self.should_stop:
-                                self.response_panel.add_response("Cancelled", "🛑 Operation cancelled by user")
+                                # Send cancellation message to response panel via queue
+                                self.agent_ui_queue.put(("response", ("Cancelled", "🛑 Operation cancelled by user")))
                                 # Cancel remaining futures
                                 for remaining_future in future_to_function:
                                     remaining_future.cancel()
                                 # Still create RAG vectors for completed functions
                                 if processed_functions_data:
-                                    self.response_panel.add_response(
-                                        "🔄 RAG Processing",
-                                        f"Creating RAG vectors for {len(processed_functions_data)} processed functions before stopping...",
+                                    # Send RAG processing message to response panel via queue
+                                    self.agent_ui_queue.put(
+                                        (
+                                            "response",
+                                            (
+                                                "🔄 RAG Processing",
+                                                f"Creating RAG vectors for {len(processed_functions_data)} processed functions before stopping...",
+                                            ),
+                                        )
                                     )
                                     rag_count = self._create_batch_rag_vectors(processed_functions_data)
-                                    self.response_panel.add_response(
-                                        "✅ Stop Complete",
-                                        f"Operation stopped. Successfully created {rag_count} RAG vectors from processed functions.",
+                                    # Send RAG completion message to response panel via queue
+                                    self.agent_ui_queue.put(
+                                        (
+                                            "response",
+                                            (
+                                                "✅ Stop Complete",
+                                                f"Operation stopped. Successfully created {rag_count} RAG vectors from processed functions.",
+                                            ),
+                                        )
                                     )
                                 break
 
@@ -1619,20 +1974,41 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                                 if result["result_type"] == "skipped":
                                     skipped_functions += 1
                                     if completed_count % 10 == 0:  # Batch UI updates
-                                        self.response_panel.add_response(
-                                            "Progress", f"Processed {completed_count}/{total_functions} functions"
+                                        # Send progress message to response panel via queue
+                                        self.agent_ui_queue.put(
+                                            (
+                                                "response",
+                                                (
+                                                    "Progress",
+                                                    f"Processed {completed_count}/{total_functions} functions",
+                                                ),
+                                            )
                                         )
 
                                 elif result["result_type"] == "failed":
                                     failed_renames += 1
-                                    self.response_panel.add_response(
-                                        "Error", f"❌ {result['function_name']}: {result['error_msg']}"
+                                    # Send error message to response panel via queue
+                                    self.agent_ui_queue.put(
+                                        (
+                                            "response",
+                                            (
+                                                "Error",
+                                                f"❌ {result['function_name']}: {result['error_msg']}",
+                                            ),
+                                        )
                                     )
 
                                 elif result["result_type"] == "renamed":
                                     successful_renames += 1
-                                    self.response_panel.add_response(
-                                        "Success", f"✅ {result['function_name']} → {result['suggested_name']}"
+                                    # Send success message to response panel via queue
+                                    self.agent_ui_queue.put(
+                                        (
+                                            "response",
+                                            (
+                                                "Success",
+                                                f"✅ {result['function_name']} → {result['suggested_name']}",
+                                            ),
+                                        )
                                     )
 
                                     # Add function data
@@ -1653,7 +2029,16 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
 
                                 elif result["result_type"] == "enumerated":
                                     enumerated_functions += 1
-                                    self.response_panel.add_response("Success", f"✅ {result['function_name']} (analyzed)")
+                                    # Send success message to response panel via queue
+                                    self.agent_ui_queue.put(
+                                        (
+                                            "response",
+                                            (
+                                                "Success",
+                                                f"✅ {result['function_name']} (analyzed)",
+                                            ),
+                                        )
+                                    )
 
                                     # Add function data
                                     if result["function_data"]:
@@ -1674,27 +2059,57 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                                 # Periodic progress updates (every 10 functions)
                                 if completed_count % 10 == 0:
                                     progress_pct = (completed_count / total_functions) * 100
-                                    self.response_panel.add_response(
-                                        "Progress",
-                                        f"⚡ Parallel Progress: {completed_count}/{total_functions} ({progress_pct:.1f}%) | "
-                                        + f"✅ {successful_renames + enumerated_functions} processed | "
-                                        + f"❌ {failed_renames} failed | "
-                                        + f"⏭️ {skipped_functions} skipped",
+                                    # Send progress message to response panel via queue
+                                    self.agent_ui_queue.put(
+                                        (
+                                            "response",
+                                            (
+                                                "Progress",
+                                                f"⚡ Parallel Progress: {completed_count}/{total_functions} ({progress_pct:.1f}%) | "
+                                                + f"✅ {successful_renames + enumerated_functions} processed | "
+                                                + f"❌ {failed_renames} failed | "
+                                                + f"⏭️ {skipped_functions} skipped",
+                                            ),
+                                        )
                                     )
 
                             except Exception as e:
                                 failed_renames += 1
-                                self.response_panel.add_response("Process Error", f"Exception processing function: {e}")
+                                # Send error message to response panel via queue
+                                self.agent_ui_queue.put(
+                                    (
+                                        "response",
+                                        (
+                                            "Process Error",
+                                            f"Exception processing function: {e}",
+                                        ),
+                                    )
+                                )
 
                     # BATCH RAG VECTOR CREATION (Performance Optimization)
-                    self.workflow_diagram.set_current_stage("analysis")
+                    # Update workflow stage via queue
+                    self.workflow_stage_queue.put("analysis")
                     if processed_functions_data:
-                        self.response_panel.add_response(
-                            "📊 Vector Creation", "Starting RAG vector creation for all processed functions..."
+                        # Send vector creation message to response panel via queue
+                        self.agent_ui_queue.put(
+                            (
+                                "response",
+                                (
+                                    "📊 Vector Creation",
+                                    "Starting RAG vector creation for all processed functions...",
+                                ),
+                            )
                         )
                         rag_count = self._create_batch_rag_vectors(processed_functions_data)
-                        self.response_panel.add_response(
-                            "✅ Vector Success", f"All {rag_count} function analyses have been added to the RAG vector space."
+                        # Send vector success message to response panel via queue
+                        self.agent_ui_queue.put(
+                            (
+                                "response",
+                                (
+                                    "✅ Vector Success",
+                                    f"All {rag_count} function analyses have been added to the RAG vector space.",
+                                ),
+                            )
                         )
 
                     # Performance summary
@@ -1718,12 +2133,14 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                             skip_reason_msg += (
                                 f"💡 **Tip:** {skipped_functions} functions were already renamed and were skipped."
                             )
-                        self.response_panel.add_response("⏭️ Skip Summary", skip_reason_msg)
+                        # Send skip summary to response panel via queue
+                        self.agent_ui_queue.put(("response", ("⏭️ Skip Summary", skip_reason_msg)))
 
                     # AUTOMATIC SESSION SAVE
                     session_save_success = False
                     try:
-                        self.response_panel.add_response("💾 Auto-Save", "Automatically saving session...")
+                        # Send auto-save message to response panel via queue
+                        self.agent_ui_queue.put(("response", ("💾 Auto-Save", "Automatically saving session...")))
 
                         # Define operation type for session description
                         operation_type = {
@@ -1741,7 +2158,10 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                         # Collect analyzed functions from the renamed functions panel
                         analyzed_functions = {}
                         if self.renamed_functions_panel and hasattr(self.renamed_functions_panel, "functions"):
-                            for addr, func_data in self.renamed_functions_panel.functions.items():
+                            for (
+                                addr,
+                                func_data,
+                            ) in self.renamed_functions_panel.functions.items():
                                 analyzed_functions[addr] = {
                                     "address": addr,
                                     "old_name": func_data.get("old_name", "Unknown"),
@@ -1787,22 +2207,41 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                         )
 
                         if session_save_success:
-                            self.response_panel.add_response(
-                                "✅ Auto-Save Complete",
-                                f"Session automatically saved as '{auto_session_name}'\n"
-                                + f"• {len(analyzed_functions)} analyzed functions\n"
-                                + f"• {len(rag_vectors)} RAG vectors",
+                            # Send auto-save complete message to response panel via queue
+                            self.agent_ui_queue.put(
+                                (
+                                    "response",
+                                    (
+                                        "✅ Auto-Save Complete",
+                                        f"Session automatically saved as '{auto_session_name}'\n"
+                                        + f"• {len(analyzed_functions)} analyzed functions\n"
+                                        + f"• {len(rag_vectors)} RAG vectors",
+                                    ),
+                                )
                             )
                         else:
-                            self.response_panel.add_response(
-                                "⚠️ Auto-Save Warning", "Session save attempted but may have failed. Check logs for details."
+                            # Send auto-save warning message to response panel via queue
+                            self.agent_ui_queue.put(
+                                (
+                                    "response",
+                                    (
+                                        "⚠️ Auto-Save Warning",
+                                        "Session save attempted but may have failed. Check logs for details.",
+                                    ),
+                                )
                             )
 
                     except Exception as save_error:
-                        self.response_panel.add_response(
-                            "⚠️ Auto-Save Error",
-                            f"Could not automatically save session: {save_error}\n"
-                            + "You can manually save via File > Save Session",
+                        # Send auto-save error message to response panel via queue
+                        self.agent_ui_queue.put(
+                            (
+                                "response",
+                                (
+                                    "⚠️ Auto-Save Error",
+                                    f"Could not automatically save session: {save_error}\n"
+                                    + "You can manually save via File > Save Session",
+                                ),
+                            )
                         )
                         logger.error(f"Auto-save error: {save_error}")
                         import traceback
@@ -1841,7 +2280,8 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
 All processed functions have been added to the 'Analyzed Functions' tab with behavior summaries.
 Check the tab to see detailed analysis results and manage function information.
 """
-                    self.response_panel.add_response("🏁 Final Summary", summary_msg)
+                    # Send final summary message to response panel via queue
+                    self.agent_ui_queue.put(("response", ("🏁 Final Summary", summary_msg)))
 
                     # Clear cache after operation completes
                     self._clear_decompilation_cache()
@@ -1859,8 +2299,10 @@ Check the tab to see detailed analysis results and manage function information.
             except Exception as e:
                 error_msg = f"Error running {display_name}: {e}"
                 logger.error(error_msg)
-                self.response_panel.add_response("Error", error_msg)
-                self.workflow_diagram.set_current_stage(None)
+                # Add error message via queue
+                self.agent_ui_queue.put(("response", ("Error", error_msg)))
+                # Final stage update via queue
+                self.workflow_stage_queue.put(None)
             finally:
                 self._set_tool_running(False)
 
@@ -1879,22 +2321,38 @@ Check the tab to see detailed analysis results and manage function information.
         def worker():
             try:
                 self._set_tool_running(True, display_name)
-                self.workflow_diagram.set_current_stage("execution")
+                # Update workflow stage via queue
+                self.workflow_stage_queue.put("execution")
 
-                # Add initial message to response panel
-                self.response_panel.add_response(
-                    f"Smart Tool: {display_name}",
-                    "Starting 3-step analysis workflow: get current function → decompile → AI analysis",
+                # Add initial message to response panel via queue
+                self.agent_ui_queue.put(
+                    (
+                        "response",
+                        (
+                            f"Smart Tool: {display_name}",
+                            "Starting 3-step analysis workflow: get current function → decompile → AI analysis",
+                        ),
+                    )
                 )
 
                 # Step 1: Get current function
                 try:
                     current_function_result = self.bridge.ghidra.get_current_function()
                     if isinstance(current_function_result, str) and current_function_result.lower().startswith("error:"):
-                        self.response_panel.add_response("Error", f"Failed to get current function: {current_function_result}")
+                        # Send error message to response panel via queue
+                        self.agent_ui_queue.put(
+                            (
+                                "response",
+                                (
+                                    "Error",
+                                    f"Failed to get current function: {current_function_result}",
+                                ),
+                            )
+                        )
                         return
 
-                    self.response_panel.add_response("Step 1: Current Function", str(current_function_result))
+                    # Send current function info to response panel via queue
+                    self.agent_ui_queue.put(("response", ("Step 1: Current Function", str(current_function_result))))
 
                     # Extract function name from the result
                     function_name = None
@@ -1907,36 +2365,59 @@ Check the tab to see detailed analysis results and manage function information.
                             function_name = match.group(1)
 
                     if not function_name:
-                        self.response_panel.add_response(
-                            "Error", "Could not extract function name from current function result"
+                        # Send error message to response panel via queue
+                        self.agent_ui_queue.put(
+                            (
+                                "response",
+                                (
+                                    "Error",
+                                    "Could not extract function name from current function result",
+                                ),
+                            )
                         )
                         return
 
                 except Exception as e:
-                    self.response_panel.add_response("Error", f"Error getting current function: {e}")
+                    # Send error message to response panel via queue
+                    self.agent_ui_queue.put(("response", ("Error", f"Error getting current function: {e}")))
                     return
 
                 # Step 2: Decompile the function to get its code
                 try:
                     decompile_result = self.bridge.ghidra.decompile_function(name=function_name)
                     if isinstance(decompile_result, str) and decompile_result.lower().startswith("error:"):
-                        self.response_panel.add_response(
-                            "Error", f"Failed to decompile function {function_name}: {decompile_result}"
+                        # Send error message to response panel via queue
+                        self.agent_ui_queue.put(
+                            (
+                                "response",
+                                (
+                                    "Error",
+                                    f"Failed to decompile function {function_name}: {decompile_result}",
+                                ),
+                            )
                         )
                         return
 
-                    self.response_panel.add_response(
-                        "Step 2: Function Decompilation",
-                        f"Successfully decompiled {function_name} (length: {len(decompile_result)} chars)",
+                    # Send decompilation success message to response panel via queue
+                    self.agent_ui_queue.put(
+                        (
+                            "response",
+                            (
+                                "Step 2: Function Decompilation",
+                                f"Successfully decompiled {function_name} (length: {len(decompile_result)} chars)",
+                            ),
+                        )
                     )
 
                 except Exception as e:
-                    self.response_panel.add_response("Error", f"Error decompiling function {function_name}: {e}")
+                    # Send error message to response panel via queue
+                    self.agent_ui_queue.put(("response", ("Error", f"Error decompiling function {function_name}: {e}")))
                     return
 
                 # Step 3: AI Analysis of the function
                 try:
-                    self.workflow_diagram.set_current_stage("analysis")
+                    # Update workflow stage via queue
+                    self.workflow_stage_queue.put("analysis")
 
                     # Build analysis prompt with function info first
                     analysis_prompt = (
@@ -1983,7 +2464,8 @@ Check the tab to see detailed analysis results and manage function information.
                     ai_analysis = self.bridge.ollama.generate(prompt=analysis_prompt)
 
                     if ai_analysis and ai_analysis.strip():
-                        self.response_panel.add_response("Step 3: Comprehensive AI Analysis", ai_analysis)
+                        # Send AI analysis to response panel via queue
+                        self.agent_ui_queue.put(("response", ("Step 3: Comprehensive AI Analysis", ai_analysis)))
 
                         # Store the function summary for future reference
                         if hasattr(self.bridge, "function_summaries"):
@@ -1998,33 +2480,43 @@ Check the tab to see detailed analysis results and manage function information.
                                 if addr_match:
                                     address = addr_match.group(1)
 
-                            self.renamed_functions_panel.add_function_with_summary(
-                                address=address,
-                                old_name=function_name,
-                                new_name=function_name,  # Keep same name since this is analysis only
-                                summary=ai_analysis.strip(),
-                            )
+                                self.renamed_functions_panel.add_function_with_summary(
+                                    address=address,
+                                    old_name=function_name,
+                                    new_name=function_name,  # Keep same name since this is analysis only
+                                    summary=ai_analysis.strip(),
+                                )
 
-                        self.response_panel.add_response(
-                            "✅ Analysis Complete",
-                            f"Function {function_name} has been thoroughly analyzed and added to the function tracking system.",
+                        # Send analysis complete message to response panel via queue
+                        self.agent_ui_queue.put(
+                            (
+                                "response",
+                                (
+                                    "✅ Analysis Complete",
+                                    f"Function {function_name} has been thoroughly analyzed and added to the function tracking system.",
+                                ),
+                            )
                         )
                     else:
-                        self.response_panel.add_response("Warning", "AI analysis returned empty response.")
+                        # Send warning message to response panel via queue
+                        self.agent_ui_queue.put(("response", ("Warning", "AI analysis returned empty response.")))
 
                 except Exception as e:
                     error_msg = f"Error during AI analysis: {e}"
                     logger.error(error_msg)
-                    self.response_panel.add_response("Error", error_msg)
+                    # Send error message to response panel via queue
+                    self.agent_ui_queue.put(("response", ("Error", error_msg)))
 
-                # Final stage update
-                self.workflow_diagram.set_current_stage(None)
+                # Final stage update via queue
+                self.workflow_stage_queue.put(None)
 
             except Exception as e:
                 error_msg = f"Error running {display_name}: {e}"
                 logger.error(error_msg)
-                self.response_panel.add_response("Error", error_msg)
-                self.workflow_diagram.set_current_stage(None)
+                # Send error message to response panel via queue
+                self.agent_ui_queue.put(("response", ("Error", error_msg)))
+                # Update workflow stage via queue
+                self.workflow_stage_queue.put(None)
             finally:
                 self._set_tool_running(False)
 
@@ -2064,23 +2556,27 @@ Do you want to proceed with renaming all functions?"""
         # Secondary dialog for enumeration option
         enumeration_dialog = tk.Toplevel(self.frame)
         enumeration_dialog.title("Function Enumeration Options")
-        enumeration_dialog.geometry("800x650")
+        enumeration_dialog.geometry("800x780")
         enumeration_dialog.transient(self.frame.winfo_toplevel())
         enumeration_dialog.grab_set()
 
         # Center the dialog
         enumeration_dialog.update_idletasks()
         x = (enumeration_dialog.winfo_screenwidth() // 2) - (800 // 2)
-        y = (enumeration_dialog.winfo_screenheight() // 2) - (650 // 2)
-        enumeration_dialog.geometry(f"800x650+{x}+{y}")
+        y = (enumeration_dialog.winfo_screenheight() // 2) - (780 // 2)
+        enumeration_dialog.geometry(f"800x780+{x}+{y}")
 
         # Dialog content
         main_frame = ttk.Frame(enumeration_dialog, padding=20)
-        main_frame.pack(fill="both", expand=True)
+        main_frame.after(0, lambda: main_frame.pack(fill="both", expand=True))
 
         # Title
-        title_label = ttk.Label(main_frame, text="🔍 Function Enumeration Options", font=("TkDefaultFont", 14, "bold"))
-        title_label.pack(pady=(0, 15))
+        title_label = ttk.Label(
+            main_frame,
+            text="🔍 Function Enumeration Options",
+            font=("TkDefaultFont", 14, "bold"),
+        )
+        title_label.after(0, lambda: title_label.pack(pady=(0, 15)))
 
         # Description
         desc_text = """Enhanced Enumeration Mode
@@ -2092,66 +2588,80 @@ with high-quality behavior summaries for complete binary coverage.
 Choose your enumeration strategy:"""
 
         desc_label = ttk.Label(main_frame, text=desc_text, font=("TkDefaultFont", 10), wraplength=750)
-        desc_label.pack(pady=(0, 20))
+        desc_label.after(0, lambda: desc_label.pack(pady=(0, 20)))
 
         # Options frame
         options_frame = ttk.LabelFrame(main_frame, text="Enumeration Strategy", padding=15)
-        options_frame.pack(fill="x", pady=(0, 20))
+        options_frame.after(0, lambda: options_frame.pack(fill="x", pady=(0, 20)))
 
         enumeration_var = tk.StringVar(value="rename_only")
 
         # Option 1: Rename only (current behavior)
-        ttk.Radiobutton(options_frame, text="Rename Only (Standard)", variable=enumeration_var, value="rename_only").pack(
-            anchor="w", pady=5
+        radio_button_rename = ttk.Radiobutton(
+            options_frame,
+            text="Rename Only (Standard)",
+            variable=enumeration_var,
+            value="rename_only",
         )
+        radio_button_rename.after(0, lambda: radio_button_rename.pack(anchor="w", pady=5))
         desc1 = ttk.Label(
             options_frame,
             text="• Only rename functions with generic names (FUN_*, sub_*, etc.)\n• Skip functions that already have descriptive names\n• Faster execution, focused on renaming",
             font=("TkDefaultFont", 9),
             foreground="gray",
         )
-        desc1.pack(anchor="w", padx=20, pady=(0, 10))
+        desc1.after(0, lambda: desc1.pack(anchor="w", padx=20, pady=(0, 10)))
 
         # Option 2: Full enumeration (enhanced)
-        ttk.Radiobutton(
-            options_frame, text="Full Enumeration (Enhanced)", variable=enumeration_var, value="full_enumeration"
-        ).pack(anchor="w", pady=5)
+        radio_button_full_enum = ttk.Radiobutton(
+            options_frame,
+            text="Full Enumeration (Enhanced)",
+            variable=enumeration_var,
+            value="full_enumeration",
+        )
+        radio_button_full_enum.after(0, lambda: radio_button_full_enum.pack(anchor="w", pady=5))
         desc2 = ttk.Label(
             options_frame,
             text="• Process ALL functions in the binary (renamed + existing)\n• Generate behavior summaries for every function\n• Add all functions to Renamed Functions list for complete coverage\n• Ideal for comprehensive binary analysis and documentation",
             font=("TkDefaultFont", 9),
             foreground="gray",
         )
-        desc2.pack(anchor="w", padx=20, pady=(0, 10))
+        desc2.after(0, lambda: desc2.pack(anchor="w", padx=20, pady=(0, 10)))
 
         # Option 3: Smart enumeration
-        ttk.Radiobutton(
-            options_frame, text="Smart Enumeration (Recommended)", variable=enumeration_var, value="smart_enumeration"
-        ).pack(anchor="w", pady=5)
+        radio_button_smart_enum = ttk.Radiobutton(
+            options_frame,
+            text="Smart Enumeration (Recommended)",
+            variable=enumeration_var,
+            value="smart_enumeration",
+        )
+        radio_button_smart_enum.after(0, lambda: radio_button_smart_enum.pack(anchor="w", pady=5))
         desc3 = ttk.Label(
             options_frame,
             text="• Rename generic functions + analyze key descriptive functions\n• Focus on important functions (main, crypto, network, file ops)\n• Balance between speed and comprehensive coverage\n• Best for most analysis scenarios",
             font=("TkDefaultFont", 9),
             foreground="gray",
         )
-        desc3.pack(anchor="w", padx=20)
+        desc3.after(0, lambda: desc3.pack(anchor="w", padx=20))
 
         # Buttons
         button_frame = ttk.Frame(main_frame)
-        button_frame.pack(fill="x")
+        button_frame.after(0, lambda: button_frame.pack(fill="x"))
 
         selected_mode = None
 
         def confirm_enumeration():
             nonlocal selected_mode
             selected_mode = enumeration_var.get()
-            enumeration_dialog.destroy()
+            enumeration_dialog.after(0, enumeration_dialog.destroy)
 
         def cancel_enumeration():
-            enumeration_dialog.destroy()
+            enumeration_dialog.after(0, enumeration_dialog.destroy)
 
-        ttk.Button(button_frame, text="Start Processing", command=confirm_enumeration).pack(side="right", padx=(10, 0))
-        ttk.Button(button_frame, text="Cancel", command=cancel_enumeration).pack(side="right")
+        button_start_processing = ttk.Button(button_frame, text="Start Processing", command=confirm_enumeration)
+        button_start_processing.after(0, lambda: button_start_processing.pack(side="right", padx=(10, 0)))
+        button_cancel_processing = ttk.Button(button_frame, text="Cancel", command=cancel_enumeration)
+        button_cancel_processing.after(0, lambda: button_cancel_processing.pack(side="right"))
 
         # Wait for dialog to close
         enumeration_dialog.wait_window()
@@ -2222,95 +2732,134 @@ Do you want to proceed with generating the vulnerability report?"""
         def worker():
             try:
                 self._set_tool_running(True, display_name)
-                self.workflow_diagram.set_current_stage("planning")
+                # Update workflow stage via queue
+                self.workflow_stage_queue.put("planning")
 
-                # Add initial message to response panel
-                self.response_panel.add_response(
-                    f"Smart Tool: {display_name}",
-                    f"Starting comprehensive software analysis and report generation (Format: {report_format.upper()})",
+                # Add initial message to response panel via queue
+                self.agent_ui_queue.put(
+                    (
+                        "response",
+                        (
+                            f"Smart Tool: {display_name}",
+                            f"Starting comprehensive software analysis and report generation (Format: {report_format.upper()})",
+                        ),
+                    )
                 )
 
                 # Phase 1: Data Collection
-                self.response_panel.add_response("Phase 1", "Collecting comprehensive binary data...")
-                self.workflow_diagram.set_current_stage("execution")
+                self.agent_ui_queue.put(("response", ("Phase 1", "Collecting comprehensive binary data...")))
+                # Update workflow stage via queue
+                self.workflow_stage_queue.put("execution")
 
                 # Phase 2: AI Analysis
-                self.response_panel.add_response(
-                    "Phase 2", "Performing AI-powered analysis (classification, security, behavior, architecture)..."
+                self.agent_ui_queue.put(
+                    (
+                        "response",
+                        ("Phase 2", "Performing AI-powered analysis (classification, security, behavior, architecture)..."),
+                    )
                 )
-                self.workflow_diagram.set_current_stage("analysis")
+                # Update workflow stage via queue
+                self.workflow_stage_queue.put("analysis")
 
                 # Phase 3: Report Generation
-                self.response_panel.add_response("Phase 3", "Generating structured software report...")
-                self.workflow_diagram.set_current_stage("review")
+                self.agent_ui_queue.put(("response", ("Phase 3", "Generating structured software report...")))
+                # Update workflow stage via queue
+                self.workflow_stage_queue.put("review")
 
                 # Call the bridge method to generate the report
                 try:
                     report_content = self.bridge.generate_software_report(report_format)
 
-                    # Display success message
-                    self.response_panel.add_response("Report Generated", "✅ Vulnerability report generated successfully!")
+                    # Display success message via queue
+                    self.agent_ui_queue.put(
+                        ("response", ("Report Generated", "✅ Vulnerability report generated successfully!"))
+                    )
 
                     # Only show preview for non-HTML formats (HTML is not human-readable in text)
                     if report_format != "html":
                         preview = report_content[:1000] + ("..." if len(report_content) > 1000 else "")
-                        self.response_panel.add_response("Report Preview", preview)
+                        self.agent_ui_queue.put(("response", ("Report Preview", preview)))
                     else:
-                        self.response_panel.add_response(
-                            "Report Info",
-                            f"📄 HTML report generated ({len(report_content)} bytes). Open the saved file in a browser to view.",
+                        self.agent_ui_queue.put(
+                            (
+                                "response",
+                                (
+                                    "Report Info",
+                                    f"📄 HTML report generated ({len(report_content)} bytes). Open the saved file in a browser to view.",
+                                ),
+                            )
                         )
 
-                    # Offer to save the report
-                    save_response = messagebox.askyesno(
-                        "Save Report",
-                        f"Vulnerability report generated successfully!\n\nWould you like to save the report to a file?\n\nReport size: {len(report_content)} bytes",
-                    )
+                    # For file dialogs, we need to use the main thread via our queue system
+                    # Save the report content for later use
+                    report_data = {"content": report_content, "size": len(report_content), "format": report_format}
 
-                    if save_response:
-                        # Determine file extension
-                        extension = ".md" if report_format == "markdown" else f".{report_format}"
-                        default_filename = f"vulnerability_report_{self._get_timestamp_for_filename()}{extension}"
-
-                        # Show save dialog
-                        filename = filedialog.asksaveasfilename(
-                            title="Save Vulnerability Report",
-                            defaultextension=extension,
-                            initialfile=default_filename,
-                            filetypes=[(f"{report_format.upper()} files", f"*{extension}"), ("All files", "*.*")],
-                        )
-
-                        if filename:
-                            try:
-                                with open(filename, "w", encoding="utf-8") as f:
-                                    f.write(report_content)
-                                self.response_panel.add_response("File Saved", f"✅ Report saved to: {filename}")
-                            except Exception as e:
-                                self.response_panel.add_response("Save Error", f"❌ Error saving file: {e}")
+                    # Add a special message to the agent_ui_queue for showing the save dialog
+                    # We'll need to extend _check_agent_ui_queue to handle this message type
+                    self.agent_ui_queue.put(("show_save_dialog", report_data))
 
                     # Only show full report in response panel for non-HTML formats
                     if report_format != "html":
-                        self.response_panel.add_response("Full Report", report_content)
+                        self.agent_ui_queue.put(("response", ("Full Report", report_content)))
 
                 except Exception as e:
                     error_msg = f"Error generating software report: {e}"
-                    self.response_panel.add_response("Error", error_msg)
+                    # Add error message via queue
+                    self.agent_ui_queue.put(("response", ("Error", error_msg)))
                     import traceback
 
-                    self.response_panel.add_response("Error Details", traceback.format_exc())
+                    # Add error details via queue
+                    self.agent_ui_queue.put(("response", ("Error Details", traceback.format_exc())))
 
-                # Final stage update
-                self.workflow_diagram.set_current_stage(None)
+                # Final stage update via queue
+                self.workflow_stage_queue.put(None)
 
             except Exception as e:
                 error_msg = f"Error running {display_name}: {e}"
                 logger.error(error_msg)
-                self.response_panel.add_response("Error", error_msg)
-                self.workflow_diagram.set_current_stage(None)
+                # Add error message via queue
+                self.agent_ui_queue.put(("response", ("Error", error_msg)))
+                # Final stage update via queue
+                self.workflow_stage_queue.put(None)
             finally:
                 self._set_tool_running(False)
 
         threading.Thread(target=worker, daemon=True).start()
+
+    def _show_save_dialog_main_thread(self, report_content: str, report_size: int, report_format: str):
+        """Show save dialog from the main thread."""
+        # This method is called by the main thread via the UI queue system
+        # Offer to save the report
+        save_response = messagebox.askyesno(
+            "Save Report",
+            f"Vulnerability report generated successfully!\n\nWould you like to save the report to a file?\n\nReport size: {report_size} bytes",
+        )
+
+        if save_response:
+            # Determine file extension
+            extension = ".md" if report_format == "markdown" else f".{report_format}"
+            default_filename = f"vulnerability_report_{self._get_timestamp_for_filename()}{extension}"
+
+            # Show save dialog
+            filename = filedialog.asksaveasfilename(
+                title="Save Vulnerability Report",
+                defaultextension=extension,
+                initialfile=default_filename,
+                filetypes=[
+                    (f"{report_format.upper()} files", f"*{extension}"),
+                    ("All files", "*.*"),
+                ],
+            )
+
+            if filename:
+                try:
+                    with open(filename, "w", encoding="utf-8") as f:
+                        f.write(report_content)
+                    # Add success message via queue to update response panel
+                    self.response_panel.add_response("File Saved", f"✅ Report saved to: {filename}")
+                except Exception as e:
+                    # Add error message
+                    self.response_panel.add_response("Save Error", f"❌ Error saving file: {e}")
 
     def _get_timestamp_for_filename(self) -> str:
         """Get a timestamp string suitable for filenames."""
@@ -2376,6 +2925,75 @@ TOOL DATA:
 Please provide a comprehensive analysis of this information.
 """
 
+    def _check_workflow_stage_queue(self):
+        """Process items from the workflow stage queue on the main thread."""
+        try:
+            # Process all current items in the queue
+            while not self.workflow_stage_queue.empty():
+                # Get the current stage from the queue
+                current_stage = self.workflow_stage_queue.get_nowait()
+
+                # Update the workflow diagram on the main thread
+                self.workflow_diagram.set_current_stage(current_stage)
+
+                # Mark as done
+                self.workflow_stage_queue.task_done()
+
+        except Exception as e:
+            logger.error(f"Error processing workflow stage queue: {e}")
+
+        finally:
+            # Schedule next check after 100ms
+            if hasattr(self, "frame") and self.frame.winfo_exists():
+                self.frame.after(100, self._check_workflow_stage_queue)
+
+    def _check_agent_ui_queue(self):
+        """Process items from the agent UI queue on the main thread."""
+        try:
+            # Process all current items in the queue
+            while not self.agent_ui_queue.empty():
+                # Get the update from the queue
+                update_type, params = self.agent_ui_queue.get_nowait()
+
+                # Handle different types of updates
+                if update_type == "tool_running":
+                    running, tool_name = params
+                    self._set_tool_running_main_thread(running, tool_name)
+                elif update_type == "response":
+                    response_type, content = params
+                    self.response_panel.add_response(response_type, content)
+                elif update_type == "workflow_stage":
+                    stage = params
+                    self.workflow_diagram.set_current_stage(stage)
+                elif update_type == "show_save_dialog":
+                    # Handle the save dialog request on the main thread
+                    report_data = params
+                    self._show_save_dialog_main_thread(
+                        report_content=report_data["content"],
+                        report_size=report_data["size"],
+                        report_format=report_data["format"],
+                    )
+                elif update_type == "update_response":
+                    # Handle streaming updates to an existing response
+                    response_type, content = params
+                    # This will update the last response with the given type
+                    if hasattr(self.response_panel, "update_response"):
+                        self.response_panel.update_response(response_type, content)
+                    else:
+                        # Fallback if update_response doesn't exist
+                        self.response_panel.add_response(f"{response_type} (Update)", content)
+
+                # Mark as done
+                self.agent_ui_queue.task_done()
+
+        except Exception as e:
+            logger.error(f"Error processing agent UI queue: {e}")
+
+        finally:
+            # Schedule next check after 100ms
+            if hasattr(self, "frame") and self.frame.winfo_exists():
+                self.frame.after(100, self._check_agent_ui_queue)
+
     def get_widget(self):
         """Return the frame widget."""
         return self.frame
@@ -2388,14 +3006,31 @@ Please provide a comprehensive analysis of this information.
             self._set_tool_running(False)
 
     def _set_tool_running(self, running: bool, tool_name: str = ""):
-        """Set the tool running state."""
-        self.tool_running = running
+        """Set the tool running state.
 
-        # Update all buttons
+        This method can be called from worker threads - it adds to the agent_ui_queue.
+        """
+        # Update the running state flag immediately
+        self.tool_running = running
+        # Add UI updates to the queue for the main thread
+        self.agent_ui_queue.put(("tool_running", (running, tool_name)))
+
+    def _set_tool_running_main_thread(self, running: bool, tool_name: str = ""):
+        """Set the tool running state - called only from the main thread."""
+        # No need to update self.tool_running here - already done by _set_tool_running
+
+        # Update all buttons according to whether the app is processing or ready for new commands
         state = "disabled" if running else "normal"
-        for widget in self.frame.winfo_children():
-            if isinstance(widget, ttk.Button) and widget not in [self.stop_button]:
-                widget.config(state=state)
+
+        self.analyze_current_btn.config(state=state)
+        self.rename_current_btn.config(state=state)
+        self.rename_all_btn.config(state=state)
+        self.generate_report_btn.config(state=state)
+        self.analyze_imports_btn.config(state=state)
+        self.analyze_strings_btn.config(state=state)
+        self.analyze_exports_btn.config(state=state)
+        self.search_strings_btn.config(state=state)
+        self.scan_tables_btn.config(state=state)
 
         # Update stop button state
         self.stop_button.config(state="normal" if running else "disabled")
@@ -2403,10 +3038,11 @@ Please provide a comprehensive analysis of this information.
         # Update status and progress
         if running:
             self.should_stop = False  # Reset stop flag for new tool
-            self.status_label.config(text=f"Running {tool_name}...", foreground="orange")
+            # Using hex color instead of named color for better cross-platform compatibility
+            self.status_label.config(text=f"Running {tool_name}...", foreground="#FFA500")
             self.progress.start()
         else:
-            self.status_label.config(text="Ready", foreground="green")
+            self.status_label.config(text="Ready", foreground="#2BC72B")
             self.progress.stop()
 
     def _search_strings(self):
@@ -2421,7 +3057,11 @@ Please provide a comprehensive analysis of this information.
             return  # cancelled
 
         # list_strings supports optional 'filter' parameter (alias string_search)
-        self._run_hardcoded_workflow("list_strings", f"Search Strings for '{query}'", params={"filter": query.strip()})
+        self._run_hardcoded_workflow(
+            "list_strings",
+            f"Search Strings for '{query}'",
+            params={"filter": query.strip()},
+        )
 
     def _scan_function_tables(self):
         """Scan for function pointer tables (vtables, dispatch tables) without LLM intervention."""
@@ -2431,13 +3071,19 @@ Please provide a comprehensive analysis of this information.
         def worker():
             try:
                 self._set_tool_running(True, "Scan Function Tables")
-                self.workflow_diagram.set_current_stage("execution")
+                # Update workflow stage via queue
+                self.workflow_stage_queue.put("execution")
 
-                # Add initial message
-                self.response_panel.add_response(
-                    "Smart Tool: Scan Function Tables",
-                    "Scanning binary for function pointer tables (vtables, dispatch tables, jump tables)...\n"
-                    "This runs algorithmically without LLM intervention.",
+                # Add initial message via queue
+                self.agent_ui_queue.put(
+                    (
+                        "response",
+                        (
+                            "Smart Tool: Scan Function Tables",
+                            "Scanning binary for function pointer tables (vtables, dispatch tables, jump tables)...\n"
+                            "This runs algorithmically without LLM intervention.",
+                        ),
+                    )
                 )
 
                 # Run the scan directly (no LLM needed)
@@ -2448,10 +3094,12 @@ Please provide a comprehensive analysis of this information.
                 if tables:
                     # Format results
                     formatted = self.bridge.ghidra.format_table_scan_results(tables)
-                    self.response_panel.add_response(f"Scan Complete: Found {len(tables)} Table(s)", formatted)
+                    # Send results via queue
+                    self.agent_ui_queue.put(("response", (f"Scan Complete: Found {len(tables)} Table(s)", formatted)))
 
                     # Now send to AI for interpretation
-                    self.workflow_diagram.set_current_stage("analysis")
+                    # Update workflow stage via queue
+                    self.workflow_stage_queue.put("analysis")
 
                     # Build analysis prompt
                     analysis_prompt = f"""Analyze these detected function pointer tables:
@@ -2465,46 +3113,58 @@ Please provide:
 4. Which functions are reachable through these tables (indirect call targets)
 """
 
-                    # Stream the AI analysis
-                    self.response_panel.add_response("AI Analysis", "")
+                    # Streaming analysis needs special handling for thread safety
+                    # First add the AI Analysis header via queue
+                    self.agent_ui_queue.put(("response", ("AI Analysis", "")))
 
-                    for chunk in self.bridge.ollama_client.stream_generate(
-                        model=self.bridge.ollama_config.model, prompt=analysis_prompt, temperature=0.7
-                    ):
-                        if self.should_stop:
-                            break
-                        self.response_panel.append_to_last_response(chunk)
+                    # Instead of directly streaming to the UI, collect the response
+                    # The bridge doesn't have a streaming method, so we'll use a non-streaming approach
+                    full_response = self.bridge.ollama.generate(
+                        prompt=analysis_prompt,
+                        temperature=0.7,
+                    )
+
+                    # Send the complete response via queue
+                    self.agent_ui_queue.put(("update_response", ("AI Analysis", full_response)))
                 else:
                     # Get segment info for context
                     try:
                         segments = self.bridge.ghidra.list_segments()
                         seg_info = "\n".join(f"  {s}" for s in segments[:8])
                     except Exception as e:
-                        error_message = "  (Could not retrieve segment info)"
-                        logger.warning(f"{error_message}: {e}")
-                        seg_info = error_message
+                        seg_info = "  (Could not retrieve segment info)"
+                        logger.warning(f"{seg_info} : {e}")
 
-                    self.response_panel.add_response(
-                        "Scan Complete: No Tables Found",
-                        f"No function pointer tables were detected (require 3+ consecutive function pointers).\n\n"
-                        f"**Scanned Segments:**\n{seg_info}\n\n"
-                        f"**This could mean:**\n"
-                        f"• The binary is written in C (no vtables) rather than C++\n"
-                        f"• No dispatch tables or jump tables in data segments\n"
-                        f"• Function pointers exist but aren't grouped into tables\n\n"
-                        f"**Alternative approaches:**\n"
-                        f"• Use read_bytes() to examine specific addresses manually\n"
-                        f"• Search for xrefs to functions to find indirect calls\n"
-                        f"• Look for DATA references using get_xrefs_to()",
+                    # Send "no tables" message via queue
+                    self.agent_ui_queue.put(
+                        (
+                            "response",
+                            (
+                                "Scan Complete: No Tables Found",
+                                f"No function pointer tables were detected (require 3+ consecutive function pointers).\n\n"
+                                f"**Scanned Segments:**\n{seg_info}\n\n"
+                                f"**This could mean:**\n"
+                                f"• The binary is written in C (no vtables) rather than C++\n"
+                                f"• No dispatch tables or jump tables in data segments\n"
+                                f"• Function pointers exist but aren't grouped into tables\n\n"
+                                f"**Alternative approaches:**\n"
+                                f"• Use read_bytes() to examine specific addresses manually\n"
+                                f"• Search for xrefs to functions to find indirect calls\n"
+                                f"• Look for DATA references using get_xrefs_to()",
+                            ),
+                        )
                     )
 
-                self.workflow_diagram.set_current_stage("complete")
+                # Update workflow stage via queue
+                self.workflow_stage_queue.put("complete")
 
             except Exception as e:
                 import traceback
 
-                self.response_panel.add_response("Error", f"Scan failed: {str(e)}\n\n{traceback.format_exc()}")
-                self.workflow_diagram.set_current_stage("error")
+                # Send error via queue
+                self.agent_ui_queue.put(("response", ("Error", f"Scan failed: {str(e)}\n\n{traceback.format_exc()}")))
+                # Update workflow stage via queue
+                self.workflow_stage_queue.put("error")
             finally:
                 self._set_tool_running(False, "")
 
