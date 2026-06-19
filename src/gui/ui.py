@@ -46,6 +46,10 @@ class OGhidraUI:
             size=(1400, 900),
         )
 
+        # Ensure closing the main window triggers a clean application shutdown
+        # (save session, close Ghidra/pyGhidra client, exit mainloop).
+        self.root.protocol("WM_DELETE_WINDOW", self._quit_application)
+
         self._setup_ui()
         self._setup_menu()
 
@@ -954,12 +958,21 @@ class OGhidraUI:
             except Exception as e:
                 results.append(f"Ollama API: ERROR - {e}")
 
-            # Check Ghidra
+            # Check Ghidra backend (HTTP MCP server or pyGhidra)
             try:
                 ghidra_health = self.bridge.ghidra.check_health()
-                results.append(f"GhidraMCP API: {'OK ✅' if ghidra_health else 'NOT OK ❌'}")
+                # Decide label based on configured backend
+                backend = getattr(self.config.ghidra, "backend", "http")
+                if backend == "pyghidra":
+                    label = "PyGhidra API"
+                else:
+                    label = "GhidraMCP API"
+
+                results.append(f"{label}: {'OK ✅' if ghidra_health else 'NOT OK ❌'}")
             except Exception as e:
-                results.append(f"GhidraMCP API: ERROR - {e}")
+                backend = getattr(self.config.ghidra, "backend", "http")
+                label = "PyGhidra API" if backend == "pyghidra" else "GhidraMCP API"
+                results.append(f"{label}: ERROR - {e}")
 
             # Check CAG
             try:
@@ -1264,6 +1277,13 @@ Features:
                 # Save session before quitting
                 if hasattr(self.bridge, "cag_manager") and self.bridge.cag_manager:
                     self.bridge.cag_manager.save_session()
+                # Best-effort: close any Ghidra client (including pyGhidra
+                # backend) so projects/programs are released cleanly.
+                if hasattr(self.bridge, "ghidra_client") and self.bridge.ghidra_client:
+                    try:
+                        self.bridge.ghidra_client.close()
+                    except Exception as e:
+                        logger.error(f"Error closing Ghidra client on quit: {e}")
             except Exception as e:
                 logger.error(f"Error saving session on quit: {e}")
 

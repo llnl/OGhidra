@@ -1367,6 +1367,40 @@ class GhidraMCPConfig(BaseModel):
     timeout: int = Field(ge=1, le=300, default=30, description="Timeout in seconds (1-300)", env="GHIDRA_TIMEOUT")
     mock_mode: bool = Field(default=False, env="GHIDRA_MOCK_MODE")
     api_path: str = Field(default="", description="API path for GhidraMCP", env="GHIDRA_API_PATH")
+    # Backend selection: "http" uses the GhidraMCP HTTP server, "pyghidra"
+    # uses the in-process pyGhidra integration.
+    backend: str = Field(
+        default="http",
+        description="Ghidra backend: 'http' (GhidraMCP server) or 'pyghidra' (in-process)",
+        env="GHIDRA_BACKEND",
+    )
+
+    # Optional pyGhidra settings. These are only used when backend == "pyghidra".
+    # They are intentionally loose strings so users can adapt them to however
+    # they open projects/programs via pyGhidra.
+    pyghidra_project_path: str | None = Field(
+        default=None,
+        description="Path to Ghidra project (directory or .gpr) for pyGhidra backend",
+        env="PYGHIDRA_PROJECT_PATH",
+    )
+    pyghidra_program: str | None = Field(
+        default=None,
+        description=(
+            "Program name or path within the project for pyGhidra backend. "
+            "If omitted and the project contains exactly one program, that program "
+            "will be opened automatically; if multiple programs exist, you must "
+            "specify this value."
+        ),
+        env="PYGHIDRA_PROGRAM",
+    )
+    pyghidra_binary: str | None = Field(
+        default=None,
+        description=(
+            "Path to a binary to open with pyGhidra. When set and no project is provided, "
+            "OGhidra will create a new Ghidra project and import this binary."
+        ),
+        env="PYGHIDRA_BINARY",
+    )
 
     @validator("api_path")
     def validate_api_path(cls, v):
@@ -1374,6 +1408,15 @@ class GhidraMCPConfig(BaseModel):
         if v and not v.startswith("/"):
             raise ValueError('API path must start with "/" or be empty')
         return v
+
+    @validator("backend")
+    def validate_backend(cls, v):
+        """Validate Ghidra backend selection."""
+        normalized = v.strip().lower()
+        valid_backends = {"http", "pyghidra"}
+        if normalized not in valid_backends:
+            raise ValueError(f"backend must be one of {sorted(valid_backends)}")
+        return normalized
 
 
 class SessionHistoryConfig(BaseModel):
@@ -1699,6 +1742,26 @@ def get_config() -> BridgeConfig:
             if "ghidra" not in config_data:
                 config_data["ghidra"] = {}
             config_data["ghidra"]["api_path"] = os.getenv("GHIDRA_API_PATH")
+
+        if os.getenv("GHIDRA_BACKEND"):
+            if "ghidra" not in config_data:
+                config_data["ghidra"] = {}
+            config_data["ghidra"]["backend"] = os.getenv("GHIDRA_BACKEND")
+
+        if os.getenv("PYGHIDRA_PROJECT_PATH"):
+            if "ghidra" not in config_data:
+                config_data["ghidra"] = {}
+            config_data["ghidra"]["pyghidra_project_path"] = os.getenv("PYGHIDRA_PROJECT_PATH")
+
+        if os.getenv("PYGHIDRA_PROGRAM"):
+            if "ghidra" not in config_data:
+                config_data["ghidra"] = {}
+            config_data["ghidra"]["pyghidra_program"] = os.getenv("PYGHIDRA_PROGRAM")
+
+        if os.getenv("PYGHIDRA_BINARY"):
+            if "ghidra" not in config_data:
+                config_data["ghidra"] = {}
+            config_data["ghidra"]["pyghidra_binary"] = os.getenv("PYGHIDRA_BINARY")
 
         # Load LLM Provider
         if os.getenv("LLM_PROVIDER"):

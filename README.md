@@ -303,6 +303,84 @@ File → Load Session
 
 ---
 
+## Backend Setup
+
+OGhidra supports two backend types:
+
+- **MCP** — Integrates with the GhidraMCP server and requires the Ghidra client to be running during analysis
+- **PyGhidra** — Supports headless analysis without the Ghidra client and removes the server component required by MCP
+
+### Selecting a Backend
+
+Use the following command-line option to choose a backend:
+
+```bash
+--ghidra-backend={http,pyghidra}
+```
+
+| Backend Option | Description |
+|----------------|-------------|
+| `http` | Uses the GhidraMCP backend |
+| `pyghidra` | Uses the PyGhidra backend |
+
+---
+
+## PyGhidra Configuration
+
+### Using an Existing Ghidra Project
+
+Specify a Ghidra project file (`.gpr`) when launching OGhidra:
+
+```bash
+--pyghidra-project=/path/to/project.gpr
+```
+
+PyGhidra requires a valid Ghidra project in order to launch OGhidra.
+
+---
+
+### Selecting a Program
+
+Specify which binary inside the Ghidra project should be analyzed:
+
+```bash
+--pyghidra-program=<program_name>
+```
+
+example call for selecting a program in a Ghidra project:
+
+```bash
+uv run main.py --ui --ghidra-backend=pyghidra --pyghidra-project=/path/to/project.gpr --pyghidra-program=<program_name>
+```
+
+Requirements:
+
+- The program name must exactly match the name shown in the Ghidra project GUI
+- This option is required when using an existing project
+- Failure to specify a program will prevent OGhidra from launching
+
+---
+
+### Launching a Binary Directly
+
+You can also provide a binary path directly:
+
+```bash
+--pyghidra-binary=/path/to/binary
+```
+
+When this option is used, PyGhidra automatically:
+
+1. Creates a new Ghidra project (`.gpr`)
+2. Imports the binary
+3. Launches the binary in OGhidra for analysis
+
+example call for launching a binary directly:
+
+uv run main.py --ui --ghidra-backend=pyghidra --pyghidra-binary=/path/to/binary
+
+---
+
 ## Common Workflows
 
 ### Analyze a Suspicious Binary

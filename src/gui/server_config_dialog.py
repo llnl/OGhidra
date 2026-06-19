@@ -338,6 +338,38 @@ class ServerConfigDialog:
                 except Exception as e:
                     results.append(f"Ollama: ❌ {str(e)}")
 
+            backend = getattr(self.config.ghidra, "backend", "http")
+
+            if backend == "pyghidra":
+                try:
+                    from .ghidra_client import PyGhidraClient
+
+                    client = PyGhidraClient(self.config.ghidra)
+                    try:
+                        if client.check_health():
+                            results.append("pyGhidra: ✅ Connected")
+                        else:
+                            results.append("pyGhidra: ❌ Health check failed")
+                    finally:
+                        client.close()
+                except Exception as e:
+                    results.append(f"pyGhidra: ❌ {str(e)}")
+            else:
+                try:
+                    import requests
+
+                    response = requests.get(
+                        f"{self.ghidra_url_var.get()}/methods",
+                        params={"offset": 0, "limit": 1},
+                        timeout=5,
+                    )
+                    if response.status_code == 200:
+                        results.append("GhidraMCP: ✅ Connected")
+                    else:
+                        results.append(f"GhidraMCP: ❌ HTTP {response.status_code}")
+                except Exception as e:
+                    results.append(f"GhidraMCP: ❌ {str(e)}")
+
             # Test GhidraMCP
             try:
                 import requests

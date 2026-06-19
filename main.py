@@ -43,13 +43,62 @@ def print_header():
 
 def run_interactive_mode(bridge: Bridge, config: BridgeConfig):
     """Run the bridge in interactive mode."""
+    is_pyghidra_backend = getattr(config.ghidra, "backend", "http") == "pyghidra"
+    ghidra_backend_label = "pyGhidra" if is_pyghidra_backend else "GhidraMCP"
     print("Ollama-GhidraMCP Bridge (Interactive Mode)")
     print(
         f"Default model: {bridge.ollama.config.model if hasattr(bridge, 'ollama') and hasattr(bridge.ollama, 'config') else config.ollama.model}"
     )
+    print(f"Ghidra backend: {ghidra_backend_label}")
 
     # Initialize a list to store outputs from the current session for review
     current_session_log = []
+
+    def _normalize_function_lines(raw_result):
+        if isinstance(raw_result, list):
+            raw_lines = [str(line).strip() for line in raw_result if str(line).strip()]
+        elif isinstance(raw_result, str):
+            raw_lines = [line.strip() for line in raw_result.splitlines() if line.strip()]
+        else:
+            return [], f"Error: Unexpected function list format: {type(raw_result).__name__}"
+
+        if raw_lines and raw_lines[0].lower().startswith(("error", "request failed")):
+            return [], raw_lines[0]
+
+        filtered_lines = [
+            line
+            for line in raw_lines
+            if not line.startswith("[")
+            and not line.startswith("=")
+            and not line.startswith("-")
+            and not line.lower().startswith(("error", "request failed"))
+        ]
+        has_more = any("[Next:" in line for line in raw_lines)
+        return filtered_lines, has_more
+
+    def _collect_all_functions():
+        all_functions = []
+        offset = 0
+        limit = 200
+
+        while True:
+            functions_result = bridge.ghidra.list_functions(offset=offset, limit=limit) if hasattr(bridge, "ghidra") else []
+
+            batch, status = _normalize_function_lines(functions_result)
+            if isinstance(status, str):
+                return status
+
+            if not batch:
+                break
+
+            all_functions.extend(batch)
+
+            if not status:
+                break
+
+            offset += limit
+
+        return all_functions
 
     while True:
         try:
@@ -546,8 +595,12 @@ Tool Output:
                         if address_part:  # Ensure address_part is not empty
                             address = address_part
 
+                    if is_pyghidra_backend and not address:
+                        print("\nThe pyGhidra backend does not track the live Ghidra GUI selection.")
+                        print("Use: analyze-function 0x401000\n")
+                        continue
+
                     params_for_log = f"address={repr(address)}" if address else ""
-                    print(f"\nExecuting: analyze_function({f'address=\\"{address}\\"' if address else ''})")
 
                     raw_tool_result = (
                         bridge.ghidra.analyze_function(address=address)
@@ -654,25 +707,13 @@ Tool Output:
 
                     # Step 1: Get all functions
                     print("\n[Step 1] Getting function list...")
-                    functions_result = bridge.ghidra.list_functions() if hasattr(bridge, "ghidra") else []
+                    functions_result = _collect_all_functions()
 
-                    if isinstance(functions_result, str) and functions_result.lower().startswith("error:"):
+                    if isinstance(functions_result, str):
                         print(f"Error getting functions: {functions_result}")
                         continue
 
-                    # Parse function list
-                    valid_functions = []
-                    if isinstance(functions_result, list):
-                        valid_functions = functions_result
-                    elif isinstance(functions_result, str):
-                        import re
-
-                        # Parse format: "FUN_00401000 at 00401000"
-                        function_lines = functions_result.strip().split("\n")
-                        for line in function_lines:
-                            line = line.strip()
-                            if line and not line.startswith("=") and not line.startswith("-"):
-                                valid_functions.append(line)
+                    valid_functions = functions_result
 
                     if not valid_functions:
                         print("No functions found to enumerate.")
@@ -966,18 +1007,26 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                                 if suggested_name and is_generic_name:
                                     print(f"  📝 Extracted name: {suggested_name}")
 
-                                    # Perform the rename using bridge
+                                    # Perform the rename using bridge. Use the
+                                    # address-based rename tool so this works
+                                    # consistently for both MCP and pyGhidra
+                                    # backends.
                                     try:
                                         from src.bridge import Bridge
 
                                         if hasattr(bridge, "execute_command"):
                                             rename_result = bridge.execute_command(
-                                                "rename_function", {"old_name": function_name, "new_name": suggested_name}
+                                                "rename_function_by_address",
+                                                {
+                                                    "function_address": address,
+                                                    "new_name": suggested_name,
+                                                },
                                             )
                                         else:
                                             # Fallback to direct ghidra call
-                                            rename_result = bridge.ghidra.rename_function(
-                                                old_name=function_name, new_name=suggested_name
+                                            rename_result = bridge.ghidra.rename_function_by_address(
+                                                function_address=address,
+                                                new_name=suggested_name,
                                             )
 
                                         if isinstance(rename_result, str) and rename_result.lower().startswith("error:"):
@@ -1254,13 +1303,62 @@ def main():
     parser.add_argument("--interactive", "-i", action="store_true", help="Enable interactive mode")
     parser.add_argument("--query", "-q", type=str, help="Single query to execute (non-interactive mode)")
     # UI now defaults to ON when no other mode flags are passed
-    parser.add_argument("--ui", action="store_true", help="Launch the graphical user interface (default)")
+    parser.add_argument(
+        "--ui",
+        action="store_true",
+        help="Launch the graphical user interface (default)",
+    )
+
+    # Ghidra backend selection: default is HTTP GhidraMCP server.
+    parser.add_argument(
+        "--ghidra-backend",
+        choices=["http", "pyghidra"],
+        default=None,
+        help="Backend to use for Ghidra integration: 'http' (default) or 'pyghidra'",
+    )
+
+    # When using the pyGhidra backend, these options can be used to specify
+    # the target project and program without editing configuration files.
+    parser.add_argument(
+        "--pyghidra-project",
+        type=str,
+        default=None,
+        help="Path to Ghidra project (.gpr or directory) for pyGhidra backend",
+    )
+    parser.add_argument(
+        "--pyghidra-program",
+        type=str,
+        default=None,
+        help=(
+            "Program name or path within the project for pyGhidra backend. "
+            "If omitted and the project contains exactly one program, that program "
+            "will be opened automatically; otherwise you must specify this option."
+        ),
+    )
+
+    parser.add_argument(
+        "--pyghidra-binary",
+        type=str,
+        default=None,
+        help=(
+            "Path to a binary to open in a new Ghidra project for the pyGhidra backend. "
+            "When provided without --pyghidra-project, OGhidra will create a project and "
+            "import this binary automatically."
+        ),
+    )
 
     # Capabilities list is now included by default; provide opt-out flag instead
     parser.add_argument(
-        "--no-capabilities", "--no-cap", action="store_true", help="Do NOT include tool capabilities in the prompt"
+        "--no-capabilities",
+        "--no-cap",
+        action="store_true",
+        help="Do NOT include tool capabilities in the prompt",
     )
-    parser.add_argument("--disable-cag", action="store_true", help="Disable Cache-Augmented Generation (CAG)")
+    parser.add_argument(
+        "--disable-cag",
+        action="store_true",
+        help="Disable Cache-Augmented Generation (CAG)",
+    )
 
     args = parser.parse_args()
 
@@ -1277,6 +1375,20 @@ def main():
     # Override CAG settings from command line if specified
     if args.disable_cag:
         config.cag_enabled = False
+
+    # Override Ghidra backend from command line if specified
+    if getattr(args, "ghidra_backend", None):
+        config.ghidra.backend = args.ghidra_backend
+
+    # Apply pyGhidra project/program/binary options when using pyGhidra backend.
+    if getattr(args, "pyghidra_project", None):
+        config.ghidra.pyghidra_project_path = args.pyghidra_project
+    if getattr(args, "pyghidra_program", None):
+        config.ghidra.pyghidra_program = args.pyghidra_program
+    if getattr(args, "pyghidra_binary", None):
+        config.ghidra.pyghidra_binary = args.pyghidra_binary
+    if getattr(args, "pyghidra_projects_dir", None):
+        config.ghidra.pyghidra_projects_dir = args.pyghidra_projects_dir
 
     # Create the bridge
     bridge = Bridge(
