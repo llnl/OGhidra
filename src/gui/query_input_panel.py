@@ -29,14 +29,14 @@ class QueryInputPanel:
         self.query_running = False
         self.should_stop = False  # Flag to control stopping
 
-        # Queues for the asynchronous workers to post results
-        self.workflow_stage_queue: Queue[str] = Queue()
+        # Queue for the asynchronous workers to post UI updates
+        self.ui_update_queue: Queue[tuple] = Queue()
 
         # Setup the GUI
         self._setup_widgets()
 
-        # Start UI callback loops for displaying the results from asynchronous workers.
-        self._check_workflow_stage_queue()
+        # Start UI callback loop for displaying the results from asynchronous workers.
+        self._check_ui_update_queue()
 
     def _setup_widgets(self):
         """Setup the query input widgets."""
@@ -203,10 +203,10 @@ class QueryInputPanel:
 
         def worker():
             try:
-                self._set_query_running(True)
+                self._queue_ui_update("set_running", True)
 
                 # Add query to response panel
-                self.response_panel.add_response("User Query", query)
+                self._queue_ui_update("add_response", "User Query", query)
 
                 # Start monitoring workflow in a separate thread
                 monitor_thread = threading.Thread(target=self._monitor_workflow_stage, daemon=True)
@@ -223,18 +223,18 @@ class QueryInputPanel:
                 result = self.bridge.process_query(query)
 
                 # Add result to response panel
-                self.response_panel.add_response("AI Agent Response", result)
+                self._queue_ui_update("add_response", "AI Agent Response", result)
 
-                # Final stage update
+                # Final stage update - call WorkflowDiagram directly (thread-safe)
                 self.workflow_diagram.set_current_stage(None)
 
             except Exception as e:
                 error_msg = f"Error processing query: {e}"
                 logger.error(error_msg)
-                self.response_panel.add_response("Error", error_msg)
+                self._queue_ui_update("add_response", "Error", error_msg)
                 self.workflow_diagram.set_current_stage(None)
             finally:
-                self._set_query_running(False)
+                self._queue_ui_update("set_running", False)
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -340,44 +340,18 @@ class QueryInputPanel:
         """Stop the currently running query."""
         if self.query_running:
             self.should_stop = True
-            self.response_panel.add_response("User Action", "🛑 Query cancellation requested...")
-            self._set_query_running(False)
-
-    def _set_query_running(self, running: bool):
-        """Set the query running state."""
-        self.query_running = running
-
-        # Update button states
-        state = "disabled" if running else "normal"
-        self.send_button.after(0, lambda: self.send_button.config(state=state))
-        self.analyze_button.after(0, lambda: self.analyze_button.config(state=state))
-        self.rename_button.after(0, lambda: self.rename_button.config(state=state))
-        self.stop_button.after(
-            0,
-            lambda: self.stop_button.config(state="normal" if running else "disabled"),
-        )
-
-        # Update status and progress
-        if running:
-            self.should_stop = False  # Reset stop flag for new query
-            self.status_label.after(
-                0,
-                self.status_label.config(text="Processing query...", foreground="#FFA500"),
-            )
-            self.progress.after(0, self.progress.start)
-        else:
-            self.status_label.after(0, lambda: self.status_label.config(text="Ready", foreground="#2BC72B"))
-            self.progress.after(0, self.progress.stop)
+            self._queue_ui_update("add_response", "User Action", "🛑 Query cancellation requested...")
+            self._queue_ui_update("set_running", False)
 
     def _monitor_workflow_stage(self):
-        """Monitor the bridge's workflow stage and add updates to the queue."""
+        """Monitor the bridge's workflow stage and update WorkflowDiagram directly."""
         previous_stage = None
         while self.query_running:
             try:
                 current_stage = getattr(self.bridge, "current_workflow_stage", None)
                 if current_stage != previous_stage:
-                    # Add the stage change to the queue instead of updating UI directly
-                    self.workflow_stage_queue.put(current_stage)
+                    # Update WorkflowDiagram directly (it handles thread-safety internally)
+                    self.workflow_diagram.set_current_stage(current_stage)
                     previous_stage = current_stage
 
                 # Break if workflow is complete
@@ -389,25 +363,51 @@ class QueryInputPanel:
                 logger.error(f"Error monitoring workflow stage: {e}")
                 break
 
-    def _check_workflow_stage_queue(self):
-        """Process items from the workflow stage queue on the main thread."""
+    def _queue_ui_update(self, action: str, *args):
+        """Queue a UI update to be processed by the main thread."""
+        self.ui_update_queue.put((action, args))
+
+    def _check_ui_update_queue(self):
+        """Process UI updates from the queue on the main thread."""
         try:
             # Process all current items in the queue
-            while not self.workflow_stage_queue.empty():
-                # Get the current stage from the queue
-                current_stage = self.workflow_stage_queue.get_nowait()
+            while not self.ui_update_queue.empty():
+                action, args = self.ui_update_queue.get_nowait()
 
-                # Update the workflow diagram on the main thread
-                self.workflow_diagram.set_current_stage(current_stage)
+                if action == "set_running":
+                    self._set_query_running(args[0])
+                elif action == "add_response":
+                    self.response_panel.add_response(args[0], args[1])
+                else:
+                    logger.warning(f"Unknown UI update action: {action}")
 
-                # Mark as done
-                self.workflow_stage_queue.task_done()
+                self.ui_update_queue.task_done()
 
         except Exception as e:
-            logger.error(f"Error processing workflow stage queue: {e}")
+            logger.error(f"Error processing UI update queue: {e}")
 
         finally:
-            self.frame.after(100, self._check_workflow_stage_queue)
+            self.frame.after(100, self._check_ui_update_queue)
+
+    def _set_query_running(self, running: bool):
+        """Internal method to set query running state (called from main thread only)."""
+        self.query_running = running
+
+        # Update button states
+        state = "disabled" if running else "normal"
+        self.send_button.config(state=state)
+        self.analyze_button.config(state=state)
+        self.rename_button.config(state=state)
+        self.stop_button.config(state="normal" if running else "disabled")
+
+        # Update status and progress
+        if running:
+            self.should_stop = False  # Reset stop flag for new query
+            self.status_label.config(text="Processing query...", foreground="#FFA500")
+            self.progress.start()
+        else:
+            self.status_label.config(text="Ready", foreground="#2BC72B")
+            self.progress.stop()
 
     def get_widget(self):
         """Return the frame widget."""

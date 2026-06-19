@@ -6,7 +6,7 @@ import time
 import tkinter as tk
 from queue import Queue
 from tkinter import filedialog, messagebox, ttk
-from typing import Any, Dict, Literal, Optional, Tuple
+from typing import Any, Dict, Literal, Tuple
 
 from ..bridge import Bridge
 from .ai_response_panel import AIResponsePanel
@@ -36,10 +36,10 @@ class ToolButtonsPanel:
         self.tool_running = False
         self.should_stop = False  # Flag to control stopping
 
-        # Queue for thread-safe UI updates
-        self.workflow_stage_queue: Queue[Optional[str]] = Queue()
         # Queue for agent query thread UI updates
-        self.agent_ui_queue: Queue[Tuple[Literal["tool_running", "response", "workflow_stage"], Any]] = Queue()
+        self.agent_ui_queue: Queue[Tuple[Literal["tool_running", "response", "show_save_dialog", "update_response"], Any]] = (
+            Queue()
+        )
 
         # DECOMPILATION CACHE: LRU cache for frequently accessed functions
         self._decompilation_cache = {}  # address -> decompiled_code
@@ -49,8 +49,6 @@ class ToolButtonsPanel:
 
         self._setup_widgets()
 
-        # Start processing the workflow stage queue
-        self._check_workflow_stage_queue()
         # Start processing the agent UI queue
         self._check_agent_ui_queue()
 
@@ -221,16 +219,16 @@ class ToolButtonsPanel:
                 # Add result to response panel via queue
                 self.agent_ui_queue.put(("response", ("AI Agent Response", result)))
 
-                # Final stage update via queue
-                self.agent_ui_queue.put(("workflow_stage", None))
+                # Final stage update - call WorkflowDiagram directly (thread-safe)
+                self.workflow_diagram.set_current_stage(None)
 
             except Exception as e:
                 error_msg = f"Error running {tool_name}: {e}"
                 logger.error(error_msg)
                 # Add error message to queue
                 self.agent_ui_queue.put(("response", ("Error", error_msg)))
-                # Final stage update via queue
-                self.agent_ui_queue.put(("workflow_stage", None))
+                # Final stage update - call WorkflowDiagram directly (thread-safe)
+                self.workflow_diagram.set_current_stage(None)
             finally:
                 # THREAD SAFETY: Clear batch operation flag to re-enable auto-refresh
                 if self.renamed_functions_panel:
@@ -251,14 +249,14 @@ class ToolButtonsPanel:
         threading.Thread(target=worker, daemon=True).start()
 
     def _monitor_workflow_stage(self):
-        """Monitor the bridge's workflow stage and add updates to the queue."""
+        """Monitor the bridge's workflow stage and update WorkflowDiagram directly."""
         previous_stage = None
         while self.tool_running:
             try:
                 current_stage = getattr(self.bridge, "current_workflow_stage", None)
                 if current_stage != previous_stage:
-                    # Add the stage change to the queue instead of updating UI directly
-                    self.workflow_stage_queue.put(current_stage)
+                    # Update WorkflowDiagram directly (it handles thread-safety internally)
+                    self.workflow_diagram.set_current_stage(current_stage)
                     previous_stage = current_stage
 
                 # Break if workflow is complete
@@ -276,8 +274,8 @@ class ToolButtonsPanel:
         def worker():
             try:
                 self._set_tool_running(True, display_name)
-                # Update workflow stage via queue
-                self.agent_ui_queue.put(("workflow_stage", "execution"))
+                # Update workflow stage - call WorkflowDiagram directly (thread-safe)
+                self.workflow_diagram.set_current_stage("execution")
 
                 # Add initial message to response panel via queue
                 self.agent_ui_queue.put(
@@ -390,8 +388,8 @@ class ToolButtonsPanel:
                                         code_snippet = f"Error decompiling {faddr}: {e}"
                                     extra_context += f"\n--- Decompiled caller {faddr} ---\n{code_snippet}\n"
 
-                        # Step 2: Send to AI for analysis - update stage via queue
-                        self.agent_ui_queue.put(("workflow_stage", "analysis"))
+                        # Step 2: Send to AI for analysis - call WorkflowDiagram directly (thread-safe)
+                        self.workflow_diagram.set_current_stage("analysis")
                         analysis_prompt = self._get_analysis_prompt(tool_name, formatted_tool_data + extra_context)
 
                         try:
@@ -414,8 +412,8 @@ class ToolButtonsPanel:
                     error_msg = f"Tool {tool_name} not found in bridge.ghidra"
                     self.agent_ui_queue.put(("response", ("Error", error_msg)))
 
-                # Final stage update via queue
-                self.agent_ui_queue.put(("workflow_stage", None))
+                # Final stage update - call WorkflowDiagram directly (thread-safe)
+                self.workflow_diagram.set_current_stage(None)
 
             except Exception as e:
                 error_msg = f"Error running {display_name}: {e}"
@@ -436,7 +434,7 @@ class ToolButtonsPanel:
                 self._set_tool_running(True, display_name)
 
                 # Update workflow stage via queue
-                self.workflow_stage_queue.put("execution")
+                self.workflow_diagram.set_current_stage("execution")
 
                 # Add initial message to response panel via queue
                 self.agent_ui_queue.put(
@@ -499,7 +497,7 @@ class ToolButtonsPanel:
                 # Step 2: Use AI agent to analyze the function and suggest a new name
                 try:
                     # Update workflow stage via queue
-                    self.workflow_stage_queue.put("analysis")
+                    self.workflow_diagram.set_current_stage("analysis")
 
                     # Create a detailed query for the AI agent to analyze and suggest rename
                     analysis_query = f"""Analyze the function '{function_name}' and provide a highly descriptive rename suggestion.
@@ -684,7 +682,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                                                 old_vector_count = len(self.bridge.cag_manager.vector_store.documents)
 
                                             # Send RAG progress to queue for thread-safe workflow_diagram update
-                                            self.workflow_stage_queue.put("rag_vectors")
+                                            self.workflow_diagram.set_current_stage("rag_vectors")
 
                                             # Send RAG integration message to response panel via queue
                                             self.agent_ui_queue.put(
@@ -703,7 +701,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                                             time.sleep(0.2)  # Brief pause to show completion
 
                                             # Send workflow stage update for RAG completion via queue
-                                            self.workflow_stage_queue.put(None)
+                                            self.workflow_diagram.set_current_stage(None)
 
                                             new_vector_count = 0
                                             if (
@@ -840,7 +838,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                     return
 
                 # Final stage update via queue
-                self.workflow_stage_queue.put(None)
+                self.workflow_diagram.set_current_stage(None)
 
             except Exception as e:
                 error_msg = f"Error running {display_name}: {e}"
@@ -848,7 +846,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                 # Send error to response panel via queue
                 self.agent_ui_queue.put(("response", ("Error", error_msg)))
                 # Update workflow stage via queue
-                self.workflow_stage_queue.put(None)
+                self.workflow_diagram.set_current_stage(None)
             finally:
                 self._set_tool_running(False)
 
@@ -1343,8 +1341,8 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
             )
         )
 
-        # Initialize RAG progress in workflow diagram via workflow_stage_queue
-        self.workflow_stage_queue.put("rag_vectors")
+        # Initialize RAG progress in workflow diagram (thread-safe)
+        self.workflow_diagram.set_current_stage("rag_vectors")
 
         # Batch create RAG vectors for all processed functions
         rag_success_count = 0
@@ -1380,7 +1378,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                     rag_success_count += 1
 
                     # No need to update workflow diagram progress for every iteration in thread-safe mode
-                    # The workflow diagram is now updated by setting rag_vectors mode via workflow_stage_queue
+                    # The workflow diagram is now updated by calling set_current_stage() directly
 
                     # Small delay to make progress visible (can be removed for production)
                     import time
@@ -1403,11 +1401,11 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                     )
                 )
                 # Update workflow stage to complete RAG operation
-                self.workflow_stage_queue.put(None)
+                self.workflow_diagram.set_current_stage(None)
                 return rag_success_count
 
         # Mark RAG creation as complete via queue
-        self.workflow_stage_queue.put(None)
+        self.workflow_diagram.set_current_stage(None)
 
         # Send RAG completion message to response panel via queue
         self.agent_ui_queue.put(
@@ -1724,7 +1722,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
             try:
                 self._set_tool_running(True, display_name)
                 # Update workflow stage via queue
-                self.workflow_stage_queue.put("planning")
+                self.workflow_diagram.set_current_stage("planning")
 
                 # THREAD SAFETY: Set flag to prevent auto-refresh during batch operations
                 if self.renamed_functions_panel:
@@ -2044,7 +2042,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
 
                     # BATCH RAG VECTOR CREATION (Performance Optimization)
                     # Update workflow stage via queue
-                    self.workflow_stage_queue.put("analysis")
+                    self.workflow_diagram.set_current_stage("analysis")
                     if processed_functions_data:
                         # Send vector creation message to response panel via queue
                         self.agent_ui_queue.put(
@@ -2258,7 +2256,7 @@ Check the tab to see detailed analysis results and manage function information.
                 # Add error message via queue
                 self.agent_ui_queue.put(("response", ("Error", error_msg)))
                 # Final stage update via queue
-                self.workflow_stage_queue.put(None)
+                self.workflow_diagram.set_current_stage(None)
             finally:
                 self._set_tool_running(False)
 
@@ -2278,7 +2276,7 @@ Check the tab to see detailed analysis results and manage function information.
             try:
                 self._set_tool_running(True, display_name)
                 # Update workflow stage via queue
-                self.workflow_stage_queue.put("execution")
+                self.workflow_diagram.set_current_stage("execution")
 
                 # Add initial message to response panel via queue
                 self.agent_ui_queue.put(
@@ -2373,7 +2371,7 @@ Check the tab to see detailed analysis results and manage function information.
                 # Step 3: AI Analysis of the function
                 try:
                     # Update workflow stage via queue
-                    self.workflow_stage_queue.put("analysis")
+                    self.workflow_diagram.set_current_stage("analysis")
 
                     # Build analysis prompt with function info first
                     analysis_prompt = (
@@ -2464,7 +2462,7 @@ Check the tab to see detailed analysis results and manage function information.
                     self.agent_ui_queue.put(("response", ("Error", error_msg)))
 
                 # Final stage update via queue
-                self.workflow_stage_queue.put(None)
+                self.workflow_diagram.set_current_stage(None)
 
             except Exception as e:
                 error_msg = f"Error running {display_name}: {e}"
@@ -2472,7 +2470,7 @@ Check the tab to see detailed analysis results and manage function information.
                 # Send error message to response panel via queue
                 self.agent_ui_queue.put(("response", ("Error", error_msg)))
                 # Update workflow stage via queue
-                self.workflow_stage_queue.put(None)
+                self.workflow_diagram.set_current_stage(None)
             finally:
                 self._set_tool_running(False)
 
@@ -2689,7 +2687,7 @@ Do you want to proceed with generating the vulnerability report?"""
             try:
                 self._set_tool_running(True, display_name)
                 # Update workflow stage via queue
-                self.workflow_stage_queue.put("planning")
+                self.workflow_diagram.set_current_stage("planning")
 
                 # Add initial message to response panel via queue
                 self.agent_ui_queue.put(
@@ -2705,7 +2703,7 @@ Do you want to proceed with generating the vulnerability report?"""
                 # Phase 1: Data Collection
                 self.agent_ui_queue.put(("response", ("Phase 1", "Collecting comprehensive binary data...")))
                 # Update workflow stage via queue
-                self.workflow_stage_queue.put("execution")
+                self.workflow_diagram.set_current_stage("execution")
 
                 # Phase 2: AI Analysis
                 self.agent_ui_queue.put(
@@ -2715,12 +2713,12 @@ Do you want to proceed with generating the vulnerability report?"""
                     )
                 )
                 # Update workflow stage via queue
-                self.workflow_stage_queue.put("analysis")
+                self.workflow_diagram.set_current_stage("analysis")
 
                 # Phase 3: Report Generation
                 self.agent_ui_queue.put(("response", ("Phase 3", "Generating structured software report...")))
                 # Update workflow stage via queue
-                self.workflow_stage_queue.put("review")
+                self.workflow_diagram.set_current_stage("review")
 
                 # Call the bridge method to generate the report
                 try:
@@ -2768,7 +2766,7 @@ Do you want to proceed with generating the vulnerability report?"""
                     self.agent_ui_queue.put(("response", ("Error Details", traceback.format_exc())))
 
                 # Final stage update via queue
-                self.workflow_stage_queue.put(None)
+                self.workflow_diagram.set_current_stage(None)
 
             except Exception as e:
                 error_msg = f"Error running {display_name}: {e}"
@@ -2776,7 +2774,7 @@ Do you want to proceed with generating the vulnerability report?"""
                 # Add error message via queue
                 self.agent_ui_queue.put(("response", ("Error", error_msg)))
                 # Final stage update via queue
-                self.workflow_stage_queue.put(None)
+                self.workflow_diagram.set_current_stage(None)
             finally:
                 self._set_tool_running(False)
 
@@ -2881,28 +2879,6 @@ TOOL DATA:
 Please provide a comprehensive analysis of this information.
 """
 
-    def _check_workflow_stage_queue(self):
-        """Process items from the workflow stage queue on the main thread."""
-        try:
-            # Process all current items in the queue
-            while not self.workflow_stage_queue.empty():
-                # Get the current stage from the queue
-                current_stage = self.workflow_stage_queue.get_nowait()
-
-                # Update the workflow diagram on the main thread
-                self.workflow_diagram.set_current_stage(current_stage)
-
-                # Mark as done
-                self.workflow_stage_queue.task_done()
-
-        except Exception as e:
-            logger.error(f"Error processing workflow stage queue: {e}")
-
-        finally:
-            # Schedule next check after 100ms
-            if hasattr(self, "frame") and self.frame.winfo_exists():
-                self.frame.after(100, self._check_workflow_stage_queue)
-
     def _check_agent_ui_queue(self):
         """Process items from the agent UI queue on the main thread."""
         try:
@@ -2918,9 +2894,6 @@ Please provide a comprehensive analysis of this information.
                 elif update_type == "response":
                     response_type, content = params
                     self.response_panel.add_response(response_type, content)
-                elif update_type == "workflow_stage":
-                    stage = params
-                    self.workflow_diagram.set_current_stage(stage)
                 elif update_type == "show_save_dialog":
                     # Handle the save dialog request on the main thread
                     report_data = params
@@ -3028,7 +3001,7 @@ Please provide a comprehensive analysis of this information.
             try:
                 self._set_tool_running(True, "Scan Function Tables")
                 # Update workflow stage via queue
-                self.workflow_stage_queue.put("execution")
+                self.workflow_diagram.set_current_stage("execution")
 
                 # Add initial message via queue
                 self.agent_ui_queue.put(
@@ -3055,7 +3028,7 @@ Please provide a comprehensive analysis of this information.
 
                     # Now send to AI for interpretation
                     # Update workflow stage via queue
-                    self.workflow_stage_queue.put("analysis")
+                    self.workflow_diagram.set_current_stage("analysis")
 
                     # Build analysis prompt
                     analysis_prompt = f"""Analyze these detected function pointer tables:
@@ -3112,7 +3085,7 @@ Please provide:
                     )
 
                 # Update workflow stage via queue
-                self.workflow_stage_queue.put("complete")
+                self.workflow_diagram.set_current_stage("complete")
 
             except Exception as e:
                 import traceback
@@ -3120,7 +3093,7 @@ Please provide:
                 # Send error via queue
                 self.agent_ui_queue.put(("response", ("Error", f"Scan failed: {str(e)}\n\n{traceback.format_exc()}")))
                 # Update workflow stage via queue
-                self.workflow_stage_queue.put("error")
+                self.workflow_diagram.set_current_stage("error")
             finally:
                 self._set_tool_running(False, "")
 
