@@ -6,7 +6,9 @@ import logging
 import re
 import struct
 import base64
-from typing import Dict, Any, List
+import threading
+from abc import ABC, abstractmethod
+from typing import Dict, Any, List, Optional, Tuple
 from urllib.parse import urlparse
 
 import httpx
@@ -16,8 +18,53 @@ from src.config import GhidraMCPConfig
 logger = logging.getLogger("ollama-ghidra-bridge.ghidra")
 
 
-class GhidraMCPClient:
-    """Client for interacting with GhidraMCP API."""
+class AbstractGhidraClient(ABC):
+    """Abstract base class for Ghidra clients.
+
+    Concrete backends (HTTP GhidraMCP server, pyGhidra, etc.) should
+    implement the same public tool surface. Shared backend-agnostic
+    helpers live here.
+    """
+
+    def __init__(self, config: GhidraMCPConfig, ollama_client=None) -> None:
+        self.config = config
+        self.ollama_client = ollama_client
+
+    # ------------------------------------------------------------------
+    # Backend lifecycle / introspection hooks
+    # ------------------------------------------------------------------
+
+    @abstractmethod
+    def health_check(self) -> bool:
+        """Check whether the backend is currently usable."""
+
+    @abstractmethod
+    def check_health(self) -> bool:
+        """Alternate health-check entry point used by the UI/tests."""
+
+    @abstractmethod
+    def instances_list(self) -> str:
+        """List available Ghidra instances/programs for this backend."""
+
+    @abstractmethod
+    def instances_discover(self, host: str = "localhost", start_port: int = 8192, end_port: int = 8200) -> str:
+        """Discover available instances/programs for this backend."""
+
+    @abstractmethod
+    def instances_use(self, port: int) -> str:
+        """Switch the active instance/program when supported."""
+
+    @abstractmethod
+    def instances_current(self) -> str:
+        """Describe the current active instance/program."""
+
+    @abstractmethod
+    def get_current_program_info(self) -> Dict[str, str]:
+        """Return structured metadata for the active program."""
+
+    # ------------------------------------------------------------------
+    # Shared helpers and backend-agnostic high-level tool surface
+    # ------------------------------------------------------------------
 
     # Safe limit enforcement for bulk operations to prevent context overflow
     MAX_SAFE_LIMIT = 20
@@ -46,485 +93,207 @@ class GhidraMCPClient:
         logger.warning(f"Invalid {param_name} type={type(value).__name__}; using default={default}")
         return default
 
-    def __init__(self, config: GhidraMCPConfig, ollama_client=None):
-        """
-        Initialize the GhidraMCP client.
+    def _get_offset_limit(self, offset: Any, limit: Any, *, default_limit: int = 100) -> Tuple[int, int]:
+        """Parse non-negative offset/limit pairs consistently across backends."""
+        parsed_offset = max(0, self._coerce_int_param(offset, param_name="offset", default=0))
+        parsed_limit = max(
+            0,
+            self._coerce_int_param(limit, param_name="limit", default=default_limit),
+        )
+        return parsed_offset, parsed_limit
 
-        Args:
-            config: GhidraMCPConfig object with connection details
-            ollama_client: Optional OllamaClient for AI-powered analysis
-        """
-        self.config = config
-        self.client = httpx.Client(timeout=config.timeout)
-        self.api_version = None
-        self.ollama_client = ollama_client
+    @staticmethod
+    def _paginate_lines(lines: List[str], offset: int, limit: int) -> List[str]:
+        """Slice a list of rendered lines using MCP-style pagination."""
+        if limit == 0:
+            return []
+        return lines[offset : offset + limit]
 
-        # Instance management
-        self.active_instances = {}  # port -> info_dict
-        self.current_instance_port = None
+    def _render_paginated_lines(self, lines: List[str], offset: int, limit: int) -> List[str]:
+        """Render list pagination metadata in the same shape as the HTTP plugin."""
+        total = len(lines)
+        start = max(0, offset)
+        end = min(total, offset + limit)
 
-        # Parse default port from config.base_url
-        try:
-            parsed = urlparse(str(config.base_url))
-            if parsed.port:
-                self.default_port = parsed.port
-                # We'll set this as active initially, but verify it later
-                self.current_instance_port = self.default_port
-                self.active_instances[self.default_port] = {"url": str(config.base_url).rstrip("/")}
+        if start >= total:
+            return [f"[Total: {total}] [Showing: 0 items - offset {offset} exceeds total]"]
+
+        header = f"[Total: {total}] [Showing: {start + 1}-{end}]"
+        if end < total:
+            header += f" [Next: offset={end}, limit={limit}]"
+
+        return [header, *lines[start:end]]
+
+    def _render_paginated_text(self, text: str, offset: int, limit: int) -> str:
+        """Render text pagination metadata in the same shape as the HTTP plugin."""
+        if text is None:
+            return ""
+
+        normalized = text.strip()
+        lines = normalized.splitlines()
+        total = len(lines)
+        start = max(0, offset)
+        end = min(total, offset + limit)
+
+        if start >= total:
+            return f"[Total Lines: {total}] [Showing: 0 lines - offset {offset} exceeds total]"
+
+        parts = [f"[Total Lines: {total}] [Showing Lines: {start + 1}-{end}]"]
+        parts.extend(lines[start:end])
+        if end < total:
+            parts.append(f"... [Next: offset={end}, limit={limit}]")
+        return "\n".join(parts)
+
+    @staticmethod
+    def _escape_display_string(value: str | None) -> str:
+        """Escape non-printable characters similarly to the HTTP plugin."""
+        if value is None:
+            return ""
+
+        pieces: List[str] = []
+        for char in value:
+            codepoint = ord(char)
+            if 32 <= codepoint < 127:
+                pieces.append(char)
+            elif char == "\n":
+                pieces.append("\\n")
+            elif char == "\r":
+                pieces.append("\\r")
+            elif char == "\t":
+                pieces.append("\\t")
             else:
-                self.default_port = 8080
-                self.current_instance_port = 8080
-        except Exception:
-            self.default_port = 8080
-            self.current_instance_port = 8080
+                pieces.append(f"\\x{codepoint & 0xFF:02x}")
+        return "".join(pieces)
 
-        logger.info(f"Initialized GhidraMCP client at: {config.base_url}")
+    @staticmethod
+    def _normalize_addr(identifier: str) -> str:
+        """Return canonical hexadecimal address without any '0x' prefix, lower-cased."""
+        if not identifier:
+            return ""
 
-        # Try to detect API version and available endpoints
-        self._detect_api()
+        if identifier.isalnum() and all(c in "0123456789abcdefABCDEF" for c in identifier):
+            return identifier.lower()
 
-        # Auto-discover other instances on startup
-        try:
-            self.instances_list()
-        except AttributeError:
-            # Methods might not be added yet if doing partial update
-            pass
+        if identifier.lower().startswith("0x"):
+            return identifier[2:].lower()
 
-    def _detect_api(self):
-        """Detect the API version and available endpoints."""
-        try:
-            # Try to get available methods
-            response = self.safe_get("methods", {"offset": 0, "limit": 1})
-            # Check if response is valid (list of strings, not error strings)
-            if (
-                response
-                and isinstance(response, list)
-                and not (response and (response[0].startswith("Error") or response[0].startswith("Request failed")))
-            ):
-                logger.info("Successfully connected to GhidraMCP API")
-                # Update info for current instance
-                if self.current_instance_port:
-                    self._update_instance_info(self.current_instance_port)
-            else:
-                logger.warning(f"Failed to connect to GhidraMCP API: {response}")
-        except Exception as e:
-            logger.warning(f"Error detecting API: {str(e)}")
+        match = re.search(r"([0-9a-fA-F]{6,})", identifier)
+        if match:
+            return match.group(1).lower()
 
-    def _get_base_url(self) -> str:
-        """Get the base URL for the current active instance."""
-        if self.current_instance_port and self.current_instance_port in self.active_instances:
-            return self.active_instances[self.current_instance_port]["url"]
-        return str(self.config.base_url).rstrip("/")
+        return identifier
 
-    def safe_get(self, endpoint: str, params: Dict[str, Any] = None) -> List[str]:
-        """
-        Perform a GET request safely and return the response lines.
-
-        Args:
-            endpoint: The endpoint to request (without leading slash)
-            params: Query parameters
-
-        Returns:
-            List of response lines
-        """
-        if params is None:
-            params = {}
-
-        # Ensure proper URL construction by removing trailing slash from base_url
-        # and ensuring endpoint doesn't start with slash
-        base_url = self._get_base_url()
-        endpoint = endpoint.lstrip("/")
-        url = f"{base_url}/{endpoint}"
-
-        try:
-            logger.debug(f"Sending GET request to GhidraMCP: {endpoint} with params: {params}")
-            response = self.client.get(url, params=params, timeout=self.config.timeout)
-            response.encoding = "utf-8"
-
-            if response.status_code == 200:
-                return response.text.splitlines()
-            else:
-                return [f"Error {response.status_code}: {response.text.strip()}"]
-        except Exception as e:
-            error_msg = f"Request failed: {str(e)}"
-            logger.error(error_msg)
-            return [error_msg]
-
-    def safe_post(self, endpoint: str, data: Dict[str, Any] | str) -> str:
-        """
-        Perform a POST request with data.
-
-        Args:
-            endpoint: The endpoint to request (without leading slash)
-            data: Data to send (dict or string)
-
-        Returns:
-            Response text
-        """
-        # Ensure proper URL construction by removing trailing slash from base_url
-        # and ensuring endpoint doesn't start with slash
-        base_url = self._get_base_url()
-        endpoint = endpoint.lstrip("/")
-        url = f"{base_url}/{endpoint}"
-
-        try:
-            logger.debug(f"Sending POST request to GhidraMCP: {endpoint} with data: {data}")
-
-            if isinstance(data, dict):
-                response = self.client.post(url, data=data, timeout=self.config.timeout)
-            else:
-                response = self.client.post(url, data=data.encode("utf-8"), timeout=self.config.timeout)
-
-            response.encoding = "utf-8"
-
-            if response.status_code == 200:
-                return response.text.strip()
-            else:
-                return f"Error {response.status_code}: {response.text.strip()}"
-        except Exception as e:
-            error_msg = f"Request failed: {str(e)}"
-            logger.error(error_msg)
-            return error_msg
-
-    def health_check(self) -> bool:
-        """
-        Check if the GhidraMCP server is available.
-
-        Returns:
-            True if the server is available, False otherwise
-        """
-        try:
-            response = self.safe_get("methods", {"offset": 0, "limit": 1})
-            return response and not response[0].startswith("Error")
-        except Exception as e:
-            logger.error(f"GhidraMCP server health check failed: {str(e)}")
-            return False
-
-    def check_health(self) -> bool:
-        """
-        Check if the GhidraMCP server is reachable and responding.
-
-        Returns:
-            True if GhidraMCP is healthy, False otherwise
-        """
-        try:
-            # Use the same URL construction pattern as other methods
-            base_url = self._get_base_url()
-            url = f"{base_url}/methods"
-
-            response = self.client.get(url, params={"offset": 0, "limit": 1})
-            response.raise_for_status()
-            return True
-        except Exception as e:
-            logger.error(f"GhidraMCP health check failed: {str(e)}")
-            return False
-
-    # Implement GhidraMCP API methods
-
+    @abstractmethod
     def list_methods(self, offset: int = 0, limit: int = 100) -> List[str]:
-        """
-        List all function names in the program with pagination.
+        """List all function names in the program with pagination."""
 
-        Args:
-            offset: Offset to start from
-            limit: Maximum number of results
-
-        Returns:
-            List of function names
-        """
-        return self.safe_get("methods", {"offset": offset, "limit": limit})
-
+    @abstractmethod
     def list_classes(self, offset: int = 0, limit: int = 100) -> List[str]:
-        """
-        List all namespace/class names in the program with pagination.
+        """List all namespace/class names in the program with pagination."""
 
-        Args:
-            offset: Offset to start from
-            limit: Maximum number of results
-
-        Returns:
-            List of class names
-        """
-        return self.safe_get("classes", {"offset": offset, "limit": limit})
-
+    @abstractmethod
     def decompile_function(self, name: str, offset: int = 0, limit: int = 500) -> str:
-        """
-        Decompile a specific function by name and return the decompiled C code.
+        """Decompile a specific function by name and return the decompiled C code."""
 
-        Args:
-            name: Function name
-            offset: Line offset (default: 0)
-            limit: Max lines to return (default: 500)
-
-        Returns:
-            Decompiled C code
-        """
-        # The new server implementation accepts query params on the same endpoint,
-        # but safe_post sends data as body.
-        # We need to construct the URL with params manually or modify safe_post.
-        # Since safe_post handles URL construction, let's just append params to the endpoint
-        # if the server handles them from query string while reading body.
-        endpoint = f"decompile?offset={offset}&limit={limit}"
-        return self.safe_post(endpoint, name)
-
+    @abstractmethod
     def rename_function(self, old_name: str, new_name: str) -> str:
-        """
-        Rename a function by its current name to a new user-defined name.
+        """Rename a function by its current name to a new user-defined name."""
 
-        Args:
-            old_name: Current function name
-            new_name: New function name
-
-        Returns:
-            Result of the rename operation
-        """
-        return self.safe_post("renameFunction", {"oldName": old_name, "newName": new_name})
-
+    @abstractmethod
     def rename_data(self, address: str, new_name: str) -> str:
-        """
-        Rename a data label at the specified address.
+        """Rename a data label at the specified address."""
 
-        Args:
-            address: Data address
-            new_name: New data name
-
-        Returns:
-            Result of the rename operation
-        """
-        return self.safe_post("renameData", {"address": address, "newName": new_name})
-
+    @abstractmethod
     def list_segments(self, offset: int = 0, limit: int = 100) -> List[str]:
-        """
-        List all memory segments in the program with pagination.
+        """List all memory segments in the program with pagination."""
 
-        Args:
-            offset: Offset to start from
-            limit: Maximum number of results
-
-        Returns:
-            List of memory segments
-        """
-        offset = self._coerce_int_param(offset, param_name="offset", default=0)
-        limit = self._coerce_int_param(limit, param_name="limit", default=100)
-
-        if limit > self.MAX_SAFE_LIMIT:
-            logger.warning(
-                self.LIMIT_WARNING_TEMPLATE.format(method="list_segments", limit=limit, max_safe=self.MAX_SAFE_LIMIT)
-            )
-            limit = self.MAX_SAFE_LIMIT
-        return self.safe_get("segments", {"offset": offset, "limit": limit})
-
+    @abstractmethod
     def list_imports(self, offset: int = 0, limit: int = 100) -> List[str]:
-        """
-        List imported symbols in the program with pagination.
+        """List imported symbols in the program with pagination."""
 
-        Args:
-            offset: Offset to start from
-            limit: Maximum number of results
-
-        Returns:
-            List of imported symbols
-        """
-        offset = self._coerce_int_param(offset, param_name="offset", default=0)
-        limit = self._coerce_int_param(limit, param_name="limit", default=100)
-
-        # Enforce safe limit to prevent context overflow
-        if limit > self.MAX_SAFE_LIMIT:
-            logger.warning(self.LIMIT_WARNING_TEMPLATE.format(method="list_imports", limit=limit, max_safe=self.MAX_SAFE_LIMIT))
-            limit = self.MAX_SAFE_LIMIT
-
-        return self.safe_get("imports", {"offset": offset, "limit": limit})
-
+    @abstractmethod
     def list_exports(self, offset: int = 0, limit: int = 100) -> List[str]:
-        """
-        List exported functions/symbols with pagination.
+        """List exported functions/symbols with pagination."""
 
-        Args:
-            offset: Offset to start from
-            limit: Maximum number of results
-
-        Returns:
-            List of exported symbols
-        """
-        offset = self._coerce_int_param(offset, param_name="offset", default=0)
-        limit = self._coerce_int_param(limit, param_name="limit", default=100)
-
-        # Enforce safe limit to prevent context overflow
-        if limit > self.MAX_SAFE_LIMIT:
-            logger.warning(self.LIMIT_WARNING_TEMPLATE.format(method="list_exports", limit=limit, max_safe=self.MAX_SAFE_LIMIT))
-            limit = self.MAX_SAFE_LIMIT
-
-        return self.safe_get("exports", {"offset": offset, "limit": limit})
-
+    @abstractmethod
     def list_namespaces(self, offset: int = 0, limit: int = 100) -> List[str]:
-        """
-        List all non-global namespaces in the program with pagination.
+        """List all non-global namespaces in the program with pagination."""
 
-        Args:
-            offset: Offset to start from
-            limit: Maximum number of results
-
-        Returns:
-            List of namespaces
-        """
-        return self.safe_get("namespaces", {"offset": offset, "limit": limit})
-
+    @abstractmethod
     def list_data_items(self, offset: int = 0, limit: int = 100) -> List[str]:
-        """
-        List defined data labels and their values with pagination.
+        """List defined data labels and their values with pagination."""
 
-        Args:
-            offset: Offset to start from
-            limit: Maximum number of results
-
-        Returns:
-            List of data items
-        """
-        offset = self._coerce_int_param(offset, param_name="offset", default=0)
-        limit = self._coerce_int_param(limit, param_name="limit", default=100)
-
-        if limit > self.MAX_SAFE_LIMIT:
-            logger.warning(
-                self.LIMIT_WARNING_TEMPLATE.format(method="list_data_items", limit=limit, max_safe=self.MAX_SAFE_LIMIT)
-            )
-            limit = self.MAX_SAFE_LIMIT
-        return self.safe_get("data", {"offset": offset, "limit": limit})
-
+    @abstractmethod
     def list_strings(self, offset: int = 0, limit: int = 100, filter: str | None = None) -> List[str]:
-        """
-        List defined strings (or search with substring filter).
+        """List defined strings or search them by substring."""
 
-        Args:
-            offset: Pagination offset
-            limit: Maximum number of results
-            filter: Optional substring to restrict results (alias: string_search)
-
-        Returns:
-            List of strings (raw API response)
-        """
-        offset = self._coerce_int_param(offset, param_name="offset", default=0)
-        limit = self._coerce_int_param(limit, param_name="limit", default=100)
-
-        # Enforce safe limit to prevent context overflow (especially when no filter)
-        if limit > self.MAX_SAFE_LIMIT and not filter:
-            logger.warning(
-                self.LIMIT_WARNING_TEMPLATE.format(method="list_strings", limit=limit, max_safe=self.MAX_SAFE_LIMIT)
-                + " Consider using 'filter' parameter for targeted searches."
-            )
-            limit = self.MAX_SAFE_LIMIT
-
-        params = {"offset": offset, "limit": limit}
-        if filter:
-            params["filter"] = filter
-        return self.safe_get("strings", params)
-
+    @abstractmethod
     def search_functions_by_name(self, query: str, offset: int = 0, limit: int = 100) -> List[str]:
-        """
-        Search for functions whose name contains the given substring.
+        """Search for functions whose name contains the given substring."""
 
-        Args:
-            query: Search query
-            offset: Offset to start from
-            limit: Maximum number of results
-
-        Returns:
-            List of matching functions
-        """
-        if not query:
-            return ["Error: query string is required"]
-        return self.safe_get("searchFunctions", {"query": query, "offset": offset, "limit": limit})
-
+    @abstractmethod
     def rename_variable(self, function_name: str, old_name: str, new_name: str) -> str:
-        """
-        Rename a local variable within a function.
+        """Rename a local variable within a function."""
 
-        Args:
-            function_name: Function name
-            old_name: Current variable name
-            new_name: New variable name
-
-        Returns:
-            Result of the rename operation
-        """
-        return self.safe_post("renameVariable", {"functionName": function_name, "oldName": old_name, "newName": new_name})
-
+    @abstractmethod
     def get_function_by_address(self, address: str) -> str:
-        """
-        Get a function by its address.
+        """Get a function by its address."""
 
-        Args:
-            address: Function address
-
-        Returns:
-            Function information
-        """
-        result = self.safe_get("get_function_by_address", {"address": address})
-        return "\n".join(result)
-
+    @abstractmethod
     def get_current_address(self) -> str:
-        """
-        Get the address currently selected by the user.
+        """Get the address currently selected by the user."""
 
-        Returns:
-            Current address
-        """
-        result = self.safe_get("get_current_address")
-        return "\n".join(result)
-
+    @abstractmethod
     def get_current_function(self) -> str:
-        """
-        Get the function currently selected by the user.
+        """Get the function currently selected by the user."""
 
-        Returns:
-            Current function
-        """
-        result = self.safe_get("get_current_function")
-        return "\n".join(result)
-
+    @abstractmethod
     def list_functions(self, offset: int = 0, limit: int = 100) -> List[str]:
-        """
-        List all functions in the database with pagination.
+        """List all functions in the database with pagination."""
 
-        Args:
-            offset: Offset to start from (default: 0)
-            limit: Maximum number of results (default: 100)
-
-        Returns:
-            List of functions with pagination metadata
-        """
-        offset = self._coerce_int_param(offset, param_name="offset", default=0)
-        limit = self._coerce_int_param(limit, param_name="limit", default=100)
-
-        # Note: list_functions returns only function names (strings), not full content
-        # so we can safely allow larger limits without context overflow risk
-        # MAX_SAFE_LIMIT is primarily for operations that return large content
-        # Increased limit to support large binaries with 3000+ functions
-        MAX_FUNCTIONS_LIMIT = 10000  # Allow pagination up to 10K functions per request
-        if limit > MAX_FUNCTIONS_LIMIT:
-            logger.warning(
-                f"list_functions limit {limit} exceeds MAX_FUNCTIONS_LIMIT={MAX_FUNCTIONS_LIMIT}. Capping to MAX_FUNCTIONS_LIMIT."
-            )
-            limit = MAX_FUNCTIONS_LIMIT
-
-        return self.safe_get("list_functions", {"offset": offset, "limit": limit})
-
+    @abstractmethod
     def decompile_function_by_address(self, address: str, offset: int = 0, limit: int = 500) -> str:
-        """
-        Decompile a function by address and return the decompiled C code.
+        """Decompile a function by address and return the decompiled C code."""
 
-        Args:
-            address: Function address (e.g., "0x401000")
-            offset: Line offset (default: 0)
-            limit: Max lines to return (default: 500)
+    @abstractmethod
+    def disassemble_function(self, address: str) -> List[str]:
+        """Get assembly code for a function."""
 
-        Returns:
-            Decompiled function
-        """
-        offset = self._coerce_int_param(offset, param_name="offset", default=0)
-        limit = self._coerce_int_param(limit, param_name="limit", default=500)
+    @abstractmethod
+    def set_decompiler_comment(self, address: str, comment: str) -> str:
+        """Set a comment for a given address in the function pseudocode."""
 
-        result = self.safe_get("decompile_function", {"address": address, "offset": offset, "limit": limit})
-        return "\n".join(result)
+    @abstractmethod
+    def set_disassembly_comment(self, address: str, comment: str) -> str:
+        """Set a comment for a given address in the function disassembly."""
+
+    @abstractmethod
+    def rename_function_by_address(self, function_address: str, new_name: str) -> str:
+        """Rename a function by its address."""
+
+    @abstractmethod
+    def set_function_prototype(self, function_address: str, prototype: str) -> str:
+        """Set a function prototype."""
+
+    @abstractmethod
+    def set_local_variable_type(self, function_address: str, variable_name: str, new_type: str) -> str:
+        """Set a local variable type."""
+
+    @abstractmethod
+    def get_xrefs_to(self, address: str, offset: int = 0, limit: int = 100):
+        """List all xrefs to an address."""
+
+    @abstractmethod
+    def get_xrefs_from(self, address: str, offset: int = 0, limit: int = 100):
+        """List all xrefs from an address."""
+
+    @abstractmethod
+    def get_function_xrefs(self, name: str, offset: int = 0, limit: int = 100):
+        """List xrefs to a function or symbol."""
+
+    @abstractmethod
+    def read_bytes(self, address: str, length: int = 16, format: str = "hex") -> str:
+        """Read raw bytes from memory."""
 
     def analyze_function(self, address: str = None) -> str:
         """
@@ -674,172 +443,6 @@ class GhidraMCPClient:
                 except Exception as e:
                     logger.debug(f"Could not decompile referenced function {func_name}: {e}")
 
-        return "\n".join(result)
-
-    def disassemble_function(self, address: str) -> List[str]:
-        """
-        Get assembly code (address: instruction; comment) for a function.
-
-        Args:
-            address: Function address
-
-        Returns:
-            Disassembled function
-        """
-        return self.safe_get("disassemble_function", {"address": address})
-
-    def set_decompiler_comment(self, address: str, comment: str) -> str:
-        """
-        Set a comment for a given address in the function pseudocode.
-
-        Args:
-            address: Address
-            comment: Comment
-
-        Returns:
-            Result of the operation
-        """
-        return self.safe_post("set_decompiler_comment", {"address": address, "comment": comment})
-
-    def set_disassembly_comment(self, address: str, comment: str) -> str:
-        """
-        Set a comment for a given address in the function disassembly.
-
-        Args:
-            address: Address
-            comment: Comment
-
-        Returns:
-            Result of the operation
-        """
-        return self.safe_post("set_disassembly_comment", {"address": address, "comment": comment})
-
-    def rename_function_by_address(self, function_address: str, new_name: str) -> str:
-        """
-        Rename a function by its address.
-
-        Args:
-            function_address: Function address
-            new_name: New name
-
-        Returns:
-            Result of the rename operation
-        """
-        return self.safe_post("rename_function_by_address", {"function_address": function_address, "new_name": new_name})
-
-    def set_function_prototype(self, function_address: str, prototype: str) -> str:
-        """
-        Set a function's prototype.
-
-        Args:
-            function_address: Function address
-            prototype: Function prototype
-
-        Returns:
-            Result of the operation
-        """
-        return self.safe_post("set_function_prototype", {"function_address": function_address, "prototype": prototype})
-
-    def set_local_variable_type(self, function_address: str, variable_name: str, new_type: str) -> str:
-        """
-        Set a local variable's type.
-
-        Args:
-            function_address: Function address
-            variable_name: Variable name
-            new_type: New type
-
-        Returns:
-            Result of the operation
-        """
-        return self.safe_post(
-            "set_local_variable_type",
-            {"function_address": function_address, "variable_name": variable_name, "new_type": new_type},
-        )
-
-    # ------------------------------------------------------------------
-    # 🔄 Address helper & cross-reference endpoints (extended)
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _normalize_addr(identifier: str) -> str:
-        """Return canonical hexadecimal address **without** any "0x" prefix, lower-cased.
-
-        Accepts typical variants such as:
-        • "0x401000"
-        • "401000"
-        • "FUN_401000" / "thunk_FUN_401000"
-
-        and converts them to "401000" which is the address format required by
-        most GhidraMCP endpoints (all lowercase, no prefix).
-        """
-
-        if not identifier:
-            return ""
-
-        # Fast-path: already looks like an address with no prefix
-        if identifier.isalnum() and all(c in "0123456789abcdefABCDEF" for c in identifier):
-            return identifier.lower()
-
-        # If it starts with 0x/0X remove the prefix
-        if identifier.lower().startswith("0x"):
-            return identifier[2:].lower()
-
-        # Extract the first long hex substring (6+ chars)
-        import re
-
-        m = re.search(r"([0-9a-fA-F]{6,})", identifier)
-        if m:
-            return m.group(1).lower()
-
-        # Fallback: return as-is (may produce server error, but avoids crash)
-        return identifier
-
-    # -- incoming xrefs
-    def get_xrefs_to(self, address: str, offset: int = 0, limit: int = 100):
-        """List all x-refs *to* `address`. Returns list/str depending on API."""
-        norm_addr = self._normalize_addr(address)
-        lines = self.safe_get("xrefs_to", {"address": norm_addr, "offset": offset, "limit": limit})
-        return lines
-
-    # -- outgoing xrefs
-    def get_xrefs_from(self, address: str, offset: int = 0, limit: int = 100):
-        """List all x-refs *from* `address`."""
-        norm_addr = self._normalize_addr(address)
-        lines = self.safe_get("xrefs_from", {"address": norm_addr, "offset": offset, "limit": limit})
-        return lines
-
-    # -- name-based helper
-    def get_function_xrefs(self, name: str, offset: int = 0, limit: int = 100):
-        """List x-refs to a function by `name`. If an address is mistakenly passed,
-        we treat it as address form and call get_xrefs_to instead."""
-        # Detect address-like input
-        if name.upper().startswith("0X") or name[:3].upper() == "FUN" or name.isalnum() and len(name) >= 6:
-            addr = self._normalize_addr(name)
-            return self.get_xrefs_to(addr, offset=offset, limit=limit)
-
-        lines = self.safe_get("function_xrefs", {"name": name, "offset": offset, "limit": limit})
-        return lines
-
-    # ------------------------------------------------------------------
-    # Raw byte reading capability
-    # ------------------------------------------------------------------
-
-    def read_bytes(self, address: str, length: int = 16, format: str = "hex") -> str:
-        """
-        Read raw bytes from memory at the specified address.
-
-        Args:
-            address: Starting address in hex format (e.g. "0x1400010a0")
-            length: Number of bytes to read (1-4096, default: 16)
-            format: "hex" for hex dump with ASCII representation,
-                    "raw" for base64 encoded bytes
-
-        Returns:
-            Hex dump string or base64-encoded raw bytes
-        """
-        norm_addr = self._normalize_addr(address)
-        result = self.safe_get("read_bytes", {"address": norm_addr, "length": length, "format": format})
         return "\n".join(result)
 
     # =========================================================================
@@ -1155,6 +758,171 @@ class GhidraMCPClient:
 
         return "\n".join(lines)
 
+
+class GhidraMCPClient(AbstractGhidraClient):
+    """HTTP-based client for interacting with GhidraMCP API."""
+
+    def __init__(self, config: GhidraMCPConfig, ollama_client=None):
+        """
+        Initialize the GhidraMCP client.
+
+        Args:
+            config: GhidraMCPConfig object with connection details
+            ollama_client: Optional OllamaClient for AI-powered analysis
+        """
+        super().__init__(config=config, ollama_client=ollama_client)
+        self.client = httpx.Client(timeout=config.timeout)
+        self.api_version = None
+
+        # Instance management
+        self.active_instances = {}  # port -> info_dict
+        self.current_instance_port = None
+
+        # Parse default port from config.base_url
+        try:
+            parsed = urlparse(str(config.base_url))
+            if parsed.port:
+                self.default_port = parsed.port
+                # We'll set this as active initially, but verify it later
+                self.current_instance_port = self.default_port
+                self.active_instances[self.default_port] = {"url": str(config.base_url).rstrip("/")}
+            else:
+                self.default_port = 8080
+                self.current_instance_port = 8080
+        except Exception:
+            self.default_port = 8080
+            self.current_instance_port = 8080
+
+        # Thread-safety: serialize all HTTP requests for future parallel workers
+        self._request_lock = threading.Lock()
+
+        logger.info(f"Initialized GhidraMCP client at: {config.base_url}")
+
+        # Try to detect API version and available endpoints
+        self._detect_api()
+
+        # Auto-discover other instances on startup
+        try:
+            self.instances_list()
+        except AttributeError:
+            # Methods might not be added yet if doing partial update
+            pass
+
+    def _detect_api(self):
+        """Detect the API version and available endpoints."""
+        try:
+            # Try to get available methods
+            response = self._http_get_lines("methods", {"offset": 0, "limit": 1})
+            # Check if response is valid (list of strings, not error strings)
+            if (
+                response
+                and isinstance(response, list)
+                and not (response and (response[0].startswith("Error") or response[0].startswith("Request failed")))
+            ):
+                logger.info("Successfully connected to GhidraMCP API")
+                # Update info for current instance
+                if self.current_instance_port:
+                    self._update_instance_info(self.current_instance_port)
+            else:
+                logger.warning(f"Failed to connect to GhidraMCP API: {response}")
+        except Exception as e:
+            logger.warning(f"Error detecting API: {str(e)}")
+
+    def _get_base_url(self) -> str:
+        """Get the base URL for the current active instance."""
+        if self.current_instance_port and self.current_instance_port in self.active_instances:
+            return self.active_instances[self.current_instance_port]["url"]
+        return str(self.config.base_url).rstrip("/")
+
+    def _http_request_text(
+        self,
+        method: str,
+        endpoint: str,
+        *,
+        params: Dict[str, Any] | None = None,
+        data: Dict[str, Any] | str | None = None,
+    ) -> str:
+        """Execute an HTTP request against the current GhidraMCP instance."""
+        if params is None:
+            params = {}
+
+        base_url = self._get_base_url()
+        endpoint = endpoint.lstrip("/")
+        url = f"{base_url}/{endpoint}"
+
+        try:
+            with self._request_lock:
+                if method.upper() == "GET":
+                    response = self.client.get(url, params=params, timeout=self.config.timeout)
+                elif isinstance(data, dict):
+                    response = self.client.post(
+                        url,
+                        params=params,
+                        data=data,
+                        timeout=self.config.timeout,
+                    )
+                elif data is None:
+                    response = self.client.post(url, params=params, timeout=self.config.timeout)
+                else:
+                    response = self.client.post(
+                        url,
+                        params=params,
+                        data=data.encode("utf-8"),
+                        timeout=self.config.timeout,
+                    )
+        except Exception as exc:
+            error_msg = f"Request failed: {exc}"
+            logger.error(error_msg)
+            return error_msg
+
+        response.encoding = "utf-8"
+        if response.status_code == 200:
+            return response.text if method.upper() == "GET" else response.text.strip()
+        return f"Error {response.status_code}: {response.text.strip()}"
+
+    def _http_get_lines(self, endpoint: str, params: Dict[str, Any] | None = None) -> List[str]:
+        """GET an endpoint and return split text lines."""
+        text = self._http_request_text("GET", endpoint, params=params)
+        return text.splitlines()
+
+    def _http_post_text(
+        self,
+        endpoint: str,
+        data: Dict[str, Any] | str,
+        *,
+        params: Dict[str, Any] | None = None,
+    ) -> str:
+        """POST to an endpoint and return response text."""
+        return self._http_request_text("POST", endpoint, params=params, data=data)
+
+    def health_check(self) -> bool:
+        """
+        Check if the GhidraMCP server is available.
+
+        Returns:
+            True if the server is available, False otherwise
+        """
+        try:
+            response = self._http_get_lines("methods", {"offset": 0, "limit": 1})
+            return bool(response) and not response[0].startswith(("Error", "Request failed"))
+        except Exception as e:
+            logger.error(f"GhidraMCP server health check failed: {str(e)}")
+            return False
+
+    def check_health(self) -> bool:
+        """
+        Check if the GhidraMCP server is reachable and responding.
+
+        Returns:
+            True if GhidraMCP is healthy, False otherwise
+        """
+        try:
+            response = self._http_get_lines("methods", {"offset": 0, "limit": 1})
+            return bool(response) and not response[0].startswith(("Error", "Request failed"))
+        except Exception as e:
+            logger.error(f"GhidraMCP health check failed: {str(e)}")
+            return False
+
     # =========================================================================
     # Instance Management
     #
@@ -1347,3 +1115,1708 @@ class GhidraMCPClient:
             pass
 
         self.active_instances[port] = info
+
+    # ------------------------------------------------------------------
+    # HTTP-backed public tool surface
+    # ------------------------------------------------------------------
+
+    def list_methods(self, offset: int = 0, limit: int = 100) -> List[str]:
+        offset, limit = self._get_offset_limit(offset, limit)
+        return self._http_get_lines("methods", {"offset": offset, "limit": limit})
+
+    def list_classes(self, offset: int = 0, limit: int = 100) -> List[str]:
+        offset, limit = self._get_offset_limit(offset, limit)
+        return self._http_get_lines("classes", {"offset": offset, "limit": limit})
+
+    def decompile_function(self, name: str, offset: int = 0, limit: int = 500) -> str:
+        offset, limit = self._get_offset_limit(offset, limit, default_limit=500)
+        return self._http_post_text(
+            "decompile",
+            name,
+            params={"offset": offset, "limit": limit},
+        )
+
+    def rename_function(self, old_name: str, new_name: str) -> str:
+        return self._http_post_text("renameFunction", {"oldName": old_name, "newName": new_name})
+
+    def rename_data(self, address: str, new_name: str) -> str:
+        return self._http_post_text("renameData", {"address": address, "newName": new_name})
+
+    def list_segments(self, offset: int = 0, limit: int = 100) -> List[str]:
+        offset, limit = self._get_offset_limit(offset, limit)
+        if limit > self.MAX_SAFE_LIMIT:
+            logger.warning(
+                self.LIMIT_WARNING_TEMPLATE.format(
+                    method="list_segments",
+                    limit=limit,
+                    max_safe=self.MAX_SAFE_LIMIT,
+                )
+            )
+            limit = self.MAX_SAFE_LIMIT
+        return self._http_get_lines("segments", {"offset": offset, "limit": limit})
+
+    def list_imports(self, offset: int = 0, limit: int = 100) -> List[str]:
+        offset, limit = self._get_offset_limit(offset, limit)
+        if limit > self.MAX_SAFE_LIMIT:
+            logger.warning(
+                self.LIMIT_WARNING_TEMPLATE.format(
+                    method="list_imports",
+                    limit=limit,
+                    max_safe=self.MAX_SAFE_LIMIT,
+                )
+            )
+            limit = self.MAX_SAFE_LIMIT
+        return self._http_get_lines("imports", {"offset": offset, "limit": limit})
+
+    def list_exports(self, offset: int = 0, limit: int = 100) -> List[str]:
+        offset, limit = self._get_offset_limit(offset, limit)
+        if limit > self.MAX_SAFE_LIMIT:
+            logger.warning(
+                self.LIMIT_WARNING_TEMPLATE.format(
+                    method="list_exports",
+                    limit=limit,
+                    max_safe=self.MAX_SAFE_LIMIT,
+                )
+            )
+            limit = self.MAX_SAFE_LIMIT
+        return self._http_get_lines("exports", {"offset": offset, "limit": limit})
+
+    def list_namespaces(self, offset: int = 0, limit: int = 100) -> List[str]:
+        offset, limit = self._get_offset_limit(offset, limit)
+        return self._http_get_lines("namespaces", {"offset": offset, "limit": limit})
+
+    def list_data_items(self, offset: int = 0, limit: int = 100) -> List[str]:
+        offset, limit = self._get_offset_limit(offset, limit)
+        if limit > self.MAX_SAFE_LIMIT:
+            logger.warning(
+                self.LIMIT_WARNING_TEMPLATE.format(
+                    method="list_data_items",
+                    limit=limit,
+                    max_safe=self.MAX_SAFE_LIMIT,
+                )
+            )
+            limit = self.MAX_SAFE_LIMIT
+        return self._http_get_lines("data", {"offset": offset, "limit": limit})
+
+    def list_strings(self, offset: int = 0, limit: int = 100, filter: str | None = None) -> List[str]:
+        offset = self._coerce_int_param(offset, param_name="offset", default=0)
+        limit = self._coerce_int_param(limit, param_name="limit", default=100)
+
+        max_limit = 50 if filter else self.MAX_SAFE_LIMIT
+        if limit > max_limit:
+            logger.warning(
+                self.LIMIT_WARNING_TEMPLATE.format(method="list_strings", limit=limit, max_safe=max_limit)
+                + (" Consider using 'filter' parameter for targeted searches." if not filter else "")
+            )
+            limit = max_limit
+
+        params: Dict[str, Any] = {"offset": offset, "limit": limit}
+        if filter:
+            params["filter"] = filter
+        return self._http_get_lines("strings", params)
+
+    def search_functions_by_name(self, query: str, offset: int = 0, limit: int = 100) -> List[str]:
+        if not query:
+            return ["Error: query string is required"]
+        offset, limit = self._get_offset_limit(offset, limit)
+        return self._http_get_lines(
+            "searchFunctions",
+            {"query": query, "offset": offset, "limit": limit},
+        )
+
+    def rename_variable(self, function_name: str, old_name: str, new_name: str) -> str:
+        return self._http_post_text(
+            "renameVariable",
+            {"functionName": function_name, "oldName": old_name, "newName": new_name},
+        )
+
+    def get_function_by_address(self, address: str) -> str:
+        return "\n".join(self._http_get_lines("get_function_by_address", {"address": address}))
+
+    def get_current_address(self) -> str:
+        return "\n".join(self._http_get_lines("get_current_address"))
+
+    def get_current_function(self) -> str:
+        return "\n".join(self._http_get_lines("get_current_function"))
+
+    def list_functions(self, offset: int = 0, limit: int = 100) -> List[str]:
+        offset, limit = self._get_offset_limit(offset, limit)
+        max_functions_limit = 10000
+        if limit > max_functions_limit:
+            logger.warning(
+                "list_functions limit %s exceeds MAX_FUNCTIONS_LIMIT=%s. Capping to MAX_FUNCTIONS_LIMIT.",
+                limit,
+                max_functions_limit,
+            )
+            limit = max_functions_limit
+
+        return self._http_get_lines("list_functions", {"offset": offset, "limit": limit})
+
+    def decompile_function_by_address(self, address: str, offset: int = 0, limit: int = 500) -> str:
+        offset, limit = self._get_offset_limit(offset, limit, default_limit=500)
+        return "\n".join(
+            self._http_get_lines(
+                "decompile_function",
+                {"address": address, "offset": offset, "limit": limit},
+            )
+        )
+
+    def disassemble_function(self, address: str) -> List[str]:
+        return self._http_get_lines("disassemble_function", {"address": address})
+
+    def set_decompiler_comment(self, address: str, comment: str) -> str:
+        return self._http_post_text("set_decompiler_comment", {"address": address, "comment": comment})
+
+    def set_disassembly_comment(self, address: str, comment: str) -> str:
+        return self._http_post_text("set_disassembly_comment", {"address": address, "comment": comment})
+
+    def rename_function_by_address(self, function_address: str, new_name: str) -> str:
+        return self._http_post_text(
+            "rename_function_by_address",
+            {"function_address": function_address, "new_name": new_name},
+        )
+
+    def set_function_prototype(self, function_address: str, prototype: str) -> str:
+        return self._http_post_text(
+            "set_function_prototype",
+            {"function_address": function_address, "prototype": prototype},
+        )
+
+    def set_local_variable_type(self, function_address: str, variable_name: str, new_type: str) -> str:
+        return self._http_post_text(
+            "set_local_variable_type",
+            {
+                "function_address": function_address,
+                "variable_name": variable_name,
+                "new_type": new_type,
+            },
+        )
+
+    def get_xrefs_to(self, address: str, offset: int = 0, limit: int = 100):
+        offset, limit = self._get_offset_limit(offset, limit)
+        norm_addr = self._normalize_addr(address)
+        return self._http_get_lines("xrefs_to", {"address": norm_addr, "offset": offset, "limit": limit})
+
+    def get_xrefs_from(self, address: str, offset: int = 0, limit: int = 100):
+        offset, limit = self._get_offset_limit(offset, limit)
+        norm_addr = self._normalize_addr(address)
+        return self._http_get_lines("xrefs_from", {"address": norm_addr, "offset": offset, "limit": limit})
+
+    def get_function_xrefs(self, name: str, offset: int = 0, limit: int = 100):
+        if name.upper().startswith("0X") or name[:3].upper() == "FUN" or name.isalnum() and len(name) >= 6:
+            return self.get_xrefs_to(name, offset=offset, limit=limit)
+
+        offset, limit = self._get_offset_limit(offset, limit)
+        return self._http_get_lines("function_xrefs", {"name": name, "offset": offset, "limit": limit})
+
+    def read_bytes(self, address: str, length: int = 16, format: str = "hex") -> str:
+        norm_addr = self._normalize_addr(address)
+        return "\n".join(
+            self._http_get_lines(
+                "read_bytes",
+                {"address": norm_addr, "length": length, "format": format},
+            )
+        )
+
+
+class PyGhidraClient(AbstractGhidraClient):
+    """pyGhidra-backed implementation of the Ghidra client.
+
+    This backend talks directly to the current Ghidra Program through
+    pyGhidra and overrides the same public tool methods exposed by the
+    HTTP-backed client. Shared backend-agnostic behavior remains in
+    :class:`AbstractGhidraClient`.
+    """
+
+    def __init__(self, config: GhidraMCPConfig, ollama_client=None):
+        super().__init__(config=config, ollama_client=ollama_client)
+
+        # Keep a subset of the HTTP client attributes for compatibility with
+        # callers that may introspect them.
+        self.api_version = None
+        self.active_instances = {}
+        self.current_instance_port = None
+        self.default_port = None
+        self._request_lock = threading.Lock()
+
+        # pyGhidra-specific state
+        self._pyghidra = None
+        self._project = None
+        self._program = None
+        self._decomp = None  # Lazy-initialized decompiler interface
+        self._decomp_monitor = None
+        self._project_ctx = None
+        self._program_ctx = None
+        self._program_consumer = None
+        self._open_program_cm = None
+        self._DefinedStringIterator = None
+        self._defined_string_iterator_warning_emitted = False
+        self._use_defined_string_iterator = True
+
+        self._init_pyghidra()
+
+    def close(self) -> None:
+        """Release pyGhidra project/program resources if possible.
+
+        This is a best-effort cleanup method; failures are logged but do not
+        raise. It is safe to call multiple times.
+        """
+        try:
+            if self._decomp is not None:
+                try:
+                    self._decomp.dispose()
+                except Exception:
+                    logger.exception("Error disposing pyGhidra decompiler interface")
+                finally:
+                    self._decomp = None
+
+            # Release program if acquired via consume_program
+            if getattr(self, "_program_consumer", None) is not None and self._program is not None:
+                try:
+                    self._program.release(self._program_consumer)
+                except Exception:
+                    logger.exception("Error releasing pyGhidra program consumer")
+                finally:
+                    self._program_consumer = None  # type: ignore[attr-defined]
+
+            # Close any program context manager we created
+            if getattr(self, "_program_ctx", None) is not None:
+                try:
+                    self._program_ctx.__exit__(None, None, None)  # type: ignore[call-arg]
+                except Exception:
+                    logger.exception("Error closing pyGhidra program context")
+                finally:
+                    self._program_ctx = None  # type: ignore[attr-defined]
+
+            # Close the project context manager if we created one
+            if getattr(self, "_project_ctx", None) is not None:
+                try:
+                    self._project_ctx.__exit__(None, None, None)  # type: ignore[call-arg]
+                except Exception:
+                    logger.exception("Error closing pyGhidra project context")
+                finally:
+                    self._project_ctx = None  # type: ignore[attr-defined]
+
+            # Close the open_program() context manager used for binary-only mode.
+            if getattr(self, "_open_program_cm", None) is not None:
+                try:
+                    self._open_program_cm.__exit__(None, None, None)  # type: ignore[call-arg]
+                except Exception:
+                    logger.exception("Error closing pyGhidra open_program context")
+                finally:
+                    self._open_program_cm = None  # type: ignore[attr-defined]
+
+            self._program = None
+            self._project = None
+        except Exception:
+            logger.exception("Unexpected error while closing PyGhidraClient")
+
+    # ------------------------------------------------------------------
+    # pyGhidra bootstrap
+    # ------------------------------------------------------------------
+
+    def _init_pyghidra(self) -> None:
+        """Initialize pyGhidra and open the configured project/program.
+
+        This is a best-effort generic bootstrap. Many setups will want to
+        customize this logic; it is deliberately simple so it is easy to
+        adjust.
+        """
+
+        # Ensure GHIDRA_INSTALL_DIR from .env is normalized for this runtime.
+        # The main entrypoint already loads .env via python-dotenv, so the
+        # value will be in os.environ if configured there. When running on
+        # Linux/WSL with a Windows-style path (e.g. "C:\\Program Files\\ghidra"),
+        # convert it to a /mnt/c/... path so pyGhidra can find the install.
+        import os
+        import re
+
+        install_dir = os.environ.get("GHIDRA_INSTALL_DIR")
+        if install_dir and os.name == "posix":
+            # Detect simple Windows path pattern like "C:\\..." or "C:/..."
+            if re.match(r"^[A-Za-z]:[\\/].*", install_dir):
+                drive = install_dir[0].lower()
+                rest = install_dir[2:].lstrip("\\/")
+                translated = f"/mnt/{drive}/{rest.replace('\\', '/')}"
+                logger.info(
+                    "Normalized GHIDRA_INSTALL_DIR from '%s' to '%s' for Linux runtime",
+                    install_dir,
+                    translated,
+                )
+                install_dir = translated
+                os.environ["GHIDRA_INSTALL_DIR"] = translated
+
+        try:
+            import pyghidra  # type: ignore[import]
+        except ImportError as exc:  # pragma: no cover - environment-specific
+            raise RuntimeError(
+                "PyGhidra backend selected but the 'pyghidra' package is not installed. "
+                "Install it (e.g. 'pip install pyghidra') and ensure Ghidra is configured."
+            ) from exc
+
+        # Start the JVM / Ghidra once via pyGhidra. This relies on the
+        # GHIDRA_INSTALL_DIR environment variable, which is expected to be set
+        # in the project's .env and already loaded into os.environ by
+        # python-dotenv at process startup.
+        try:  # pragma: no cover - environment-specific
+            started_fn = getattr(pyghidra, "started", None)
+            start_fn = getattr(pyghidra, "start", None)
+            if callable(started_fn) and callable(start_fn):
+                if not started_fn():
+                    if install_dir:
+                        from pathlib import Path
+
+                        start_fn(install_dir=Path(install_dir))
+                    else:
+                        start_fn()
+            elif callable(start_fn):
+                # Older/alternate API: best-effort start if not clearly tracked
+                if install_dir:
+                    from pathlib import Path
+
+                    start_fn(install_dir=Path(install_dir))
+                else:
+                    start_fn()
+        except Exception as exc:
+            raise RuntimeError(f"Failed to start pyGhidra with GHIDRA_INSTALL_DIR={install_dir!r}: {exc}") from exc
+
+        # Don't import 'ghidra' here. pyGhidra is responsible for starting the
+        # JVM and setting up the classpath when we open a project/program. The
+        # various helpers that need Ghidra APIs (e.g. _ensure_decompiler) will
+        # import from ghidra.* after that initialization has occurred.
+
+        self._pyghidra = pyghidra
+
+        # Prefer Ghidra's native string iterator to avoid the Python/JVM
+        # boundary cost of repeatedly calling DataType helpers in a Python loop.
+        try:
+            from ghidra.program.util import DefinedStringIterator
+        except Exception as exc:
+            self._warn_slow_string_path(
+                "DefinedStringIterator unavailable in this pyGhidra environment; "
+                "list_strings() will use the slower listing scan across the "
+                "Python/JVM boundary and performance may suffer",
+                exc,
+            )
+            DefinedStringIterator = None
+        self._DefinedStringIterator = DefinedStringIterator
+
+        binary_path = getattr(self.config, "pyghidra_binary", None)
+        project_path = getattr(self.config, "pyghidra_project_path", None)
+        program_name = getattr(self.config, "pyghidra_program", None)
+
+        # If a binary path is provided and no explicit project is configured,
+        # use pyghidra.open_program() to create a new project+program for this
+        # binary. The project location defaults to a "pyghidra_projects"
+        # directory under the current working directory, or can be overridden
+        # via config.ghidra.pyghidra_projects_dir / PYGHIDRA_PROJECTS_DIR.
+        if binary_path and not project_path:
+            from pathlib import Path
+            import os
+
+            bpath = Path(binary_path)
+            if not bpath.is_file():
+                raise RuntimeError(f"PyGhidraClient: pyghidra_binary '{binary_path}' does not exist or is not a file.")
+
+            # Determine base directory for pyGhidra projects
+            projects_dir_cfg = getattr(self.config, "pyghidra_projects_dir", None)
+            if projects_dir_cfg:
+                projects_dir = Path(projects_dir_cfg)
+            else:
+                projects_dir = Path("pyghidra_projects")
+
+            try:
+                projects_dir.mkdir(parents=True, exist_ok=True)
+            except Exception as exc:
+                raise RuntimeError(f"Failed to create pyGhidra projects directory '{projects_dir}': {exc}") from exc
+
+            project_location = str(projects_dir)
+            project_name = bpath.name  # e.g. "vivado.exe"
+
+            try:  # pragma: no cover - environment-specific
+                open_prog_cm = self._pyghidra.open_program(
+                    str(bpath),
+                    project_location=project_location,
+                    project_name=project_name,
+                )
+            except Exception as exc:
+                raise RuntimeError(
+                    f"Failed to open binary '{binary_path}' via pyghidra.open_program: {exc}. "
+                    "Please verify the path and that Ghidra/pyGhidra support this binary type."
+                ) from exc
+
+            # Keep the context manager alive so the FlatProgramAPI/program
+            # remain valid for the lifetime of this client.
+            self._open_program_cm = open_prog_cm
+            flat_api = open_prog_cm.__enter__()
+
+            try:
+                program = flat_api.getCurrentProgram()
+            except Exception as exc:
+                raise RuntimeError(
+                    f"pyghidra.open_program returned an unexpected object: {exc}. "
+                    "Expected FlatProgramAPI with getCurrentProgram()."
+                ) from exc
+
+            self._program = program
+
+            # Best-effort project discovery for logging; not strictly required
+            try:
+                domain_file = program.getDomainFile()
+                if domain_file is not None:
+                    self._project = domain_file.getProject()
+                    project_path = str(domain_file.getProject().getProjectLocator())
+            except Exception:
+                self._project = None
+
+            logger.info(
+                "Initialized PyGhidraClient from binary '%s' in project dir '%s'",
+                binary_path,
+                projects_dir,
+            )
+            return
+
+        if not project_path:
+            raise RuntimeError(
+                "PyGhidraClient requires config.ghidra.pyghidra_project_path (or --pyghidra-project) "
+                "to be set when backend='pyghidra', or config.ghidra.pyghidra_binary/--pyghidra-binary "
+                "to be provided."
+            )
+
+        # First open the project. Different pyghidra versions use different
+        # signatures for open_project(), so we try the simplest form first and
+        # fall back to a (directory, name) variant if needed.
+        try:
+            try:
+                # Common newer signature: open_project(path_or_gpr)
+                project_ctx = self._pyghidra.open_project(project_path)
+            except TypeError:
+                # Some pyghidra builds expect open_project(project_dir, name)
+                from pathlib import Path
+
+                p = Path(project_path)
+                project_dir = str(p.parent) if str(p.parent) else str(p)
+                project_name = p.stem
+                project_ctx = self._pyghidra.open_project(project_dir, project_name)
+
+            # Keep the project context manager alive so the project stays
+            # open for the lifetime of this client.
+            self._project_ctx = project_ctx
+            self._project = project_ctx.__enter__()
+        except Exception as exc:  # pragma: no cover - environment-specific
+            raise RuntimeError(
+                f"Failed to open pyGhidra project at '{project_path}': {exc}. "
+                "Please adjust PyGhidraClient._init_pyghidra to your environment."
+            ) from exc
+
+        # Discover available programs in the project so we can either validate
+        # the requested program or auto-select when only one exists. Prefer the
+        # modern pyghidra.walk_programs / program_context API when available.
+
+        discovered: List[Tuple[str, str]] = []  # (name, project_path)
+
+        walk_programs = getattr(self._pyghidra, "walk_programs", None)
+        program_context = getattr(self._pyghidra, "program_context", None)
+        consume_program = getattr(self._pyghidra, "consume_program", None)
+
+        if callable(walk_programs):
+            try:
+
+                def _collect(df, prog):
+                    try:
+                        name = df.getName()
+                        path = df.getPathname()  # e.g. "/MyProgram" or "/folder/MyProgram"
+                        discovered.append((str(name), str(path)))
+                    except Exception:
+                        return
+
+                walk_programs(self._project, _collect, start="/")
+            except Exception:
+                discovered = []
+        else:
+            # Fallback: introspect the project object via the Ghidra API
+            try:
+                project_data = self._project.getProjectData()
+                root = project_data.getRootFolder()
+                stack = [root]
+                while stack:
+                    folder = stack.pop()
+                    try:
+                        for df in folder.getFiles():
+                            try:
+                                if hasattr(df, "isProgram") and df.isProgram():
+                                    name = df.getName()
+                                    path = df.getPathname()
+                                    discovered.append((str(name), str(path)))
+                            except Exception:
+                                continue
+                        for sub in folder.getFolders():
+                            stack.append(sub)
+                    except Exception:
+                        continue
+            except Exception:
+                discovered = []
+
+        # Decide which program to open
+        target_program = program_name
+        selected_path: Optional[str] = None
+
+        if target_program:
+            # If the user provided a project path (starts with "/"), use it
+            # directly; otherwise, treat it as a name and try to resolve it.
+            if target_program.startswith("/"):
+                if discovered and any(path == target_program for _, path in discovered):
+                    selected_path = target_program
+                else:
+                    # Let pyGhidra raise a precise error later if this path
+                    # doesn't exist.
+                    selected_path = target_program
+            else:
+                # Match by program name
+                for name, path in discovered:
+                    if name == target_program:
+                        selected_path = path
+                        break
+                if selected_path is None:
+                    pretty = ", ".join(f"{n} ({p})" for n, p in discovered) or "<none>"
+                    raise RuntimeError(
+                        f"PyGhidra could not find program named '{target_program}' in project. Available programs: {pretty}"
+                    )
+        else:
+            # No explicit program name: attempt auto-selection when exactly
+            # one program exists.
+            if len(discovered) == 1:
+                selected_path = discovered[0][1]
+                logger.info(
+                    "pyGhidra: auto-selected sole program '%s' at '%s' from project '%s'",
+                    discovered[0][0],
+                    selected_path,
+                    project_path,
+                )
+            elif len(discovered) > 1:
+                pretty = ", ".join(f"{n} ({p})" for n, p in discovered)
+                raise RuntimeError(
+                    "PyGhidra project contains multiple programs. "
+                    "Please specify config.ghidra.pyghidra_program or --pyghidra-program "
+                    "as a project path (e.g., '/MyProgram') or name. "
+                    f"Available programs: {pretty}"
+                )
+            else:
+                raise RuntimeError(
+                    "PyGhidra project appears to contain no programs, or they could not be "
+                    "discovered automatically. Please import a program into the project."
+                )
+
+        # Open the selected program for long-lived use. Prefer
+        # pyghidra.consume_program() so the Program remains valid for the
+        # lifetime of this client.
+        if not selected_path:
+            raise RuntimeError("Internal error: no program path selected for pyGhidra backend.")
+
+        try:
+            if callable(consume_program):
+                # Preferred modern API: keep program alive with explicit
+                # consumer; caller is responsible for releasing when done.
+                program, consumer = consume_program(self._project, selected_path)
+                self._program = program
+                self._program_consumer = consumer
+            elif callable(program_context):
+                # Fallback: keep the context manager alive so the program
+                # isn't closed prematurely.
+                program_ctx = program_context(self._project, selected_path)
+                self._program_ctx = program_ctx
+                self._program = program_ctx.__enter__()
+            else:
+                # Legacy fallback: rely on project.open_program(path)
+                if hasattr(self._project, "open_program"):
+                    program_ctx = self._project.open_program(selected_path)
+                    self._program_ctx = program_ctx
+                    self._program = program_ctx.__enter__()
+                else:
+                    raise RuntimeError(
+                        "pyGhidra does not provide consume_program() or program_context(), "
+                        "and the project object has no open_program() method."
+                    )
+
+        except Exception as exc:  # pragma: no cover - environment-specific
+            raise RuntimeError(
+                f"Failed to initialize pyGhidra program '{selected_path}' from project "
+                f"'{project_path}': {exc}. Please verify the program path/name and that "
+                "the project contains this program."
+            ) from exc
+
+        logger.info(
+            "Initialized PyGhidraClient with project '%s', program '%s'",
+            project_path,
+            target_program,
+        )
+
+    # ------------------------------------------------------------------
+    # Health checks (override HTTP-focused defaults)
+    # ------------------------------------------------------------------
+
+    def health_check(self) -> bool:
+        """Check that the pyGhidra backend is usable.
+
+        For the in-process backend, "healthy" means we have an open Program
+        and the decompiler can be initialized successfully.
+        """
+
+        if self._program is None:
+            logger.error("pyGhidra health_check failed: no program is open")
+            return False
+
+        try:
+            self._program.getFunctionManager()
+            self._ensure_decompiler()
+            return True
+        except Exception as exc:  # pragma: no cover - environment-specific
+            logger.error("pyGhidra health_check failed: %s", exc)
+            return False
+
+    def check_health(self) -> bool:
+        """UI/tests entry point for health checks.
+
+        Delegate to :meth:`health_check` so both methods share the same
+        semantics in the pyGhidra backend.
+        """
+
+        return self.health_check()
+
+    def instances_list(self) -> str:
+        """Return the single in-process pyGhidra instance description."""
+        return self.instances_current()
+
+    def instances_discover(self, host: str = "localhost", start_port: int = 8192, end_port: int = 8200) -> str:
+        """pyGhidra runs in-process and does not support HTTP instance discovery."""
+        return self.instances_current()
+
+    def instances_use(self, port: int) -> str:
+        """pyGhidra exposes a single in-process program rather than MCP instances."""
+        return f"Error: pyGhidra backend does not support switching between HTTP instances (requested port {port})."
+
+    def instances_current(self) -> str:
+        """Describe the single active pyGhidra program."""
+        info = self.get_current_program_info()
+        if info.get("error"):
+            return info["error"]
+
+        return "\n".join(
+            [
+                "=== Current Instance: pyGhidra (in-process) ===",
+                f"Binary: {info.get('name', 'Unknown Binary')}",
+                f"Project: {info.get('project', 'Unknown Project')}",
+                f"Program Path: {info.get('program_path', 'Unknown')}",
+            ]
+        )
+
+    def get_current_program_info(self) -> Dict[str, str]:
+        """Return structured information about the currently opened program."""
+        if self._program is None:
+            return {
+                "name": "Unknown Binary",
+                "project": "Unknown Project",
+                "program_path": "",
+                "error": "No pyGhidra program is open",
+            }
+
+        info = {
+            "name": "Unknown Binary",
+            "project": "Unknown Project",
+            "program_path": "",
+            "backend": "pyghidra",
+        }
+
+        try:
+            domain_file = self._program.getDomainFile()
+            if domain_file is not None:
+                try:
+                    info["name"] = str(domain_file.getName())
+                except Exception:
+                    pass
+                try:
+                    info["program_path"] = str(domain_file.getPathname())
+                except Exception:
+                    pass
+                try:
+                    project = domain_file.getProject()
+                    if project is not None:
+                        info["project"] = str(project.getName())
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        try:
+            if info["name"] == "Unknown Binary":
+                info["name"] = str(self._program.getName())
+        except Exception:
+            pass
+
+        if info["project"] == "Unknown Project":
+            try:
+                if self._project is not None and hasattr(self._project, "getName"):
+                    info["project"] = str(self._project.getName())
+            except Exception:
+                pass
+
+        return info
+
+    # _init_pyghidra_auto removed: pyGhidra backend now always operates on an
+    # explicitly specified project, and either an explicit program name or a
+    # single auto-selected program when only one exists.
+
+    # ------------------------------------------------------------------
+    # Direct pyGhidra-backed public methods and internal helpers
+    # ------------------------------------------------------------------
+
+    def _require_program(self):
+        """Return the current program or raise a stable backend error."""
+        if self._program is None:
+            raise RuntimeError("pyGhidra program is not initialized")
+        return self._program
+
+    def _operation_error(self, operation: str, exc: Exception) -> str:
+        """Format backend errors to match the previous pyGhidra surface."""
+        if str(exc) == "pyGhidra program is not initialized":
+            return f"Error: {exc}"
+        logger.error("pyGhidra %s failed: %s", operation, exc)
+        return f"Error: pyGhidra {operation} failed: {exc}"
+
+    def _operation_error_lines(self, operation: str, exc: Exception) -> List[str]:
+        return [self._operation_error(operation, exc)]
+
+    def _address_from_hex(self, addr_str: str):
+        """Convert a hex string (with or without 0x) to a Ghidra Address."""
+        program = self._require_program()
+        af = program.getAddressFactory()
+        s = addr_str.strip()
+        if s.lower().startswith("0x"):
+            s = s[2:]
+        space = af.getDefaultAddressSpace()
+        return space.getAddress(int(s, 16))
+
+    def _get_function_for_address(self, addr):
+        """Return the function at or containing the given address."""
+        program = self._require_program()
+        func_mgr = program.getFunctionManager()
+        func = func_mgr.getFunctionAt(addr)
+        if func is None:
+            func = func_mgr.getFunctionContaining(addr)
+        return func
+
+    def _find_function_by_name(self, name: str):
+        """Best-effort lookup of a Function by name."""
+        program = self._require_program()
+        func_mgr = program.getFunctionManager()
+        st = program.getSymbolTable()
+
+        syms = st.getSymbols(name, None)
+        for sym in syms:
+            try:
+                if sym.getSymbolType().toString() == "FUNCTION":
+                    func = func_mgr.getFunctionAt(sym.getAddress())
+                    if func is not None:
+                        return func
+            except Exception:
+                continue
+
+        try:
+            funcs_iter = func_mgr.getFunctions(True)
+            for func in funcs_iter:
+                try:
+                    if str(func.getName()) == name:
+                        return func
+                except Exception:
+                    continue
+        except Exception:
+            pass
+
+        m = re.search(r"([0-9a-fA-F]{6,})", name)
+        if m:
+            try:
+                addr = self._address_from_hex(m.group(1))
+                func = func_mgr.getFunctionAt(addr)
+                if func is not None:
+                    return func
+            except Exception:
+                pass
+
+        return None
+
+    def _ensure_decompiler(self):
+        """Lazily initialize the Ghidra decompiler interface."""
+        if self._decomp is not None:
+            return self._decomp
+        program = self._require_program()
+
+        try:
+            from ghidra.app.decompiler import DecompInterface  # type: ignore[import]
+            from ghidra.util.task import ConsoleTaskMonitor  # type: ignore[import]
+        except ImportError as exc:  # pragma: no cover - environment-specific
+            raise RuntimeError("Ghidra decompiler classes not available in pyGhidra environment") from exc
+
+        decomp = DecompInterface()
+        decomp.openProgram(program)
+        # Store monitor on instance so we can reuse it
+        self._decomp_monitor = ConsoleTaskMonitor()
+        self._decomp = decomp
+        return decomp
+
+    def _run_program_transaction(self, description: str, action) -> None:
+        """Run a program mutation under pyGhidra transaction support when available."""
+        program = self._require_program()
+        tx = getattr(self._pyghidra, "transaction", None)
+        tm_fn = getattr(self._pyghidra, "task_monitor", None)
+
+        if callable(tx):
+            monitor = tm_fn() if callable(tm_fn) else None
+            with tx(program, description):
+                action()
+            if monitor is not None:
+                try:
+                    program.save(description, monitor)
+                except Exception:
+                    pass
+            return
+
+        action()
+
+    def _list_function_lines(self, *, offset: int, limit: int, include_addresses: bool) -> List[str]:
+        program = self._require_program()
+        func_mgr = program.getFunctionManager()
+        funcs_iter = func_mgr.getFunctions(True)
+
+        lines: List[str] = []
+        for func in funcs_iter:
+            try:
+                name = str(func.getName())
+                if include_addresses:
+                    entry = func.getEntryPoint()
+                    addr_text = str(entry) if entry is not None else "0"
+                    lines.append(f"{name} at {addr_text}")
+                else:
+                    lines.append(name)
+            except Exception:
+                continue
+
+        return self._render_paginated_lines(lines, offset, limit)
+
+    def _warn_slow_string_path(self, message: str, exc: Exception | None = None) -> None:
+        """Emit a one-time error when list_strings() must use the slow path."""
+        if getattr(self, "_defined_string_iterator_warning_emitted", False):
+            return
+
+        self._defined_string_iterator_warning_emitted = True
+        if exc is None:
+            logger.error("%s", message)
+        else:
+            logger.error("%s: %s", message, exc)
+
+    def _get_defined_string_iterator(self, program):
+        """Return the fast Ghidra string iterator when it is usable."""
+        iterator_cls = getattr(self, "_DefinedStringIterator", None)
+        if iterator_cls is None:
+            self._warn_slow_string_path(
+                "DefinedStringIterator unavailable in this pyGhidra environment; "
+                "list_strings() is using the slower listing scan across the "
+                "Python/JVM boundary and performance may suffer"
+            )
+            return None
+
+        if not getattr(self, "_use_defined_string_iterator", True):
+            return None
+
+        try:
+            return iterator_cls.forProgram(program)
+        except Exception as exc:
+            self._use_defined_string_iterator = False
+            self._warn_slow_string_path(
+                "DefinedStringIterator failed during list_strings(); falling back "
+                "to the slower listing scan across the Python/JVM boundary and "
+                "performance may suffer",
+                exc,
+            )
+            return None
+
+    def _iter_string_entries(self, program=None):
+        """Yield string-like entries via the slow fallback listing scan."""
+        if program is None:
+            program = self._require_program()
+        listing = program.getListing()
+        for data in listing.getDefinedData(True):
+            try:
+                dt_name = str(data.getDataType().getDisplayName()).lower()
+                if "string" in dt_name or "unicode" in dt_name or "char" in dt_name:
+                    yield data
+            except Exception:
+                continue
+
+    @staticmethod
+    def _string_entry_value(entry) -> str:
+        """Normalize string entry objects from multiple Ghidra iterators."""
+        if hasattr(entry, "value"):
+            value = entry.value
+        elif hasattr(entry, "getValue"):
+            value = entry.getValue()
+        else:
+            value = None
+        return "" if value is None else str(value)
+
+    @staticmethod
+    def _string_entry_address(entry):
+        """Normalize address extraction across iterator entry shapes."""
+        if hasattr(entry, "minAddress"):
+            return entry.minAddress
+        if hasattr(entry, "getMinAddress"):
+            return entry.getMinAddress()
+        if hasattr(entry, "getAddress"):
+            return entry.getAddress()
+        return ""
+
+    def list_methods(self, offset: int = 0, limit: int = 100) -> List[str]:
+        try:
+            offset, limit = self._get_offset_limit(offset, limit)
+            return self._list_function_lines(offset=offset, limit=limit, include_addresses=False)
+        except Exception as exc:
+            return self._operation_error_lines("list_methods", exc)
+
+    def list_classes(self, offset: int = 0, limit: int = 100) -> List[str]:
+        return self.list_namespaces(offset=offset, limit=limit)
+
+    def decompile_function(self, name: str, offset: int = 0, limit: int = 500) -> str:
+        try:
+            offset, limit = self._get_offset_limit(offset, limit, default_limit=500)
+            func = self._find_function_by_name(name)
+            if func is None:
+                return f"Error: function '{name}' not found"
+
+            decomp = self._ensure_decompiler()
+            results = decomp.decompileFunction(func, 60, self._decomp_monitor)
+            df = results.getDecompiledFunction()
+            if df is None:
+                return f"Error: Decompilation failed for function '{name}'"
+            return self._render_paginated_text(df.getC(), offset, limit)
+        except Exception as exc:
+            return self._operation_error("decompile_function(name)", exc)
+
+    def rename_function(self, old_name: str, new_name: str) -> str:
+        if not old_name or not new_name:
+            return "Error: 'oldName' and 'newName' are required for renameFunction"
+
+        try:
+            from ghidra.program.model.symbol import SourceType  # type: ignore[import]
+
+            program = self._require_program()
+            st = program.getSymbolTable()
+            func_mgr = program.getFunctionManager()
+            syms = st.getSymbols(old_name, None)
+            target_func = None
+            for sym in syms:
+                try:
+                    if sym.getSymbolType().toString() == "FUNCTION":
+                        target_func = func_mgr.getFunctionAt(sym.getAddress())
+                        break
+                except Exception:
+                    continue
+
+            if target_func is None:
+                return f"Error: function '{old_name}' not found"
+
+            desc = f"rename_function: {old_name} -> {new_name}"
+            self._run_program_transaction(desc, lambda: target_func.setName(new_name, SourceType.USER_DEFINED))
+            return f"Renamed function '{old_name}' to '{new_name}'"
+        except Exception as exc:
+            return self._operation_error("renameFunction", exc)
+
+    def rename_data(self, address: str, new_name: str) -> str:
+        if not address or not new_name:
+            return "Error: 'address' and 'newName' are required for renameData"
+
+        try:
+            from ghidra.program.model.symbol import SourceType  # type: ignore[import]
+
+            program = self._require_program()
+            addr = self._address_from_hex(str(address))
+            st = program.getSymbolTable()
+
+            def action() -> None:
+                sym = st.getPrimarySymbol(addr)
+                if sym is not None:
+                    sym.setName(new_name, SourceType.USER_DEFINED)
+                else:
+                    st.createLabel(addr, new_name, None, SourceType.USER_DEFINED)
+
+            desc = f"rename_data: {address} -> {new_name}"
+            self._run_program_transaction(desc, action)
+            return f"Renamed data at {address} to '{new_name}'"
+        except Exception as exc:
+            return self._operation_error("renameData", exc)
+
+    def list_segments(self, offset: int = 0, limit: int = 100) -> List[str]:
+        try:
+            offset, limit = self._get_offset_limit(offset, limit)
+            if limit > self.MAX_SAFE_LIMIT:
+                logger.warning(
+                    self.LIMIT_WARNING_TEMPLATE.format(
+                        method="list_segments",
+                        limit=limit,
+                        max_safe=self.MAX_SAFE_LIMIT,
+                    )
+                )
+                limit = self.MAX_SAFE_LIMIT
+
+            program = self._require_program()
+            mem = program.getMemory()
+            lines: List[str] = []
+            for blk in mem.getBlocks():
+                try:
+                    name = blk.getName()
+                    start = blk.getStart().getOffset()
+                    end = blk.getEnd().getOffset()
+                    lines.append(f"{name}: {start:x} - {end:x}")
+                except Exception:
+                    continue
+            return self._render_paginated_lines(lines, offset, limit)
+        except Exception as exc:
+            return self._operation_error_lines("list_segments", exc)
+
+    def list_imports(self, offset: int = 0, limit: int = 100) -> List[str]:
+        try:
+            offset, limit = self._get_offset_limit(offset, limit)
+            if limit > self.MAX_SAFE_LIMIT:
+                logger.warning(
+                    self.LIMIT_WARNING_TEMPLATE.format(
+                        method="list_imports",
+                        limit=limit,
+                        max_safe=self.MAX_SAFE_LIMIT,
+                    )
+                )
+                limit = self.MAX_SAFE_LIMIT
+
+            program = self._require_program()
+            st = program.getSymbolTable()
+            ref_mgr = program.getReferenceManager()
+            func_mgr = program.getFunctionManager()
+            lines: List[str] = []
+            for sym in st.getExternalSymbols():
+                try:
+                    line = f"{sym.getName()} -> {sym.getAddress()}"
+                    callers: List[str] = []
+                    ref_count = 0
+                    for ref in ref_mgr.getReferencesTo(sym.getAddress()):
+                        ref_count += 1
+                        if ref_count <= 5:
+                            from_addr = ref.getFromAddress()
+                            caller = func_mgr.getFunctionContaining(from_addr)
+                            callers.append(str(caller.getName()) if caller is not None else str(from_addr))
+
+                    if ref_count > 0:
+                        line += f" [Refs: {ref_count}]"
+                        if callers:
+                            line += f" [Callers: {', '.join(callers)}"
+                            if ref_count > 5:
+                                line += ", ..."
+                            line += "]"
+
+                    lines.append(line)
+                except Exception:
+                    continue
+            return self._render_paginated_lines(lines, offset, limit)
+        except Exception as exc:
+            return self._operation_error_lines("list_imports", exc)
+
+    def list_exports(self, offset: int = 0, limit: int = 100) -> List[str]:
+        try:
+            offset, limit = self._get_offset_limit(offset, limit)
+            if limit > self.MAX_SAFE_LIMIT:
+                logger.warning(
+                    self.LIMIT_WARNING_TEMPLATE.format(
+                        method="list_exports",
+                        limit=limit,
+                        max_safe=self.MAX_SAFE_LIMIT,
+                    )
+                )
+                limit = self.MAX_SAFE_LIMIT
+
+            program = self._require_program()
+            st = program.getSymbolTable()
+            lines: List[str] = []
+            for sym in st.getAllSymbols(True):
+                try:
+                    if hasattr(sym, "isExternalEntryPoint") and sym.isExternalEntryPoint():
+                        lines.append(f"{sym.getName()} -> {sym.getAddress()}")
+                except Exception:
+                    continue
+
+            return self._render_paginated_lines(lines, offset, limit)
+        except Exception as exc:
+            return self._operation_error_lines("list_exports", exc)
+
+    def list_namespaces(self, offset: int = 0, limit: int = 100) -> List[str]:
+        try:
+            offset, limit = self._get_offset_limit(offset, limit)
+            program = self._require_program()
+            st = program.getSymbolTable()
+            names = set()
+            for sym in st.getAllSymbols(True):
+                try:
+                    namespace = sym.getParentNamespace()
+                    if namespace is None:
+                        continue
+
+                    is_global = False
+                    try:
+                        is_global = bool(namespace.isGlobal())
+                    except Exception:
+                        is_global = str(namespace.getName()) == "Global"
+
+                    if not is_global:
+                        names.add(str(namespace.getName()))
+                except Exception:
+                    continue
+
+            return self._render_paginated_lines(sorted(names), offset, limit)
+        except Exception as exc:
+            return self._operation_error_lines("list_namespaces", exc)
+
+    def list_data_items(self, offset: int = 0, limit: int = 100) -> List[str]:
+        try:
+            offset, limit = self._get_offset_limit(offset, limit)
+            if limit > self.MAX_SAFE_LIMIT:
+                logger.warning(
+                    self.LIMIT_WARNING_TEMPLATE.format(
+                        method="list_data_items",
+                        limit=limit,
+                        max_safe=self.MAX_SAFE_LIMIT,
+                    )
+                )
+                limit = self.MAX_SAFE_LIMIT
+
+            program = self._require_program()
+            listing = program.getListing()
+            lines: List[str] = []
+            for data in listing.getDefinedData(True):
+                try:
+                    label = data.getLabel() if hasattr(data, "getLabel") else None
+                    value_repr = (
+                        data.getDefaultValueRepresentation()
+                        if hasattr(data, "getDefaultValueRepresentation")
+                        else str(data.getValue())
+                    )
+                    lines.append(f"{data.getAddress()}: {label or '(unnamed)'} = {value_repr}")
+                except Exception:
+                    continue
+            return self._render_paginated_lines(lines, offset, limit)
+        except Exception as exc:
+            return self._operation_error_lines("list_data_items", exc)
+
+    def list_strings(self, offset: int = 0, limit: int = 100, filter: str | None = None) -> List[str]:
+        offset = self._coerce_int_param(offset, param_name="offset", default=0)
+        limit = self._coerce_int_param(limit, param_name="limit", default=100)
+
+        max_limit = 50 if filter else self.MAX_SAFE_LIMIT
+        if limit > max_limit:
+            logger.warning(
+                self.LIMIT_WARNING_TEMPLATE.format(method="list_strings", limit=limit, max_safe=max_limit)
+                + (" Consider using 'filter' parameter for targeted searches." if not filter else "")
+            )
+            limit = max_limit
+
+        try:
+            program = self._require_program()
+            strings = []
+            data_iter = self._get_defined_string_iterator(program)
+            if data_iter is not None:
+                for entry in data_iter:
+                    value = entry.value
+                    if value is None:
+                        value = ""
+                    if filter and filter not in value:
+                        continue
+                    strings.append(f"{entry.minAddress}: {value}")
+            else:
+                for entry in self._iter_string_entries(program):
+                    value = self._string_entry_value(entry)
+                    if filter and filter not in value:
+                        continue
+                    addr = self._string_entry_address(entry)
+                    strings.append(f"{addr}: {value}")
+            return self._render_paginated_lines(strings, offset, limit)
+        except Exception as exc:
+            return self._operation_error_lines("list_strings", exc)
+
+    def search_functions_by_name(self, query: str, offset: int = 0, limit: int = 100) -> List[str]:
+        if not query:
+            return ["Error: query string is required"]
+
+        try:
+            offset, limit = self._get_offset_limit(offset, limit)
+            program = self._require_program()
+            func_mgr = program.getFunctionManager()
+            matches: List[str] = []
+            for func in func_mgr.getFunctions(True):
+                try:
+                    name = str(func.getName())
+                    if query.lower() in name.lower():
+                        matches.append(f"{name} @ {func.getEntryPoint()}")
+                except Exception:
+                    continue
+
+            matches.sort()
+            return self._render_paginated_lines(matches, offset, limit)
+        except Exception as exc:
+            return self._operation_error_lines("search_functions", exc)
+
+    def rename_variable(self, function_name: str, old_name: str, new_name: str) -> str:
+        if not function_name or not old_name or not new_name:
+            return "Error: 'functionName', 'oldName', and 'newName' are required for renameVariable"
+
+        try:
+            from ghidra.program.model.symbol import SourceType  # type: ignore[import]
+
+            func = self._find_function_by_name(function_name)
+            if func is None:
+                return f"Error: function '{function_name}' not found"
+
+            try:
+                vars_iter = func.getAllVariables()
+            except Exception:
+                vars_iter = list(func.getParameters()) + list(func.getLocalVariables())
+
+            target = None
+            for var in vars_iter:
+                try:
+                    if var.getName() == old_name:
+                        target = var
+                        break
+                except Exception:
+                    continue
+
+            if target is None:
+                return f"Error: variable '{old_name}' not found in function '{function_name}'"
+
+            desc = f"rename_variable: {function_name}.{old_name} -> {new_name}"
+            self._run_program_transaction(desc, lambda: target.setName(new_name, SourceType.USER_DEFINED))
+            return f"Renamed variable '{old_name}' to '{new_name}' in function '{function_name}'"
+        except Exception as exc:
+            return self._operation_error("renameVariable", exc)
+
+    def get_function_by_address(self, address: str) -> str:
+        if not address:
+            return "Error: 'address' parameter is required for get_function_by_address"
+
+        try:
+            program = self._require_program()
+            addr = self._address_from_hex(str(address))
+            func = program.getFunctionManager().getFunctionAt(addr)
+            if func is None:
+                return f"Error: No function found at address {address}"
+
+            entry = func.getEntryPoint()
+            return (
+                f"Function: {func.getName()} at {entry}\n"
+                f"Signature: {func.getSignature()}\n"
+                f"Entry: {entry}\n"
+                f"Body: {func.getBody().getMinAddress()} - "
+                f"{func.getBody().getMaxAddress()}"
+            )
+        except Exception as exc:
+            return self._operation_error("get_function_by_address", exc)
+
+    def get_current_address(self) -> str:
+        return (
+            "Error: get_current_address is unavailable in the pyGhidra backend "
+            "because it does not track the live Ghidra GUI cursor. Use an explicit "
+            "address instead."
+        )
+
+    def get_current_function(self) -> str:
+        return (
+            "Error: get_current_function is unavailable in the pyGhidra backend "
+            "because it does not track the live Ghidra GUI selection. Use an explicit "
+            "function address or name instead."
+        )
+
+    def list_functions(self, offset: int = 0, limit: int = 100) -> List[str]:
+        try:
+            offset, limit = self._get_offset_limit(offset, limit)
+            max_functions_limit = 10000
+            if limit > max_functions_limit:
+                logger.warning(
+                    f"list_functions limit {limit} exceeds "
+                    f"MAX_FUNCTIONS_LIMIT={max_functions_limit}. "
+                    "Capping to MAX_FUNCTIONS_LIMIT."
+                )
+                limit = max_functions_limit
+
+            return self._list_function_lines(offset=offset, limit=limit, include_addresses=True)
+        except Exception as exc:
+            return self._operation_error_lines("list_functions", exc)
+
+    def decompile_function_by_address(self, address: str, offset: int = 0, limit: int = 500) -> str:
+        if not address:
+            return "Error: 'address' parameter is required for decompile_function"
+
+        try:
+            offset, limit = self._get_offset_limit(offset, limit, default_limit=500)
+            addr = self._address_from_hex(str(address))
+            func = self._get_function_for_address(addr)
+            if func is None:
+                return f"Error: No function found at or containing address {address}"
+
+            decomp = self._ensure_decompiler()
+            results = decomp.decompileFunction(func, 60, self._decomp_monitor)
+            df = results.getDecompiledFunction()
+            if df is None:
+                return f"Error: Decompilation failed for {address}"
+            return self._render_paginated_text(df.getC(), offset, limit)
+        except Exception as exc:
+            return self._operation_error("decompile_function", exc)
+
+    def disassemble_function(self, address: str) -> List[str]:
+        if not address:
+            return ["Error: 'address' parameter is required for disassemble_function"]
+
+        try:
+            program = self._require_program()
+            addr = self._address_from_hex(str(address))
+            func = self._get_function_for_address(addr)
+            if func is None:
+                return [f"Error: No function found at or containing address {address}"]
+
+            listing = program.getListing()
+            body = func.getBody()
+            lines: List[str] = []
+            for cu in listing.getCodeUnits(body, True):
+                try:
+                    comment = listing.getComment(cu.EOL_COMMENT, cu.getAddress())
+                    comment_suffix = f" ; {comment}" if comment else ""
+                    instr = cu.toString()
+                    lines.append(f"{cu.getAddress()}: {instr}{comment_suffix}")
+                except Exception:
+                    continue
+            return lines
+        except Exception as exc:
+            return self._operation_error_lines("disassemble_function", exc)
+
+    def set_decompiler_comment(self, address: str, comment: str) -> str:
+        if not address or comment is None:
+            return "Error: 'address' and 'comment' are required for set_decompiler_comment"
+
+        try:
+            from ghidra.program.model.listing import CodeUnit  # type: ignore[import]
+
+            program = self._require_program()
+            addr = self._address_from_hex(str(address))
+            listing = program.getListing()
+            code_unit = listing.getCodeUnitAt(addr)
+            if code_unit is None:
+                return f"Error: No code unit at address {address}"
+
+            desc = f"set_decompiler_comment at {address}"
+            self._run_program_transaction(desc, lambda: code_unit.setComment(CodeUnit.PRE_COMMENT, comment))
+            return f"Set decompiler comment at {address}"
+        except Exception as exc:
+            return self._operation_error("set_decompiler_comment", exc)
+
+    def set_disassembly_comment(self, address: str, comment: str) -> str:
+        if not address or comment is None:
+            return "Error: 'address' and 'comment' are required for set_disassembly_comment"
+
+        try:
+            from ghidra.program.model.listing import CodeUnit  # type: ignore[import]
+
+            program = self._require_program()
+            addr = self._address_from_hex(str(address))
+            listing = program.getListing()
+            code_unit = listing.getCodeUnitAt(addr)
+            if code_unit is None:
+                return f"Error: No code unit at address {address}"
+
+            desc = f"set_disassembly_comment at {address}"
+            self._run_program_transaction(desc, lambda: code_unit.setComment(CodeUnit.EOL_COMMENT, comment))
+            return f"Set disassembly comment at {address}"
+        except Exception as exc:
+            return self._operation_error("set_disassembly_comment", exc)
+
+    def rename_function_by_address(self, function_address: str, new_name: str) -> str:
+        if not function_address or not new_name:
+            return "Error: 'function_address' and 'new_name' are required for rename_function_by_address"
+
+        try:
+            from ghidra.program.model.symbol import SourceType  # type: ignore[import]
+
+            addr = self._address_from_hex(str(function_address))
+            func = self._get_function_for_address(addr)
+            if func is None:
+                return f"Error: No function found at or containing address {function_address}"
+
+            desc = f"rename_function_by_address: {function_address} -> {new_name}"
+            self._run_program_transaction(desc, lambda: func.setName(new_name, SourceType.USER_DEFINED))
+            return f"Renamed function at {function_address} to '{new_name}'"
+        except Exception as exc:
+            return self._operation_error("rename_function_by_address", exc)
+
+    def set_function_prototype(self, function_address: str, prototype: str) -> str:
+        if not function_address or not prototype:
+            return "Error: 'function_address' and 'prototype' are required for set_function_prototype"
+
+        try:
+            program = self._require_program()
+            addr = self._address_from_hex(str(function_address))
+            func = self._get_function_for_address(addr)
+            if func is None:
+                return f"Error: No function found at or containing address {function_address}"
+
+            desc = f"set_function_prototype at {function_address}"
+            tx = getattr(self._pyghidra, "transaction", None)
+
+            if hasattr(func, "setPrototypeString") and callable(tx):
+                self._run_program_transaction(
+                    desc,
+                    lambda: func.setPrototypeString(prototype),  # type: ignore[call-arg]
+                )
+                return f"Set prototype for function at {function_address} to '{prototype}'"
+
+            try:
+                from ghidra.app.util.cparser.C import CParser  # type: ignore[import]
+            except ImportError:
+                return "Error: CParser not available to set function prototype; consider upgrading Ghidra/pyGhidra."
+
+            from ghidra.program.model.symbol import SourceType  # type: ignore[import]
+
+            dtm = program.getDataTypeManager()
+            parser = CParser(dtm)
+            func_dt = parser.parseFunction(prototype)
+
+            ret_type = func_dt.getReturnType()
+            params = func_dt.getArguments()
+
+            def action() -> None:
+                func.setReturnType(ret_type, SourceType.USER_DEFINED)
+                from ghidra.app.services import FunctionUpdateType  # type: ignore[import]
+
+                func.replaceParameters(params, FunctionUpdateType.DYNAMIC_STORAGE_ALL_PARAMS, True)
+
+            self._run_program_transaction(desc, action)
+            return f"Set prototype for function at {function_address} to '{prototype}'"
+        except Exception as exc:
+            return self._operation_error("set_function_prototype", exc)
+
+    def set_local_variable_type(self, function_address: str, variable_name: str, new_type: str) -> str:
+        if not function_address or not variable_name or not new_type:
+            return "Error: 'function_address', 'variable_name', and 'new_type' are required for set_local_variable_type"
+
+        try:
+            from ghidra.program.model.symbol import SourceType  # type: ignore[import]
+            from ghidra.app.util.cparser.C import CParser  # type: ignore[import]
+
+            program = self._require_program()
+            addr = self._address_from_hex(str(function_address))
+            func = self._get_function_for_address(addr)
+            if func is None:
+                return f"Error: No function found at or containing address {function_address}"
+
+            dtm = program.getDataTypeManager()
+            parser = CParser(dtm)
+
+            proto_src = f"void __tmp({new_type} {variable_name});"
+            tmp_func_dt = parser.parseFunction(proto_src)
+            args = tmp_func_dt.getArguments()
+            if not args:
+                return f"Error: Could not parse type '{new_type}'"
+            desired_dt = args[0].getDataType()
+
+            try:
+                vars_iter = func.getAllVariables()
+            except Exception:
+                vars_iter = list(func.getParameters()) + list(func.getLocalVariables())
+
+            target = None
+            for var in vars_iter:
+                try:
+                    if var.getName() == variable_name:
+                        target = var
+                        break
+                except Exception:
+                    continue
+
+            if target is None:
+                return f"Error: variable '{variable_name}' not found in function at {function_address}"
+
+            desc = f"set_local_variable_type for {variable_name} at {function_address}"
+            self._run_program_transaction(
+                desc,
+                lambda: target.setDataType(desired_dt, SourceType.USER_DEFINED),
+            )
+            return f"Set type of variable '{variable_name}' in function at {function_address} to '{new_type}'"
+        except Exception as exc:
+            return self._operation_error("set_local_variable_type", exc)
+
+    def get_xrefs_to(self, address: str, offset: int = 0, limit: int = 100):
+        norm_addr = self._normalize_addr(address)
+        if not norm_addr:
+            return ["Error: 'address' parameter is required for xrefs_to"]
+
+        try:
+            offset, limit = self._get_offset_limit(offset, limit)
+            program = self._require_program()
+            addr = self._address_from_hex(norm_addr)
+            ref_mgr = program.getReferenceManager()
+            func_mgr = program.getFunctionManager()
+            lines: List[str] = []
+            for ref in ref_mgr.getReferencesTo(addr):
+                try:
+                    from_addr = ref.getFromAddress()
+                    ref_type = ref.getReferenceType().toString()
+                    from_func = func_mgr.getFunctionContaining(from_addr)
+                    func_info = f" in {from_func.getName()}" if from_func else ""
+                    lines.append(f"From {from_addr}{func_info} [{ref_type}]")
+                except Exception:
+                    continue
+            return self._render_paginated_lines(lines, offset, limit)
+        except Exception as exc:
+            return self._operation_error_lines("get_xrefs_to", exc)
+
+    def get_xrefs_from(self, address: str, offset: int = 0, limit: int = 100):
+        norm_addr = self._normalize_addr(address)
+        if not norm_addr:
+            return ["Error: 'address' parameter is required for xrefs_from"]
+
+        try:
+            offset, limit = self._get_offset_limit(offset, limit)
+            program = self._require_program()
+            addr = self._address_from_hex(norm_addr)
+            ref_mgr = program.getReferenceManager()
+            func_mgr = program.getFunctionManager()
+            listing = program.getListing()
+            lines: List[str] = []
+            for ref in ref_mgr.getReferencesFrom(addr):
+                try:
+                    to_addr = ref.getToAddress()
+                    ref_type = ref.getReferenceType().toString()
+                    target_info = ""
+                    to_func = func_mgr.getFunctionAt(to_addr)
+                    if to_func is not None:
+                        target_info = f" to function {to_func.getName()}"
+                    else:
+                        data = listing.getDataAt(to_addr)
+                        if data is not None:
+                            label = data.getLabel() or getattr(data, "getPathName", lambda: "")()
+                            target_info = f" to data {label}"
+                    lines.append(f"To {to_addr}{target_info} [{ref_type}]")
+                except Exception:
+                    continue
+            return self._render_paginated_lines(lines, offset, limit)
+        except Exception as exc:
+            return self._operation_error_lines("get_xrefs_from", exc)
+
+    def get_function_xrefs(self, name: str, offset: int = 0, limit: int = 100):
+        if not name:
+            return ["Error: 'name' parameter is required for function_xrefs"]
+
+        if name.upper().startswith("0X") or name[:3].upper() == "FUN" or name.isalnum() and len(name) >= 6:
+            addr = self._normalize_addr(name)
+            return self.get_xrefs_to(addr, offset=offset, limit=limit)
+
+        try:
+            offset, limit = self._get_offset_limit(offset, limit)
+            program = self._require_program()
+            symbol_table = program.getSymbolTable()
+            ref_mgr = program.getReferenceManager()
+            func_mgr = program.getFunctionManager()
+
+            target_address = None
+
+            func = self._find_function_by_name(name)
+            if func is not None:
+                target_address = func.getEntryPoint()
+
+            if target_address is None:
+                for sym in symbol_table.getExternalSymbols():
+                    try:
+                        if sym.getName() == name:
+                            target_address = sym.getAddress()
+                            break
+                    except Exception:
+                        continue
+
+            if target_address is None:
+                try:
+                    syms = symbol_table.getSymbols(name, None)
+                except TypeError:
+                    syms = symbol_table.getSymbols(name)
+                for sym in syms:
+                    try:
+                        target_address = sym.getAddress()
+                        break
+                    except Exception:
+                        continue
+
+            if target_address is None:
+                return [f"Error: function or symbol '{name}' not found"]
+
+            lines: List[str] = []
+            for ref in ref_mgr.getReferencesTo(target_address):
+                try:
+                    from_addr = ref.getFromAddress()
+                    ref_type = ref.getReferenceType().toString()
+                    from_func = func_mgr.getFunctionContaining(from_addr)
+                    func_info = f" in {from_func.getName()}" if from_func else ""
+                    lines.append(f"From {from_addr}{func_info} [{ref_type}]")
+                except Exception:
+                    continue
+
+            return self._render_paginated_lines(lines, offset, limit)
+        except Exception as exc:
+            return self._operation_error_lines("get_function_xrefs", exc)
+
+    def read_bytes(self, address: str, length: int = 16, format: str = "hex") -> str:
+        norm_addr = self._normalize_addr(address)
+        if not norm_addr:
+            return "Error: 'address' parameter is required for read_bytes"
+
+        try:
+            length = int(length or 16)
+        except Exception as exc:
+            return f"Request failed: {exc}"
+
+        if length <= 0 or length > 4096:
+            return "Error: length must be 1-4096 bytes"
+
+        fmt = (format or "hex").lower()
+
+        try:
+            program = self._require_program()
+            addr = self._address_from_hex(norm_addr)
+            mem = program.getMemory()
+            data = bytearray(length)
+            bytes_read = mem.getBytes(addr, data)
+
+            if bytes_read <= 0:
+                return f"Error: Could not read bytes at address {address}"
+
+            raw_bytes = bytes(data[:bytes_read])
+
+            if fmt == "raw":
+                return base64.b64encode(raw_bytes).decode("ascii")
+
+            bytes_per_line = 16
+            lines: List[str] = []
+            for chunk_offset in range(0, len(raw_bytes), bytes_per_line):
+                chunk = raw_bytes[chunk_offset : chunk_offset + bytes_per_line]
+                try:
+                    line_addr = str(addr.add(chunk_offset))
+                except Exception:
+                    line_addr = f"{int(norm_addr, 16) + chunk_offset:x}"
+
+                hex_bytes = " ".join(f"{byte:02X}" for byte in chunk)
+                if len(chunk) < bytes_per_line:
+                    hex_bytes += "   " * (bytes_per_line - len(chunk))
+                ascii_repr = "".join(chr(byte) if 32 <= byte < 127 else "." for byte in chunk)
+                lines.append(f"{line_addr}: {hex_bytes} |{ascii_repr}|")
+
+            return "\n".join(lines)
+        except Exception as exc:
+            return self._operation_error("read_bytes", exc)

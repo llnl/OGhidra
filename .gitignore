@@ -189,6 +189,7 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+oghidra_venv_wsl/
 
 # Spyder project settings
 .spyderproject
@@ -312,3 +313,6 @@ uv.lock
 # Gradle project files for GhidraMCP caught by python's gitignore above.
 !OGhidraMCP/Module.manifest
 !OGhidraMCP/src/main/resources/Module.manifest
+
+# Codex
+.codex

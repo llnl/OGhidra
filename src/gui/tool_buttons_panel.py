@@ -11,6 +11,8 @@ from typing import Any, Dict, Literal, Optional, Tuple
 from ..bridge import Bridge
 from .ai_response_panel import AIResponsePanel
 from .workflow_diagram import WorkflowDiagram
+from .daemon_thread_pool_executor import DaemonThreadPoolExecutor
+from concurrent.futures import as_completed
 
 logger = logging.getLogger(__name__)
 
@@ -303,45 +305,12 @@ class ToolButtonsPanel:
                             self.agent_ui_queue.put(
                                 ("response", ("Progress", f"Retrieving all {tool_name.split('_')[1]} (paginated)..."))
                             )
+                            raw_tool_result = self.bridge._collect_all_paginated_list_results(
+                                tool_method, **((params or {}).copy())
+                            )
+                            if isinstance(raw_tool_result, list):
+                                self.response_panel.add_response("Progress", f"Collected {len(raw_tool_result)} items.")
 
-                            all_items = []
-                            offset = (params or {}).get("offset", 0)
-                            limit = 200  # Use a consistent page size
-
-                            # Merge existing params if any
-                            base_params = (params or {}).copy()
-
-                            while True:
-                                current_params = base_params.copy()
-                                current_params.update({"offset": offset, "limit": limit})
-
-                                batch_result = tool_method(**current_params)
-
-                                # Check for error
-                                if isinstance(batch_result, str) and batch_result.lower().startswith("error:"):
-                                    self.agent_ui_queue.put(
-                                        ("response", ("Error", f"Failed to get batch at offset {offset}: {batch_result}"))
-                                    )
-                                    break
-
-                                if not batch_result:
-                                    break
-
-                                if isinstance(batch_result, list):
-                                    all_items.extend(batch_result)
-                                    if len(batch_result) < limit:
-                                        break
-                                else:
-                                    # Fallback for unexpected formats
-                                    all_items = batch_result
-                                    break
-
-                                offset += limit
-                                self.agent_ui_queue.put(
-                                    ("response", ("Progress", f"Collected {len(all_items)} items so far..."))
-                                )
-
-                            raw_tool_result = all_items
                         else:
                             # Standard single call for non-list tools
                             raw_tool_result = tool_method(**(params or {}))
@@ -1036,9 +1005,11 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                     result["success"] = True
                     return result
 
-            # STEP 1: Decompile function
+            # STEP 1: Decompile function. Use address-based decompilation so
+            # this works reliably across backends (HTTP MCP and pyGhidra)
+            # regardless of how auto-generated names are formatted.
             try:
-                function_decompile_result = self.bridge.ghidra.decompile_function(name=function_name)
+                function_decompile_result = self.bridge.ghidra.decompile_function_by_address(address=address)
                 if isinstance(function_decompile_result, str) and function_decompile_result.lower().startswith("error:"):
                     result["error_msg"] = f"Failed to decompile: {function_decompile_result}"
                     result["result_type"] = "failed"
@@ -1883,32 +1854,17 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                         return
 
                     total_functions = len(valid_functions)
-                    # Send step 1 complete message to response panel via queue
-                    self.agent_ui_queue.put(
-                        (
-                            "response",
-                            (
-                                "Step 1 Complete",
-                                f"Found {total_functions} functions to process",
-                            ),
-                        )
-                    )
-
+                    self.response_panel.add_response("Step 1 Complete", f"Found {total_functions} functions to process")
                     # PARALLEL PROCESSING CONFIGURATION
                     max_workers = 5  # Process 5 functions concurrently (configurable)
-                    # Send parallel processing message to response panel via queue
-                    self.agent_ui_queue.put(
-                        (
-                            "response",
-                            (
-                                "⚡ Parallel Processing",
-                                f"Using {max_workers} concurrent workers for faster processing",
-                            ),
-                        )
+                    self.response_panel.add_response(
+                        "⚡ Parallel Processing",
+                        f"Using {max_workers} concurrent workers for faster processing",
                     )
 
-                    # Step 2: Process functions in parallel using ThreadPoolExecutor
-                    from concurrent.futures import ThreadPoolExecutor, as_completed
+                    # Step 2: Process functions in parallel using a daemon-based
+                    # ThreadPoolExecutor so worker threads don't block process
+                    # exit when the UI is closed.
 
                     successful_renames = 0
                     failed_renames = 0
@@ -1917,7 +1873,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                     completed_count = 0  # Track completion for progress updates
 
                     # PARALLEL PROCESSING: Submit all functions to thread pool
-                    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    with DaemonThreadPoolExecutor(max_workers=max_workers) as executor:
                         # Submit all functions for processing
                         future_to_function = {
                             executor.submit(
