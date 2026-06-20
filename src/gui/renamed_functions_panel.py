@@ -23,11 +23,23 @@ class RenamedFunctionsPanel:
         self.function_summaries: dict[str, str] = {}  # Store behavior summaries for functions
         self._streaming_load_active = False  # Flag to prevent updates during streaming
         self.batch_operation_in_progress = False  # Flag to prevent auto-refresh during batch operations
-        self.dict_lock = threading.RLock()  # Thread-safe lock for dictionary access
 
         # Queue for thread-safe UI updates
         self.ui_update_queue: Queue[
-            Tuple[Literal["button", "label", "progress", "dialog", "add_button", "memory_update", "tree_operation"], Any]
+            Tuple[
+                Literal[
+                    "button",
+                    "label",
+                    "progress",
+                    "dialog",
+                    "add_button",
+                    "memory_update",
+                    "tree_operation",
+                    "refresh_functions",
+                    "update_dialog",
+                ],
+                Any,
+            ]
         ] = Queue()
 
         # Queue for returning data from the main thread to worker threads
@@ -359,7 +371,7 @@ class RenamedFunctionsPanel:
                             self.ui_update_queue.put(("progress", (progress_bar, overall_progress, False)))
                             self.ui_update_queue.put(("label", (progress_detail, f"Added: {func_data['new_name']}", "gray")))
                             if overall_progress % 10 == 0:
-                                progress_dialog.update()
+                                self.ui_update_queue.put(("update_dialog", progress_dialog))
                         except Exception as e:
                             logger.warning(f"Failed to add {func_data['new_name']}: {e}")
                             vectors_failed += 1
@@ -474,154 +486,158 @@ class RenamedFunctionsPanel:
             raise Exception("CAG manager not available - cannot add to vector store")
 
     def _update_function_list(self):
-        """Update the list of renamed functions."""
-        # THREAD SAFETY: Acquire lock before accessing shared dictionaries
-        with self.dict_lock:
-            try:
-                # Clear existing items
-                for item in self.tree.get_children():
-                    self.tree.delete(item)
+        """Add a refresh_functions request to the work queue.
+        This function can be safely called from worker threads. 
+        """
+        # Queue the update to ensure it runs on the main thread
+        self.ui_update_queue.put(("refresh_functions", None))
 
-                if not hasattr(self.bridge, "analysis_state"):
-                    self.count_label.after(0, lambda: self.count_label.config(text="Functions: 0"))
-                    return
+    def _refresh_functions_from_main(self):
+        """Internal method to update the list of renamed functions.
+        WARNING: This should only be called from the main thread using mechanics such as .after()
+        """
+        try:
+            # Clear existing items
+            for item in self.tree.get_children():
+                self.tree.delete(item)
 
-                renamed_functions = self.bridge.analysis_state.get("functions_renamed", {})
+            if not hasattr(self.bridge, "analysis_state"):
+                self.count_label.config(text="Functions: 0")
+                return
 
-                # Get improved function address mapping and summaries from bridge
-                function_address_mapping = getattr(self.bridge, "function_address_mapping", {})
-                bridge_summaries = getattr(self.bridge, "function_summaries", {})
+            renamed_functions = self.bridge.analysis_state.get("functions_renamed", {})
 
+            # Get improved function address mapping and summaries from bridge
+            function_address_mapping = getattr(self.bridge, "function_address_mapping", {})
+            bridge_summaries = getattr(self.bridge, "function_summaries", {})
+
+            logger.debug(
+                f"Updating function list - renamed_functions: {len(renamed_functions)}, address_mapping: {len(function_address_mapping)}"
+            )
+            if renamed_functions:
+                logger.debug(f"Renamed functions keys: {list(renamed_functions.keys())}")
+                logger.debug(f"Renamed functions values: {list(renamed_functions.values())}")
+            if function_address_mapping:
+                logger.debug(f"Address mappings keys: {list(function_address_mapping.keys())}")
+                for addr, info in function_address_mapping.items():
+                    logger.debug(f"Address {addr} -> {info}")
+
+            # Also check if bridge has the expected attributes
+            if hasattr(self.bridge, "analysis_state"):
+                logger.debug(f"Bridge analysis_state exists with keys: {list(self.bridge.analysis_state.keys())}")
+            else:
+                logger.warning("Bridge has no analysis_state attribute!")
+
+            if hasattr(self.bridge, "function_address_mapping"):
                 logger.debug(
-                    f"Updating function list - renamed_functions: {len(renamed_functions)}, address_mapping: {len(function_address_mapping)}"
+                    f"Bridge function_address_mapping exists with {len(self.bridge.function_address_mapping)} entries"
                 )
-                if renamed_functions:
-                    logger.debug(f"Renamed functions keys: {list(renamed_functions.keys())}")
-                    logger.debug(f"Renamed functions values: {list(renamed_functions.values())}")
-                if function_address_mapping:
-                    logger.debug(f"Address mappings keys: {list(function_address_mapping.keys())}")
-                    for addr, info in function_address_mapping.items():
-                        logger.debug(f"Address {addr} -> {info}")
+            else:
+                logger.warning("Bridge has no function_address_mapping attribute!")
 
-                # Also check if bridge has the expected attributes
-                if hasattr(self.bridge, "analysis_state"):
-                    logger.debug(f"Bridge analysis_state exists with keys: {list(self.bridge.analysis_state.keys())}")
-                else:
-                    logger.warning("Bridge has no analysis_state attribute!")
+            # Update count with total unique functions - use address mapping as primary source
+            # to avoid duplicates between renamed_functions and function_address_mapping
+            unique_functions = set()
 
-                if hasattr(self.bridge, "function_address_mapping"):
-                    logger.debug(
-                        f"Bridge function_address_mapping exists with {len(self.bridge.function_address_mapping)} entries"
-                    )
-                else:
-                    logger.warning("Bridge has no function_address_mapping attribute!")
+            # Add all functions from address mapping (most complete data)
+            for address in function_address_mapping.keys():
+                unique_functions.add(address)
 
-                # Update count with total unique functions - use address mapping as primary source
-                # to avoid duplicates between renamed_functions and function_address_mapping
-                unique_functions = set()
+            # Add any functions from renamed_functions that aren't in address mapping
+            for identifier in renamed_functions.keys():
+                # Check if this identifier is already covered by address mapping
+                already_covered = False
+                for addr, info in function_address_mapping.items():
+                    if addr == identifier or info.get("old_name") == identifier or info.get("new_name") == identifier:
+                        already_covered = True
+                        break
 
-                # Add all functions from address mapping (most complete data)
-                for address in function_address_mapping.keys():
-                    unique_functions.add(address)
+                if not already_covered:
+                    unique_functions.add(identifier)
 
-                # Add any functions from renamed_functions that aren't in address mapping
-                for identifier in renamed_functions.keys():
-                    # Check if this identifier is already covered by address mapping
-                    already_covered = False
-                    for addr, info in function_address_mapping.items():
-                        if addr == identifier or info.get("old_name") == identifier or info.get("new_name") == identifier:
-                            already_covered = True
-                            break
+            total_functions = len(unique_functions)
+            self.count_label.config(text=f"Functions: {total_functions}")
 
-                    if not already_covered:
-                        unique_functions.add(identifier)
+            # Use the function address mapping as the primary source to avoid duplicates
+            processed_functions = set()
 
-                total_functions = len(unique_functions)
-                self.count_label.after(
-                    0,
-                    lambda: self.count_label.config(text=f"Functions: {total_functions}"),
+            # Process functions from the address mapping first (most complete data)
+            for address, info in function_address_mapping.items():
+                old_name = info.get("old_name", "Unknown")
+                new_name = info.get("new_name", "Unknown")
+
+                # Skip if we've already processed this function
+                function_key = f"{address}_{new_name}"
+                if function_key in processed_functions:
+                    continue
+                processed_functions.add(function_key)
+
+                # Clean up fake address prefix for display
+                display_address = address.replace("name_", "") if address.startswith("name_") else address
+
+                # Get summary from bridge first, then fallback to local storage
+                summary_key = f"{address}_{new_name}"
+                summary = (
+                    bridge_summaries.get(address, "")
+                    or bridge_summaries.get(old_name, "")
+                    or bridge_summaries.get(new_name, "")
+                    or self.function_summaries.get(summary_key, "No summary available")
                 )
 
-                # Use the function address mapping as the primary source to avoid duplicates
-                processed_functions = set()
+                # Insert into tree with summary_key as a hidden column
+                self.tree.insert(
+                    "",
+                    "end",
+                    values=(
+                        display_address,
+                        old_name,
+                        new_name,
+                        summary,
+                        summary_key,
+                    ),
+                )
 
-                # Process functions from the address mapping first (most complete data)
-                for address, info in function_address_mapping.items():
-                    old_name = info.get("old_name", "Unknown")
-                    new_name = info.get("new_name", "Unknown")
+            # Process any remaining functions from renamed_functions that weren't in address mapping
+            for identifier, new_name in renamed_functions.items():
+                # Skip if this function was already processed from address mapping
+                already_processed = False
+                for addr, info in function_address_mapping.items():
+                    if info.get("new_name") == new_name and (addr == identifier or info.get("old_name") == identifier):
+                        already_processed = True
+                        break
 
-                    # Skip if we've already processed this function
-                    function_key = f"{address}_{new_name}"
-                    if function_key in processed_functions:
-                        continue
-                    processed_functions.add(function_key)
+                if already_processed:
+                    continue
 
-                    # Clean up fake address prefix for display
-                    display_address = address.replace("name_", "") if address.startswith("name_") else address
+                # This is a function not in our enhanced mapping - add it with limited info
+                function_key = f"{identifier}_{new_name}"
+                if function_key in processed_functions:
+                    continue
+                processed_functions.add(function_key)
 
-                    # Get summary from bridge first, then fallback to local storage
-                    summary_key = f"{address}_{new_name}"
-                    summary = (
-                        bridge_summaries.get(address, "")
-                        or bridge_summaries.get(old_name, "")
-                        or bridge_summaries.get(new_name, "")
-                        or self.function_summaries.get(summary_key, "No summary available")
-                    )
+                is_address = self._looks_like_address(identifier)
+                address = identifier if is_address else "Unknown"
+                old_name = "Unknown" if is_address else identifier
 
-                    # Insert into tree with summary_key as a hidden column
-                    self.tree.insert(
-                        "",
-                        "end",
-                        values=(
-                            display_address,
-                            old_name,
-                            new_name,
-                            summary,
-                            summary_key,
-                        ),
-                    )
+                summary_key = f"{address}_{new_name}" if address != "Unknown" else f"{old_name}_{new_name}"
+                summary = bridge_summaries.get(identifier, "") or self.function_summaries.get(
+                    summary_key, "No summary available"
+                )
 
-                # Process any remaining functions from renamed_functions that weren't in address mapping
-                for identifier, new_name in renamed_functions.items():
-                    # Skip if this function was already processed from address mapping
-                    already_processed = False
-                    for addr, info in function_address_mapping.items():
-                        if info.get("new_name") == new_name and (addr == identifier or info.get("old_name") == identifier):
-                            already_processed = True
-                            break
+                # Insert into tree
+                self.tree.insert(
+                    "",
+                    "end",
+                    values=(address, old_name, new_name, summary, summary_key),
+                )
 
-                    if already_processed:
-                        continue
-
-                    # This is a function not in our enhanced mapping - add it with limited info
-                    function_key = f"{identifier}_{new_name}"
-                    if function_key in processed_functions:
-                        continue
-                    processed_functions.add(function_key)
-
-                    is_address = self._looks_like_address(identifier)
-                    address = identifier if is_address else "Unknown"
-                    old_name = "Unknown" if is_address else identifier
-
-                    summary_key = f"{address}_{new_name}" if address != "Unknown" else f"{old_name}_{new_name}"
-                    summary = bridge_summaries.get(identifier, "") or self.function_summaries.get(
-                        summary_key, "No summary available"
-                    )
-
-                    # Insert into tree
-                    self.tree.insert(
-                        "",
-                        "end",
-                        values=(address, old_name, new_name, summary, summary_key),
-                    )
-
-            except Exception as e:
-                # During streaming loads, tree updates can fail due to rapid changes
-                # Log as debug instead of error to reduce noise
-                if "not found" in str(e).lower():
-                    logger.debug(f"Tree item not found during function list update: {e}")
-                else:
-                    logger.error(f"Error updating function list: {e}")
+        except Exception as e:
+            # During streaming loads, tree updates can fail due to rapid changes
+            # Log as debug instead of error to reduce noise
+            if "not found" in str(e).lower():
+                logger.debug(f"Tree item not found during function list update: {e}")
+            else:
+                logger.error(f"Error updating function list: {e}")
 
     def _looks_like_address(self, text: str) -> bool:
         """Check if a string looks like a memory address."""
@@ -1065,45 +1081,43 @@ class RenamedFunctionsPanel:
             self.function_summaries[summary_key] = summary
 
         if update_state:
-            # THREAD SAFETY: Acquire lock before writing to shared dictionaries
-            with self.dict_lock:
-                # CRITICAL FIX: Update bridge data structures that the UI actually reads from
-                # Update bridge's function_address_mapping
-                if not hasattr(self.bridge, "function_address_mapping"):
-                    self.bridge.function_address_mapping = {}
+            # CRITICAL FIX: Update bridge data structures that the UI actually reads from
+            # Update bridge's function_address_mapping
+            if not hasattr(self.bridge, "function_address_mapping"):
+                self.bridge.function_address_mapping = {}
 
-                self.bridge.function_address_mapping[address] = {
-                    "old_name": old_name,
-                    "new_name": new_name,
-                }
+            self.bridge.function_address_mapping[address] = {
+                "old_name": old_name,
+                "new_name": new_name,
+            }
 
-                # Update bridge's function summaries
-                if not hasattr(self.bridge, "function_summaries"):
-                    self.bridge.function_summaries = {}
+            # Update bridge's function summaries
+            if not hasattr(self.bridge, "function_summaries"):
+                self.bridge.function_summaries = {}
 
-                if summary:
-                    # Store summary using multiple keys for robust retrieval
-                    self.bridge.function_summaries[address] = summary
-                    if old_name != "Unknown":
-                        self.bridge.function_summaries[old_name] = summary
-                    if new_name != "Unknown":
-                        self.bridge.function_summaries[new_name] = summary
+            if summary:
+                # Store summary using multiple keys for robust retrieval
+                self.bridge.function_summaries[address] = summary
+                if old_name != "Unknown":
+                    self.bridge.function_summaries[old_name] = summary
+                if new_name != "Unknown":
+                    self.bridge.function_summaries[new_name] = summary
 
-                # Update bridge's analysis_state for legacy compatibility
-                if not hasattr(self.bridge, "analysis_state"):
-                    self.bridge.analysis_state = {}
+            # Update bridge's analysis_state for legacy compatibility
+            if not hasattr(self.bridge, "analysis_state"):
+                self.bridge.analysis_state = {}
 
-                if "functions_renamed" not in self.bridge.analysis_state:
-                    self.bridge.analysis_state["functions_renamed"] = {}
+            if "functions_renamed" not in self.bridge.analysis_state:
+                self.bridge.analysis_state["functions_renamed"] = {}
 
-                # Store in analysis_state using only address as key to avoid duplicate name entries
-                self.bridge.analysis_state["functions_renamed"][address] = new_name
+            # Store in analysis_state using only address as key to avoid duplicate name entries
+            self.bridge.analysis_state["functions_renamed"][address] = new_name
 
-                logger.info(f"Added function to session: {address} | {old_name} -> {new_name}")
-                logger.info(f"Bridge function_address_mapping now has {len(self.bridge.function_address_mapping)} entries")
-                logger.info(
-                    f"Bridge analysis_state functions_renamed now has {len(self.bridge.analysis_state['functions_renamed'])} entries"
-                )
+            logger.info(f"Added function to session: {address} | {old_name} -> {new_name}")
+            logger.info(f"Bridge function_address_mapping now has {len(self.bridge.function_address_mapping)} entries")
+            logger.info(
+                f"Bridge analysis_state functions_renamed now has {len(self.bridge.analysis_state['functions_renamed'])} entries"
+            )
 
         # Only refresh the UI list if not in streaming mode
         # During streaming, we'll do batch updates to prevent UI freezing
@@ -1165,7 +1179,7 @@ class RenamedFunctionsPanel:
                 elif update_type == "refresh_functions":
                     # Refresh function list on the main thread
                     try:
-                        self._update_function_list()
+                        self._refresh_functions_from_main()
                     except Exception as e:
                         logger.error(f"Error refreshing function list from queue: {e}")
 
@@ -1196,6 +1210,14 @@ class RenamedFunctionsPanel:
                             logger.error(f"Error getting tree data: {e}")
                             # Put an empty result in case of error
                             self.data_result_queue.put([])
+
+                elif update_type == "update_dialog":
+                    # Update/refresh a dialog widget
+                    dialog = params
+                    try:
+                        dialog.update()
+                    except Exception as e:
+                        logger.warning(f"Error updating dialog: {e}")
 
                 # Mark as done
                 self.ui_update_queue.task_done()
