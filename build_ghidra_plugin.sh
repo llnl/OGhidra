@@ -3,9 +3,6 @@
 
 echo "Building GhidraMCP extension..."
 echo
-which gradle
-gradle --version
-echo
 which javac
 javac --version
 echo
@@ -38,15 +35,36 @@ if [ ! -d "$GHIDRA_INSTALL_DIR" ]; then
     exit 1
 fi
 
+echo "$GHIDRA_INSTALL_DIR/support/gradle/gradlew"
+"$GHIDRA_INSTALL_DIR/support/gradle/gradlew" --version || {
+    echo "ERROR: Failed to run Ghidra Gradle wrapper."
+    exit 1
+}
+echo
+
 # Create gradle.properties with the correct GHIDRA_INSTALL_DIR
-echo "# Path to your Ghidra installation directory" > OGhidraMCP/gradle.properties
-echo "GHIDRA_INSTALL_DIR=$GHIDRA_INSTALL_DIR" >> OGhidraMCP/gradle.properties
+echo "# Path to your Ghidra installation directory" > OGhidraMCP/gradle.properties || {
+    echo "ERROR: Failed to write OGhidraMCP/gradle.properties"
+    exit 1
+}
+echo "GHIDRA_INSTALL_DIR=$GHIDRA_INSTALL_DIR" >> OGhidraMCP/gradle.properties || {
+    echo "ERROR: Failed to write OGhidraMCP/gradle.properties"
+    exit 1
+}
 
 # Build the extension
-(
-    cd OGhidraMCP || exit 1
-    gradle buildExtension --info || { echo "ERROR: Build failed!"; exit 1; }
-)
+cd OGhidraMCP || {
+    echo "ERROR: Failed to enter OGhidraMCP"
+    exit 1
+}
+"$GHIDRA_INSTALL_DIR/support/gradle/gradlew" buildExtension --info || {
+    echo "ERROR: Build failed!"
+    exit 1
+}
+cd .. || {
+    echo "ERROR: Failed to return to project root"
+    exit 1
+}
 
 echo
 echo "Build completed successfully!"
