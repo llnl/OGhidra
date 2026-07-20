@@ -20,7 +20,7 @@ Information Gathering:
 - scan_function_pointer_tables(min_table_entries, pointer_size): Scan the binary for function pointer tables (vtables, dispatch tables, jump tables). Returns structured list of tables with addresses and function entries. Runs algorithmically without LLM intervention. Optional params: min_table_entries (default 3), pointer_size (8 for x64, 4 for x86).
 
 Context Management:
-- get_cached_result(result_id): Retrieve the full content of a previously summarized or truncated result. Result IDs use the format "step_L{loop}_{step}" (e.g., "step_L1_5" = Loop 1, Step 5). When you see "[Already executed in step_L1_3...]" in a skip message, use get_cached_result(result_id="step_L1_3") to get the full content.
+- get_cached_result(result_id, program=None): Retrieve the full content of a previously summarized or truncated result. Result IDs use the format "step_L{loop}_{step}" (e.g., "step_L1_5" = Loop 1, Step 5). When multiple pyGhidra programs are open, cached results are also tagged by program, so you may call get_cached_result(result_id="step_L1_3", program="<program name or path>") to retrieve the version associated with a specific binary.
 
 # --- New discovery helpers ---
 - list_strings(offset, limit, filter): List all defined strings or search by substring when *filter* is provided.  Alias: `string_search(filter="<text>")`.
@@ -47,4 +47,5 @@ Instance Management:
 PyGhidra note:
 - When the pyGhidra backend has multiple programs open, instances_list() shows numbered program slots.
 - Use instances_use(port=<slot_number>) to switch the active pyGhidra program.
+- Standard list/search tools operate on the active pyGhidra program slot. Switch slots when you want to inspect a different binary.
 - You can also target a specific pyGhidra program directly with <program>::<function-or-address>.

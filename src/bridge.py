@@ -719,7 +719,7 @@ Do NOT skip to tool execution. Provide concrete details from the data above.
             )
 
             # Insert after the get_cached_result line in Context Management section
-            context_mgmt_marker = "- get_cached_result(result_id):"
+            context_mgmt_marker = "- get_cached_result("
             if context_mgmt_marker in capabilities_content:
                 # Find the end of the get_cached_result line
                 marker_pos = capabilities_content.find(context_mgmt_marker)
@@ -1302,7 +1302,7 @@ You can help analyze binary files by executing commands through GhidraMCP."""
 
         return normalized_params
 
-    def get_cached_result(self, result_id: str) -> str:
+    def get_cached_result(self, result_id: str, program: str | None = None) -> str:
         """
         Retrieve the full content of a cached result by its ID.
 
@@ -1311,6 +1311,7 @@ You can help analyze binary files by executing commands through GhidraMCP."""
 
         Args:
             result_id: The cached result ID (e.g., "r5_decompile_function_abc123")
+            program: Optional program selector when multiple pyGhidra programs are open
 
         Returns:
             Full result content, or error message if not found
@@ -1318,13 +1319,95 @@ You can help analyze binary files by executing commands through GhidraMCP."""
         if not self.context_manager or not self.context_manager.result_cache:
             return "Error: Result caching is not enabled"
 
-        full_result = self.context_manager.get_full_result(result_id)
+        cache_scope = program.strip() if isinstance(program, str) and program.strip() else None
+        full_result = self.context_manager.get_full_result(result_id, cache_scope=cache_scope)
 
         if full_result:
+            cached = self.context_manager.result_cache.get(result_id, cache_scope=cache_scope)
+            scope_prefix = ""
+            if cached and cached.scope_label:
+                scope_prefix = f"[Cache Scope: {cached.scope_label}]\n"
             self.logger.info(f"Retrieved cached result: {result_id} ({len(full_result)} chars)")
-            return full_result
-        else:
-            return f"Error: Cached result '{result_id}' not found. Available IDs: {list(self.context_manager.result_cache.cache.keys())[:5]}"
+            return scope_prefix + full_result
+
+        available_ids = self.context_manager.result_cache.get_available_ids(cache_scope=cache_scope)
+        global_match = self.context_manager.result_cache.get(result_id)
+        if cache_scope and global_match and global_match.scope_label:
+            return (
+                f"Error: Cached result '{result_id}' was not found for program '{cache_scope}'. "
+                f"It is cached under {global_match.scope_label}. Available IDs for '{cache_scope}': {available_ids}"
+            )
+        if cache_scope:
+            return (
+                f"Error: Cached result '{result_id}' not found for program '{cache_scope}'. "
+                f"Available IDs: {available_ids}"
+            )
+        return f"Error: Cached result '{result_id}' not found. Available IDs: {available_ids}"
+
+    def _get_command_cache_context(self, command_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Return cache-scoping metadata for a command, when available."""
+        if not getattr(self, "ghidra_client", None):
+            return {}
+
+        try:
+            context = self.ghidra_client.get_command_context(command_name, params)
+        except Exception as exc:
+            self.logger.debug(f"Failed to resolve command context for {command_name}: {exc}")
+            return {}
+
+        return context if isinstance(context, dict) else {}
+
+    @staticmethod
+    def _cache_scope_token(cache_context: Dict[str, Any]) -> str:
+        for key in ("program_key", "program_path", "port", "url", "name"):
+            value = cache_context.get(key)
+            if value is not None:
+                text = str(value).strip()
+                if text:
+                    return text
+        return ""
+
+    @staticmethod
+    def _cache_scope_reference(cache_context: Dict[str, Any]) -> str:
+        for key in ("program_path", "name", "program_slot", "port"):
+            value = cache_context.get(key)
+            if value is not None:
+                text = str(value).strip()
+                if text:
+                    return text
+        return ""
+
+    def _cache_scope_aliases(self, cache_context: Dict[str, Any]) -> List[str]:
+        aliases: List[str] = []
+        for key in ("program_key", "program_path", "name", "active_program", "program_slot", "port", "url"):
+            value = cache_context.get(key)
+            if value is None:
+                continue
+            text = str(value).strip()
+            if text and text not in aliases:
+                aliases.append(text)
+        return aliases
+
+    def _cache_scope_label(self, cache_context: Dict[str, Any]) -> str:
+        name = str(cache_context.get("name", "")).strip()
+        program_path = str(cache_context.get("program_path", "")).strip()
+        if name and program_path and name != program_path:
+            return f"{name} ({program_path})"
+        if name:
+            return name
+        if program_path:
+            return program_path
+        port = str(cache_context.get("port", "")).strip()
+        if port:
+            return f"port {port}"
+        return ""
+
+    def _augment_cache_params(self, params: Dict[str, Any], cache_context: Dict[str, Any]) -> Dict[str, Any]:
+        scoped_params = dict(params)
+        scope_token = self._cache_scope_token(cache_context)
+        if scope_token:
+            scoped_params["__cache_scope"] = scope_token
+        return scoped_params
 
     def _extract_behavior_summary(self, text: str) -> str:
         """
@@ -1696,7 +1779,8 @@ You can help analyze binary files by executing commands through GhidraMCP."""
 
             if normalized_bridge_cmd == "get_cached_result":
                 result_id = params.get("result_id", "")
-                result = self.get_cached_result(result_id)
+                program = params.get("program")
+                result = self.get_cached_result(result_id, program=program)
                 return {"result": result, "source": "context_cache"}
 
             if normalized_bridge_cmd == "search_function_summaries":
@@ -1795,10 +1879,12 @@ You can help analyze binary files by executing commands through GhidraMCP."""
 
             # Find the command in the Ghidra client
             command_func = getattr(self.ghidra_client, normalized_command)
+            cache_context = self._get_command_cache_context(normalized_command, params)
+            scoped_cache_params = self._augment_cache_params(params, cache_context)
 
             # Enhanced caching for multiple command types
-            cache_key = self._generate_cache_key(normalized_command, params)
-            cached_result = self._get_cached_result(normalized_command, cache_key, params)
+            cache_key = self._generate_cache_key(normalized_command, scoped_cache_params)
+            cached_result = self._get_cached_result(normalized_command, cache_key, scoped_cache_params)
 
             if cached_result is not None:
                 self.cache_stats["hits"] += 1
@@ -1837,7 +1923,7 @@ You can help analyze binary files by executing commands through GhidraMCP."""
             # ---------------------------------------------------
 
             # Cache the result for future use
-            self._cache_result(normalized_command, cache_key, params, result)
+            self._cache_result(normalized_command, cache_key, scoped_cache_params, result)
 
             # Update CAG memory with the executed command and result
             if self.enable_cag and self.cag_manager:
@@ -1864,12 +1950,14 @@ You can help analyze binary files by executing commands through GhidraMCP."""
         Returns:
             A unique cache key string
         """
+        cache_scope = str(params.get("__cache_scope", "")).strip()
+
         # For functions, use name if available, otherwise use current function
         if command_name in ["decompile_function", "analyze_function"]:
             if "name" in params and params["name"]:
-                return f"{command_name}:{params['name']}"
+                base_key = f"{command_name}:{params['name']}"
             elif "address" in params and params["address"]:
-                return f"{command_name}:{params['address']}"
+                base_key = f"{command_name}:{params['address']}"
             else:
                 # For current function, we need to get the current function name/address
                 try:
@@ -1881,20 +1969,28 @@ You can help analyze binary files by executing commands through GhidraMCP."""
                         match = re.search(r"Function:\s*(\w+)", current_func)
                         if match:
                             func_name = match.group(1)
-                            return f"{command_name}:current:{func_name}"
+                            base_key = f"{command_name}:current:{func_name}"
+                        else:
+                            base_key = f"{command_name}:current"
+                    else:
+                        base_key = f"{command_name}:current"
                 except Exception as e:
                     self.logger.warning(f"Failed to resolve current function for {command_name}: {e}")
-                    pass
-                return f"{command_name}:current"
+                    base_key = f"{command_name}:current"
 
         elif command_name == "get_current_function":
             # For get_current_function, cache per session but allow invalidation
-            return f"{command_name}:session"
+            base_key = f"{command_name}:session"
 
         else:
             # For other commands, create key from sorted params
-            param_str = ":".join([f"{k}={v}" for k, v in sorted(params.items())])
-            return f"{command_name}:{param_str}" if param_str else command_name
+            filtered_params = {k: v for k, v in params.items() if k != "__cache_scope"}
+            param_str = ":".join([f"{k}={v}" for k, v in sorted(filtered_params.items())])
+            base_key = f"{command_name}:{param_str}" if param_str else command_name
+
+        if cache_scope:
+            return f"{cache_scope}|{base_key}"
+        return base_key
 
     def _get_cached_result(self, command_name: str, cache_key: str, params: Dict[str, Any]):
         """
@@ -2097,7 +2193,11 @@ You can help analyze binary files by executing commands through GhidraMCP."""
                         cycle_context += f"- {step_id}: {cmd_name} -> {excerpt[:80]}...\n"
 
                     cycle_context += "\nContinue investigating based on the gaps identified above. "
-                    cycle_context += 'Use get_cached_result(result_id="step_L{loop}_{N}") to retrieve any previous result.\n'
+                    cycle_context += (
+                        'Use get_cached_result(result_id="step_L{loop}_{N}") to retrieve any previous result. '
+                        'When pyGhidra has multiple programs open, you may also pass program="<program>" to retrieve '
+                        "the cached result from a specific binary.\n"
+                    )
                     plan_response = self._generate_plan(query + cycle_context)
                 else:
                     plan_response = self._generate_plan(query)
@@ -2556,9 +2656,11 @@ You can help analyze binary files by executing commands through GhidraMCP."""
             # Enhanced duplicate detection using CAG memory system
             if commands:
                 cmd_name, cmd_params = commands[0]  # Get first command
+                cache_context = self._get_command_cache_context(cmd_name, cmd_params)
+                scoped_cmd_params = self._augment_cache_params(cmd_params, cache_context)
 
                 # Create signature for this exact command
-                cmd_signature = f"{cmd_name}({_canonical_params(cmd_name, cmd_params)})"
+                cmd_signature = f"{cmd_name}({_canonical_params(cmd_name, scoped_cmd_params)})"
 
                 # First check CAG memory for intelligent duplicate detection
                 skip_due_to_memory = False
@@ -2720,7 +2822,7 @@ You can help analyze binary files by executing commands through GhidraMCP."""
                     # Add command result to context (legacy - for backward compatibility)
                     self.add_to_context("tool_result", context_result)
                     # Cache signature for duplicate detection intelligence
-                    sig_exec = f"{cmd_name}({_canonical_params(cmd_name, cmd_params)})"
+                    sig_exec = f"{cmd_name}({_canonical_params(cmd_name, scoped_cmd_params)})"
                     self.analysis_state.setdefault("cached_results", {})[sig_exec] = True
 
                     # Update analysis state
@@ -3103,8 +3205,13 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
                     return exec_results
 
                 try:
+                    cache_context = self._get_command_cache_context(cmd_name, cmd_params)
+                    scoped_cmd_params = self._augment_cache_params(cmd_params, cache_context)
+                    cache_reference = self._cache_scope_reference(cache_context)
+                    cache_label = self._cache_scope_label(cache_context)
+
                     # Generate signature for duplicate detection
-                    param_sig = str(sorted(cmd_params.items())) if cmd_params else ""
+                    param_sig = str(sorted(scoped_cmd_params.items())) if scoped_cmd_params else ""
                     cmd_signature = f"{cmd_name}:{param_sig}"
 
                     # Check for duplicate tool execution
@@ -3117,10 +3224,11 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
 
                         if original_step_id and result_excerpt:
                             # Include loop-prefixed step reference so AI clearly knows which loop it came from
+                            cache_hint = f', program="{cache_reference}"' if cache_reference else ""
                             skip_note = (
                                 f"[Already executed in {original_step_id}. "
                                 f"Result excerpt: {result_excerpt[:150]}... "
-                                f'Use get_cached_result(result_id="{original_step_id}") for full content]'
+                                f'Use get_cached_result(result_id="{original_step_id}"{cache_hint}) for full content]'
                             )
                         else:
                             skip_note = "[Skipped - already executed with same parameters]"
@@ -3273,10 +3381,11 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
                             f"[TRUNCATION] Result too large: {original_len} chars > limit {max_result_chars}. Dropped {dropped_chars} chars."
                         )
                         logging.warning(f"[TRUNCATION] Full content cached with ID: {loop_step_id}")
+                        cache_hint = f', program="{cache_reference}"' if cache_reference else ""
 
                         prompt_result_str = prompt_result_str[:max_result_chars] + (
                             f"\n... [Truncated {dropped_chars} chars. "
-                            f'Use get_cached_result(result_id="{loop_step_id}") for full content]'
+                            f'Use get_cached_result(result_id="{loop_step_id}"{cache_hint}) for full content]'
                         )
 
                     # Add to analysis dump for manual review (captures full result)
@@ -3298,6 +3407,8 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
 
                     # Store step result for duplicate reference and caching
                     result_excerpt = prompt_result_str[:200].replace("\n", " ").strip()
+                    if cache_label:
+                        result_excerpt = f"[{cache_label}] {result_excerpt}"
                     self.step_result_map[cmd_signature] = (loop_step_id, result_excerpt)
 
                     # Note: Automatic focus_function tracking was removed to prevent confusion
@@ -3311,6 +3422,8 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
                             parameters=cmd_params,
                             result=full_result_str,  # Store full result, not truncated
                             custom_id=loop_step_id,
+                            cache_scopes=self._cache_scope_aliases(cache_context),
+                            scope_label=cache_label or None,
                         )
 
                     # Also add to session for tracking

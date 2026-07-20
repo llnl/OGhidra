@@ -172,6 +172,10 @@ class AbstractGhidraClient(ABC):
     def get_current_program_info(self) -> Dict[str, str]:
         """Return structured metadata for the active program."""
 
+    def get_command_context(self, command_name: str, params: Dict[str, Any]) -> Dict[str, str]:
+        """Return backend-specific command context, defaulting to current program info."""
+        return self.get_current_program_info()
+
     # ------------------------------------------------------------------
     # Shared helpers and backend-agnostic high-level tool surface
     # ------------------------------------------------------------------
@@ -1968,6 +1972,50 @@ class PyGhidraClient(AbstractGhidraClient):
 
         return info
 
+    def get_command_context(self, command_name: str, params: Dict[str, Any]) -> Dict[str, str]:
+        """Return the pyGhidra program context a command will operate on."""
+        entry = self._active_program_entry()
+
+        selector_keys = ("name", "address", "function_name", "function_address", "old_name")
+        for key in selector_keys:
+            value = params.get(key)
+            if not isinstance(value, str) or "::" not in value or len(self._program_entries) <= 1:
+                continue
+            selector, _remainder = value.split("::", 1)
+            program_key = self._resolve_program_selector(selector)
+            if program_key is not None:
+                entry = self._program_entry(program_key)
+                break
+
+        if command_name == "instances_use":
+            try:
+                slot = int(params.get("port"))
+            except Exception:
+                slot = None
+            if slot is not None:
+                self._refresh_program_instance_index()
+                target = self.active_instances.get(slot, {})
+                program_key = target.get("program_key")
+                if program_key:
+                    entry = self._program_entry(program_key)
+
+        if entry is None:
+            return {
+                "name": "Unknown Binary",
+                "project": "Unknown Project",
+                "program_path": "",
+                "backend": "pyghidra",
+            }
+
+        info = entry.info()
+        info["backend"] = "pyghidra"
+        info["program_key"] = entry.key
+        slot = self._program_slot(entry.key)
+        if slot is not None:
+            info["program_slot"] = str(slot)
+        info["active_program"] = self._program_label(entry.key)
+        return info
+
     # _init_pyghidra_auto removed: pyGhidra backend now always operates on an
     # explicitly specified project, and either an explicit program selection or
     # all discovered project programs by default.
@@ -2131,6 +2179,12 @@ class PyGhidraClient(AbstractGhidraClient):
         self._program = entry.program
         self._refresh_program_instance_index()
 
+    def _program_slot(self, program_key: str) -> Optional[int]:
+        for slot, entry in enumerate(self._program_entries, start=1):
+            if entry.key == program_key:
+                return slot
+        return None
+
     def _iter_program_entries(self):
         for entry in self._program_entries:
             yield entry.key, entry.program, entry.info()
@@ -2293,19 +2347,10 @@ class PyGhidraClient(AbstractGhidraClient):
         )
 
     def _collect_program_lines(self, collector) -> List[str]:
-        lines: List[str] = []
-        multi_program = len(self._program_entries) > 1
-
-        for program_key, program, _info in self._iter_program_entries():
-            program_lines = collector(program_key, program) or []
-            if not multi_program:
-                lines.extend(program_lines)
-                continue
-
-            label = self._program_label(program_key)
-            lines.extend(f"[{label}] {line}" for line in program_lines)
-
-        return lines
+        active_entry = self._active_program_entry()
+        if active_entry is None:
+            return []
+        return collector(active_entry.key, active_entry.program) or []
 
     def _format_program_status(self, message: str, program_key: str) -> str:
         if len(self._program_entries) <= 1:

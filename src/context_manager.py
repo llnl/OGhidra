@@ -43,6 +43,8 @@ class CachedResult:
     priority: ResultPriority = ResultPriority.MEDIUM
     timestamp: datetime = field(default_factory=datetime.now)
     is_summarized: bool = False
+    cache_scopes: List[str] = field(default_factory=list)
+    scope_label: Optional[str] = None
 
     def get_display_content(self, detail_level: str = "full") -> str:
         """Get content at specified detail level."""
@@ -66,10 +68,26 @@ class ResultCache:
 
     def __init__(self, max_cache_size: int = 100):
         self.cache: Dict[str, CachedResult] = {}
+        self.cache_by_scope: Dict[str, Dict[str, CachedResult]] = {}
         self.max_cache_size = max_cache_size
         self.result_counter = 0
 
-    def store(self, tool_name: str, parameters: Dict[str, Any], result: str, custom_id: Optional[str] = None) -> CachedResult:
+    @staticmethod
+    def _normalize_scope(scope: str | None) -> str | None:
+        if scope is None:
+            return None
+        normalized = scope.strip().lower()
+        return normalized or None
+
+    def store(
+        self,
+        tool_name: str,
+        parameters: Dict[str, Any],
+        result: str,
+        custom_id: Optional[str] = None,
+        cache_scopes: Optional[List[str]] = None,
+        scope_label: Optional[str] = None,
+    ) -> CachedResult:
         """
         Store a result and return a CachedResult object.
 
@@ -78,6 +96,8 @@ class ResultCache:
             parameters: Parameters used in the tool call
             result: The full result string
             custom_id: Optional custom ID (e.g., 'step_1') for easy retrieval
+            cache_scopes: Optional cache namespaces/aliases for scoped retrieval
+            scope_label: Optional user-facing scope label
         """
         self.result_counter += 1
 
@@ -105,9 +125,17 @@ class ResultCache:
             excerpt=excerpt,
             token_estimate=token_estimate,
             priority=priority,
+            cache_scopes=[],
+            scope_label=scope_label,
         )
 
         self.cache[result_id] = cached
+        for raw_scope in cache_scopes or []:
+            scope = self._normalize_scope(raw_scope)
+            if scope is None or scope in cached.cache_scopes:
+                continue
+            cached.cache_scopes.append(scope)
+            self.cache_by_scope.setdefault(scope, {})[result_id] = cached
 
         # Evict old entries if over limit
         if len(self.cache) > self.max_cache_size:
@@ -115,14 +143,27 @@ class ResultCache:
 
         return cached
 
-    def get(self, result_id: str) -> Optional[CachedResult]:
+    def get(self, result_id: str, cache_scope: str | None = None) -> Optional[CachedResult]:
         """Retrieve a cached result by ID."""
+        if cache_scope:
+            scope = self._normalize_scope(cache_scope)
+            if scope is not None:
+                return self.cache_by_scope.get(scope, {}).get(result_id)
         return self.cache.get(result_id)
 
-    def get_full_result(self, result_id: str) -> Optional[str]:
+    def get_full_result(self, result_id: str, cache_scope: str | None = None) -> Optional[str]:
         """Get the full result content for a cached result."""
-        cached = self.cache.get(result_id)
+        cached = self.get(result_id, cache_scope=cache_scope)
         return cached.full_result if cached else None
+
+    def get_available_ids(self, cache_scope: str | None = None, limit: int = 5) -> List[str]:
+        """Return a small list of cached IDs, optionally scoped."""
+        if cache_scope:
+            scope = self._normalize_scope(cache_scope)
+            if scope is None:
+                return []
+            return list(self.cache_by_scope.get(scope, {}).keys())[:limit]
+        return list(self.cache.keys())[:limit]
 
     def _determine_priority(self, tool_name: str, result: str) -> ResultPriority:
         """Determine priority based on tool type and result content."""
@@ -175,11 +216,21 @@ class ResultCache:
         # Remove bottom 20%
         to_remove = len(self.cache) // 5
         for result_id, _ in sorted_entries[:to_remove]:
+            cached = self.cache.get(result_id)
+            if cached is not None:
+                for scope in cached.cache_scopes:
+                    scoped_cache = self.cache_by_scope.get(scope)
+                    if scoped_cache is None:
+                        continue
+                    scoped_cache.pop(result_id, None)
+                    if not scoped_cache:
+                        self.cache_by_scope.pop(scope, None)
             del self.cache[result_id]
 
     def clear(self):
         """Clear the cache."""
         self.cache.clear()
+        self.cache_by_scope.clear()
         self.result_counter = 0
 
 
@@ -338,7 +389,13 @@ class ContextManager:
         )
 
     def process_result(
-        self, tool_name: str, parameters: Dict[str, Any], result: str, goal: str = ""
+        self,
+        tool_name: str,
+        parameters: Dict[str, Any],
+        result: str,
+        goal: str = "",
+        cache_scopes: Optional[List[str]] = None,
+        scope_label: Optional[str] = None,
     ) -> Tuple[str, CachedResult]:
         """
         Process a tool execution result for context-aware inclusion.
@@ -349,7 +406,13 @@ class ContextManager:
         # Cache the result
         cached = None
         if self.result_cache:
-            cached = self.result_cache.store(tool_name, parameters, result)
+            cached = self.result_cache.store(
+                tool_name,
+                parameters,
+                result,
+                cache_scopes=cache_scopes,
+                scope_label=scope_label,
+            )
             self.recent_results.append(cached)
         else:
             # Create a minimal cached result for tracking
@@ -580,10 +643,10 @@ Summary:"""
 
         return [exec_result for _, exec_result in scored]
 
-    def get_full_result(self, result_id: str) -> Optional[str]:
+    def get_full_result(self, result_id: str, cache_scope: str | None = None) -> Optional[str]:
         """Retrieve the full cached result by ID."""
         if self.result_cache:
-            return self.result_cache.get_full_result(result_id)
+            return self.result_cache.get_full_result(result_id, cache_scope=cache_scope)
         return None
 
     def reset(self):
