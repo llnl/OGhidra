@@ -52,10 +52,10 @@ graph TD
 
 1. **Python 3.12+** - Check version: `python --version`
 2. **Ghidra 12.0.3** (Recommended) - Download from [Ghidra Releases](https://github.com/NationalSecurityAgency/ghidra/releases)
-   - Minimum supported: Ghidra 11.0.3+
+   - Plugin build/install path is documented for Ghidra 12.0.3
    - Tested with: Ghidra 11.0.3, 11.3.2, 12.0.2, 12.0.3
-3. **Java 17+** - Required for Ghidra: `java -version`
-4. **Ollama** (for local models) - Install from [ollama.com](https://ollama.com/)
+3. **Java 21** - Required to build the Ghidra 12.0.3 extension: `java -version`
+4. **Ollama** (optional, for local models) - Install from [ollama.com](https://ollama.com/)
 
 ### Installation
 
@@ -75,7 +75,7 @@ cp .env.example .env
 
 ### Setup Ghidra Plugin
 
-The OGhidraMCP plugin supports both Ghidra 11.3.2+ and Ghidra 12.0.3 (recommended).
+The OGhidraMCP plugin build steps below target Ghidra 12.0.3 (recommended).
 There's also a YouTube video tutorial: https://www.youtube.com/watch?v=hBD92FUgR0Y
 
 #### Building the GhidraMCP Extension
@@ -83,16 +83,15 @@ There's also a YouTube video tutorial: https://www.youtube.com/watch?v=hBD92FUgR
 As a developer, you'll need to build the GhidraMCP extension before installing it in Ghidra:
 
 1. **Prerequisites**:
-   - Ghidra 12.0.3 (or compatible version) installed
-   - Gradle (run `gradle -v` to verify it's installed)
-   - Java 21 (required for Ghidra 12.0.3)
+   - Ghidra 12.0.3 installed
+   - Java 21
 
 2. **Option 1: Using the automated build scripts**:
    - Windows:
 
-     ```bash
+     ```bat
      # Set the path to your Ghidra installation (will attempt to find last run copy of Ghidra if not set)
-     set GHIDRA_INSTALL_DIR=C:\path\to\ghidra_12.0_PUBLIC
+     set GHIDRA_INSTALL_DIR=C:\path\to\ghidra_12.0.3_PUBLIC
 
      # Run the build script
      build_ghidra_plugin.bat
@@ -101,8 +100,8 @@ As a developer, you'll need to build the GhidraMCP extension before installing i
    - Unix/Linux/Mac:
 
      ```bash
-     # Set the path to your Ghidra installation (will attempt to find last run copy of Ghidra if not set)
-     export GHIDRA_INSTALL_DIR=/path/to/ghidra_12.0_PUBLIC
+     # Set the path to your Ghidra installation (will attempt to find the last run copy of Ghidra if not set)
+     export GHIDRA_INSTALL_DIR=/path/to/ghidra_12.0.3_PUBLIC
 
      # Run the build script (make it executable first if needed)
      chmod +x build_ghidra_plugin.sh
@@ -110,21 +109,27 @@ As a developer, you'll need to build the GhidraMCP extension before installing i
      ```
 
 3. **Option 2: Manual build process**:
-   - Create/update `OGhidraMCP/gradle.properties` with:
+   - Create/update `OGhidraMCP/gradle.properties` with your Ghidra install path:
 
      ```properties
-     GHIDRA_INSTALL_DIR=C:/path/to/ghidra_12.0_PUBLIC
+     GHIDRA_INSTALL_DIR=/absolute/path/to/ghidra_12.0.3_PUBLIC
      ```
 
-   - Navigate to the OGhidraMCP directory and run the build:
+   - On Unix/Linux/macOS:
      ```bash
      cd OGhidraMCP
-     gradle buildExtension
+     $GHIDRA_INSTALL_DIR/support/gradle/gradlew buildExtension --info
+     ```
+
+   - On Windows:
+     ```bat
+     cd OGhidraMCP
+     "%GHIDRA_INSTALL_DIR%\support\gradle\gradlew.bat" buildExtension --info
      ```
 
 4. **Locate the built extension**:
    - The extension zip file is created in `OGhidraMCP/dist/`
-   - The filename will be something like `ghidra_12.0_PUBLIC_YYYYMMDD_OGhidraMCP.zip`
+   - The filename will be something like `ghidra_12.0.3_PUBLIC_YYYYMMDD_OGhidraMCP.zip`
 
 #### Installing the GhidraMCP Extension
 
@@ -134,18 +139,16 @@ Once you've successfully built the extension:
    - Open Ghidra -> **File** -> **Install Extensions**
    - Click **Add Extension** (green plus icon)
    - Browse to your `OGhidraMCP/dist/` directory
-   - Select the newly built extension zip file (e.g., `ghidra_12.0_PUBLIC_YYYYMMDD_OGhidraMCP.zip`)
+   - Select the newly built extension zip file (e.g., `ghidra_12.0.3_PUBLIC_YYYYMMDD_OGhidraMCP.zip`)
    - Restart Ghidra
 
 2. **Enable the plugin**:
    - Open a Ghidra project
    - **File** → **Configure** → **Enable Developer**
-   - Check the box to enable
+   - Enable the `OGhidraMCP` plugin
    - The server will start on `http://localhost:8080/methods`
 
    > **YOU NEED TO HAVE CODE BROWSER OPEN**
-
-   > **Note**: The plugin is compatible with Ghidra 11.0.3+ and optimized for Ghidra 12.0.3
 
 ### Pull AI Models
 
@@ -169,8 +172,13 @@ uv run main.py --ui
 # Interactive CLI
 uv run main.py --interactive
 
-# Test connection
+# In interactive CLI, test connection
 health
+```
+
+If you launched GUI mode, use:
+```bash
+curl http://localhost:8080/methods
 ```
 
 ---
