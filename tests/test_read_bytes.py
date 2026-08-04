@@ -11,11 +11,14 @@ Prerequisites:
 
 Usage:
     python tests/test_read_bytes.py
+    pytest -m integration tests/test_read_bytes.py
 """
 
+import base64
 import os
 import sys
-import warnings
+
+import pytest
 
 # Add project root to path for imports
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -24,12 +27,22 @@ sys.path.insert(0, project_root)
 from src.config import GhidraMCPConfig  # noqa: E402
 from src.ghidra_client import GhidraMCPClient  # noqa: E402
 
+# Every test in this module talks to a live GhidraMCP server, so none of them can
+# run in CI. They are deselected by the `-m "not integration"` default in
+# pyproject.toml and run explicitly with `pytest -m integration`.
+pytestmark = pytest.mark.integration
+
+
+@pytest.fixture(autouse=True)
+def require_ghidra_mcp_server():
+    """Skip rather than fail when there is no GhidraMCP server to talk to."""
+    config = GhidraMCPConfig()
+    if not GhidraMCPClient(config).health_check():
+        pytest.skip(f"No GhidraMCP server reachable at {config.base_url}")
+
 
 def test_read_bytes_hex_format():
     """Test reading bytes in hex dump format."""
-    warnings.warn(
-        "These tests only work if the Ghidra client is running with the MCP plugin working. Either the tests should be mocked or the tests are moved from pytest to some sort of system testing."
-    )
     print("\n" + "=" * 60)
     print("TEST: read_bytes (hex format)")
     print("=" * 60)
@@ -50,31 +63,24 @@ def test_read_bytes_hex_format():
     print("-" * 50)
 
     # Verify we got a response
-    if "Error" in result or "No program" in result:
-        print(f"\n[FAIL] Error reading bytes: {result}")
-        return False
+    assert "Error" not in result and "No program" not in result, f"Error reading bytes: {result}"
 
     # Check for expected bytes (function prologue)
     # 55 = PUSH RBP, 57 = PUSH RDI, 56 = PUSH RSI, 53 = PUSH RBX
     expected_start = "55 57 56 53"
     if expected_start.upper() in result.upper():
         print(f"\n[PASS] Found expected prologue bytes: {expected_start}")
-        return True
-    else:
-        print(f"\n[INFO] Did not find expected bytes '{expected_start}' - may be different binary")
-        print("[INFO] Checking if we got valid hex dump format...")
-        # Check if we at least got a valid hex dump format
-        if ":" in result and "|" in result:
-            print("[PASS] Valid hex dump format received")
-            return True
-        return False
+        return
+
+    # A different binary is fine, but the response must still be a valid hex dump.
+    print(f"\n[INFO] Did not find expected bytes '{expected_start}' - may be different binary")
+    print("[INFO] Checking if we got valid hex dump format...")
+    assert ":" in result and "|" in result, f"Response is not a valid hex dump: {result}"
+    print("[PASS] Valid hex dump format received")
 
 
 def test_read_bytes_raw_format():
     """Test reading bytes in base64 raw format."""
-    warnings.warn(
-        "These tests only work if the Ghidra client is running with the MCP plugin working. Either the tests should be mocked or the tests are moved from pytest to some sort of system testing."
-    )
     print("\n" + "=" * 60)
     print("TEST: read_bytes (raw/base64 format)")
     print("=" * 60)
@@ -92,28 +98,19 @@ def test_read_bytes_raw_format():
     print(result)
     print("-" * 50)
 
-    if "Error" in result or "No program" in result:
-        print(f"\n[FAIL] Error reading bytes: {result}")
-        return False
-
-    # Try to decode the base64
-    import base64
+    assert "Error" not in result and "No program" not in result, f"Error reading bytes: {result}"
 
     try:
         decoded = base64.b64decode(result)
-        print(f"\n[PASS] Successfully decoded {len(decoded)} bytes from base64")
-        print(f"Raw bytes (hex): {decoded.hex()}")
-        return True
     except Exception as e:
-        print(f"\n[FAIL] Could not decode base64: {e}")
-        return False
+        pytest.fail(f"Could not decode base64: {e}")
+
+    print(f"\n[PASS] Successfully decoded {len(decoded)} bytes from base64")
+    print(f"Raw bytes (hex): {decoded.hex()}")
 
 
 def test_read_bytes_multiple_addresses():
     """Test reading from multiple addresses in the function."""
-    warnings.warn(
-        "These tests only work if the Ghidra client is running with the MCP plugin working. Either the tests should be mocked or the tests are moved from pytest to some sort of system testing."
-    )
     print("\n" + "=" * 60)
     print("TEST: read_bytes from multiple function addresses")
     print("=" * 60)
@@ -129,27 +126,24 @@ def test_read_bytes_multiple_addresses():
         ("10040fb02", "JZ instruction"),
     ]
 
-    all_passed = True
+    failures = []
     for address, description in test_cases:
         print(f"\n--- {description} @ 0x{address} ---")
         result = client.read_bytes(address, length=8, format="hex")
 
         if "Error" in result or not result.strip():
             print(f"[FAIL] Could not read from 0x{address}")
-            all_passed = False
+            failures.append(f"0x{address} ({description}): {result.strip() or '(empty)'}")
         else:
             # Just show first line of hex dump
             first_line = result.split("\n")[0] if result else "(empty)"
             print(f"[OK] {first_line}")
 
-    return all_passed
+    assert not failures, "Could not read from:\n  " + "\n  ".join(failures)
 
 
 def test_read_bytes_boundary_conditions():
     """Test edge cases and boundary conditions."""
-    warnings.warn(
-        "These tests only work if the Ghidra client is running with the MCP plugin working. Either the tests should be mocked or the tests are moved from pytest to some sort of system testing."
-    )
     print("\n" + "=" * 60)
     print("TEST: read_bytes boundary conditions")
     print("=" * 60)
@@ -163,7 +157,7 @@ def test_read_bytes_boundary_conditions():
         ("10040fae0", 4096, "Maximum length (4096 bytes)"),
     ]
 
-    all_passed = True
+    failures = []
     for address, length, description in test_cases:
         print(f"\n--- {description} ---")
         result = client.read_bytes(address, length=length, format="hex")
@@ -173,17 +167,15 @@ def test_read_bytes_boundary_conditions():
                 print("[PASS] Correctly rejected length > 4096")
             else:
                 print(f"[FAIL] {result}")
-                all_passed = False
+                failures.append(f"{description}: {result.strip()}")
         else:
             lines = len(result.strip().split("\n"))
             expected_lines = (length + 15) // 16  # 16 bytes per line
             print(f"[OK] Got {lines} lines (expected ~{expected_lines})")
 
-    return all_passed
+    assert not failures, "Boundary checks failed:\n  " + "\n  ".join(failures)
 
 
-# TODO: These tests only work if the Ghidra client is running with the MCP plugin working.
-# Either the tests should be mocked or the tests are moved from pytest to some sort of system testing.
 def main():
     """Run all read_bytes tests."""
     print("\n" + "=" * 60)
@@ -207,12 +199,22 @@ def main():
     print(f"\n[OK] Connected to GhidraMCP at {config.base_url}")
 
     # Run tests
-    results = []
+    checks = [
+        ("Hex Format", test_read_bytes_hex_format),
+        ("Raw/Base64 Format", test_read_bytes_raw_format),
+        ("Multiple Addresses", test_read_bytes_multiple_addresses),
+        ("Boundary Conditions", test_read_bytes_boundary_conditions),
+    ]
 
-    results.append(("Hex Format", test_read_bytes_hex_format()))
-    results.append(("Raw/Base64 Format", test_read_bytes_raw_format()))
-    results.append(("Multiple Addresses", test_read_bytes_multiple_addresses()))
-    results.append(("Boundary Conditions", test_read_bytes_boundary_conditions()))
+    results = []
+    for name, check in checks:
+        try:
+            check()
+        except AssertionError as e:
+            print(f"\n[FAIL] {e}")
+            results.append((name, False))
+        else:
+            results.append((name, True))
 
     # Summary
     print("\n" + "=" * 60)

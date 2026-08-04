@@ -41,3 +41,17 @@ packages = ["src"]
 
 [tool.ruff]
 line-length = 128
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Integration tests need a live Ghidra + OGhidraMCP instance and/or a reachable
+# LLM endpoint, so they are deselected by default. Run them with `pytest -m integration`.
+addopts = ["-m", "not integration"]
+markers = [
+    "integration: requires a running Ghidra instance with the OGhidraMCP plugin and/or a reachable LLM endpoint",
+]
+filterwarnings = [
+    # A test that returns a value instead of asserting is reported as passing no
+    # matter what it returns. Treat it as an error so this cannot regress.
+    "error::pytest.PytestReturnNotNoneWarning",
+]
