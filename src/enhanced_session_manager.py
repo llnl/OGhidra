@@ -15,6 +15,11 @@ import hashlib
 logger = logging.getLogger(__name__)
 
 
+def _short_session_hash(value: str) -> str:
+    """Return a short deterministic hash without weak algorithms."""
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:8]
+
+
 @dataclass
 class FunctionAnalysis:
     """Represents an analyzed function with all its metadata."""
@@ -97,7 +102,7 @@ class EnhancedSessionManager:
         """
         # Generate unique session ID
         timestamp = int(time.time())
-        session_id = f"session_{timestamp}_{hashlib.md5(session_name.encode()).hexdigest()[:8]}"
+        session_id = f"session_{timestamp}_{_short_session_hash(session_name)}"
 
         # Create session directory
         session_dir = os.path.join(self.sessions_dir, session_id)

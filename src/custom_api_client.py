@@ -10,7 +10,6 @@ import logging
 import requests
 import time
 import uuid
-import warnings
 import threading
 import email.utils
 import random
@@ -18,13 +17,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Union, Tuple
 from tenacity import Retrying, stop_after_attempt, wait_exponential, retry_if_exception
-import urllib3
-
-# Suppress SSL warnings when verification is disabled
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
-# Also suppress requests warnings
-warnings.filterwarnings("ignore", message="Unverified HTTPS request")
 
 
 def is_retryable_exception(e):
@@ -106,6 +98,7 @@ class CustomAPIClient:
 
         # SSL verification (disabled by default for custom APIs with cert issues)
         self.verify_ssl = getattr(config, "verify_ssl", False)
+        self._tls_warning_emitted = False
 
         print(f"[Custom API] Initialized: url={self.base_url} model={self.default_model} delay={self.request_delay}s")
 
@@ -186,6 +179,27 @@ class CustomAPIClient:
             cb(event_type, payload)
         except Exception:
             pass
+
+    def _warn_if_tls_verification_disabled(self, operation: str) -> None:
+        """Emit a one-time warning when HTTPS certificate verification is disabled."""
+        if self.verify_ssl or self._tls_warning_emitted:
+            return
+
+        message = (
+            f"[Custom API] TLS certificate verification is disabled for {operation}. "
+            "This preserves compatibility with self-signed endpoints but reduces connection security."
+        )
+        self.logger.warning(message)
+        self._emit_ui_event(
+            "security_warning",
+            {
+                "provider": "custom_api",
+                "operation": operation,
+                "verify_ssl": False,
+                "message": message,
+            },
+        )
+        self._tls_warning_emitted = True
 
     def _apply_global_throttle(self) -> None:
         """Enforce a global minimum interval between request starts."""
@@ -431,7 +445,7 @@ class CustomAPIClient:
 
         # Adjust temperature for reasoning models
         if is_reasoning_model and effective_temperature != 1.0:
-            self.logger.warning(f"⚙️  Adjusting temperature from {effective_temperature} to 1.0 for {effective_model}")
+            self.logger.warning(f"[INFO] Adjusting temperature from {effective_temperature} to 1.0 for {effective_model}")
             effective_temperature = 1.0
 
         # Build payload
@@ -451,7 +465,7 @@ class CustomAPIClient:
             # Log adjustment if we reduced the limit
             if effective_max_tokens > max_output_tokens:
                 self.logger.info(
-                    f"⚙️  Adjusted max_tokens from {effective_max_tokens} to {max_output_tokens} for Claude model (64K limit)"
+                    f"[INFO] Adjusted max_tokens from {effective_max_tokens} to {max_output_tokens} for Claude model (64K limit)"
                 )
 
         elif is_reasoning_model:
@@ -502,6 +516,7 @@ class CustomAPIClient:
             # Concurrency + global throttling
             self._request_semaphore.acquire()
             self._apply_global_throttle()
+            self._warn_if_tls_verification_disabled("chat completions")
 
             retryer = Retrying(
                 stop=stop_after_attempt(self.max_retries + 1),
@@ -512,7 +527,10 @@ class CustomAPIClient:
             )
 
             def do_post():
-                resp = requests.post(api_url, headers=headers, json=payload, timeout=self.timeout, verify=self.verify_ssl)
+                request_kwargs = {"headers": headers, "json": payload, "timeout": self.timeout}
+                if not self.verify_ssl:
+                    request_kwargs["verify"] = False
+                resp = requests.post(api_url, **request_kwargs)
                 resp.raise_for_status()
                 return resp
 
@@ -648,6 +666,7 @@ class CustomAPIClient:
             # Concurrency + global throttling
             self._request_semaphore.acquire()
             self._apply_global_throttle()
+            self._warn_if_tls_verification_disabled("embeddings")
 
             # Setup retryer
             retryer = Retrying(
@@ -659,7 +678,10 @@ class CustomAPIClient:
             )
 
             def do_post():
-                resp = requests.post(api_url, headers=headers, json=payload, timeout=self.timeout, verify=self.verify_ssl)
+                request_kwargs = {"headers": headers, "json": payload, "timeout": self.timeout}
+                if not self.verify_ssl:
+                    request_kwargs["verify"] = False
+                resp = requests.post(api_url, **request_kwargs)
                 resp.raise_for_status()
                 return resp
 
@@ -723,6 +745,7 @@ class CustomAPIClient:
     def check_health(self) -> bool:
         """Check if the Custom API endpoint is reachable."""
         try:
+            self._warn_if_tls_verification_disabled("health check")
             headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
             test_payload = {"model": self.default_model, "messages": [{"role": "user", "content": "test"}], "max_tokens": 1}
 
@@ -731,7 +754,11 @@ class CustomAPIClient:
             else:
                 api_url = f"{self.base_url}/v1/chat/completions"
 
-            response = requests.post(api_url, headers=headers, json=test_payload, timeout=5, verify=self.verify_ssl)
+            request_kwargs = {"headers": headers, "json": test_payload, "timeout": 5}
+            if not self.verify_ssl:
+                request_kwargs["verify"] = False
+
+            response = requests.post(api_url, **request_kwargs)
             return response.status_code == 200
         except Exception as e:
             self.logger.error(f"Custom API health check failed: {e}")

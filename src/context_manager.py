@@ -20,6 +20,11 @@ from enum import Enum
 logger = logging.getLogger("ollama-ghidra-bridge.context")
 
 
+def _short_stable_hash(value: str) -> str:
+    """Return a short deterministic hash without weak algorithms."""
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:8]
+
+
 class ResultPriority(Enum):
     """Priority levels for result content."""
 
@@ -85,7 +90,7 @@ class ResultCache:
         if custom_id:
             result_id = custom_id
         else:
-            param_hash = hashlib.md5(json.dumps(parameters, sort_keys=True).encode()).hexdigest()[:8]
+            param_hash = _short_stable_hash(json.dumps(parameters, sort_keys=True))
             result_id = f"r{self.result_counter}_{tool_name}_{param_hash}"
 
         # Estimate tokens (rough: ~4 chars per token)
@@ -690,7 +695,7 @@ Summary:"""
                 if len(line) > 80:
                     line = line[:77] + "..."
 
-                bullet = f"• {line}"
+                bullet = f"- {line}"
 
                 if char_count + len(bullet) + 1 > max_chars:
                     break
@@ -750,7 +755,7 @@ Summary:"""
                 section += f"Result:\n{display_content}\n"
             else:
                 # Older steps: compressed summary with cache hint
-                section = f"\n• {step_id}: {tool_name} - "
+                section = f"\n- {step_id}: {tool_name} - "
                 if len(result) > 100:
                     section += f'{len(result):,} chars [use get_cached_result("{step_id}")]'
                 else:

@@ -10,6 +10,16 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+class _ValueProxy:
+    """Minimal Tk-like value wrapper used by tests and dialog helpers."""
+
+    def __init__(self, value):
+        self._value = value
+
+    def get(self):
+        return self._value
+
+
 class ServerConfigDialog:
     """Dialog for configuring server URLs."""
 
@@ -133,6 +143,22 @@ class ServerConfigDialog:
         custom_tokens_entry = ttk.Entry(self.custom_api_frame, textvariable=self.custom_api_max_tokens_var, width=50)
         custom_tokens_entry.grid(row=4, column=1, sticky="ew", padx=(10, 0), pady=5)
 
+        self.custom_api_verify_ssl_var = tk.BooleanVar(value=bool(getattr(self.config.custom_api, "verify_ssl", False)))
+        custom_verify_ssl_check = ttk.Checkbutton(
+            self.custom_api_frame,
+            text="Verify TLS certificates",
+            variable=self.custom_api_verify_ssl_var,
+        )
+        custom_verify_ssl_check.grid(row=5, column=1, sticky="w", padx=(10, 0), pady=5)
+
+        custom_verify_hint = ttk.Label(
+            self.custom_api_frame,
+            text="Disable only for trusted endpoints with self-signed or broken certificates.",
+            font=("TkDefaultFont", 8),
+            foreground="gray",
+        )
+        custom_verify_hint.grid(row=6, column=1, sticky="w", padx=(10, 0), pady=(0, 5))
+
         self.custom_api_frame.columnconfigure(1, weight=1)
 
         # --- Ollama Configuration ---
@@ -223,6 +249,45 @@ class ServerConfigDialog:
             # Ollama selected
             self.ollama_frame.pack(fill="x", pady=(0, 10), after=self.dialog.winfo_children()[0].winfo_children()[1])
 
+    def _custom_api_verify_ssl_enabled(self) -> bool:
+        """Return the current verify_ssl setting for custom API requests."""
+        return bool(getattr(self, "custom_api_verify_ssl_var", _ValueProxy(False)).get())
+
+    def _build_custom_api_test_request(self) -> dict:
+        """Build the custom API connectivity test request parameters."""
+        api_key = self.custom_api_key_var.get()
+        return {
+            "url": self.custom_api_url_var.get(),
+            "headers": {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            "json": {
+                "model": self.custom_api_model_var.get(),
+                "messages": [{"role": "user", "content": "test"}],
+                "max_tokens": 1,
+            },
+            "timeout": 10,
+            "verify": self._custom_api_verify_ssl_enabled(),
+        }
+
+    def _build_env_updates(self, ollama_url, ghidra_url, provider: str) -> dict:
+        """Build the .env updates for the current dialog state."""
+        return {
+            "OLLAMA_BASE_URL": str(ollama_url),
+            "OLLAMA_MODEL": self.ollama_model_var.get(),
+            "OLLAMA_EMBEDDING_MODEL": self.embedding_model_var.get(),
+            "GHIDRA_BASE_URL": str(ghidra_url),
+            "EXTERNAL_PROVIDER": self.ext_provider_var.get(),
+            "EXTERNAL_API_KEY": self.ext_key_var.get(),
+            "EXTERNAL_MODEL": self.ext_model_var.get(),
+            "EXTERNAL_EMBEDDING_MODEL": self.ext_embed_var.get(),
+            "CUSTOM_API_URL": self.custom_api_url_var.get(),
+            "CUSTOM_API_KEY": self.custom_api_key_var.get(),
+            "CUSTOM_API_MODEL": self.custom_api_model_var.get(),
+            "CUSTOM_API_EMBEDDING_MODEL": self.custom_api_embed_var.get(),
+            "CUSTOM_API_MAX_TOKENS": self.custom_api_max_tokens_var.get(),
+            "CUSTOM_API_VERIFY_SSL": str(self._custom_api_verify_ssl_enabled()).lower(),
+            "LLM_PROVIDER": "external" if provider == "google" else provider,
+        }
+
     def _test_connections(self):
         """Test the connections to the configured servers."""
 
@@ -238,25 +303,25 @@ class ServerConfigDialog:
 
                     api_key = self.ext_key_var.get()
                     if not api_key:
-                        results.append("External API: ❌ API Key is missing")
+                        results.append("External API: [ERROR] API Key is missing")
                     else:
                         # Simple test for Google (since it's the only supported one currently)
                         url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
                         response = requests.get(url, timeout=5)
                         if response.status_code == 200:
-                            results.append("External API (Google): ✅ Connected")
+                            results.append("External API (Google): [OK] Connected")
                             # Verify model exists
                             models = response.json().get("models", [])
                             target_model = self.ext_model_var.get()
                             model_found = any(target_model in m.get("name", "") for m in models)
                             if model_found:
-                                results.append(f"Model ({target_model}): ✅ Available")
+                                results.append(f"Model ({target_model}): [OK] Available")
                             else:
-                                results.append(f"Model ({target_model}): ⚠️ Not found in list (might still work)")
+                                results.append(f"Model ({target_model}): [WARN] Not found in list (might still work)")
                         else:
-                            results.append(f"External API: ❌ HTTP {response.status_code}")
+                            results.append(f"External API: [ERROR] HTTP {response.status_code}")
                 except Exception as e:
-                    results.append(f"External API: ❌ {str(e)}")
+                    results.append(f"External API: [ERROR] {str(e)}")
             elif provider == "custom_api":
                 # Test Custom API
                 try:
@@ -264,26 +329,34 @@ class ServerConfigDialog:
 
                     api_url = self.custom_api_url_var.get()
                     api_key = self.custom_api_key_var.get()
+                    verify_ssl = self._custom_api_verify_ssl_enabled()
 
                     if not api_key:
-                        results.append("Custom API: ❌ API Key is missing")
+                        results.append("Custom API: [ERROR] API Key is missing")
                     elif not api_url:
-                        results.append("Custom API: ❌ API URL is missing")
+                        results.append("Custom API: [ERROR] API URL is missing")
                     else:
-                        # Test with a minimal request
-                        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-                        test_payload = {
-                            "model": self.custom_api_model_var.get(),
-                            "messages": [{"role": "user", "content": "test"}],
-                            "max_tokens": 1,
-                        }
+                        if not verify_ssl:
+                            warning_msg = (
+                                "Custom API: [WARN] TLS certificate verification is disabled for this test request"
+                            )
+                            logger.warning(warning_msg)
+                            results.append(warning_msg)
 
-                        response = requests.post(api_url, headers=headers, json=test_payload, timeout=10, verify=False)
+                        request_kwargs = self._build_custom_api_test_request()
+                        post_kwargs = {
+                            "headers": request_kwargs["headers"],
+                            "json": request_kwargs["json"],
+                            "timeout": request_kwargs["timeout"],
+                        }
+                        if not request_kwargs["verify"]:
+                            post_kwargs["verify"] = False
+                        response = requests.post(request_kwargs["url"], **post_kwargs)
                         if response.status_code == 200:
-                            results.append("Custom API: ✅ Connected")
-                            results.append(f"Model ({self.custom_api_model_var.get()}): ✅ Available")
+                            results.append("Custom API: [OK] Connected")
+                            results.append(f"Model ({self.custom_api_model_var.get()}): [OK] Available")
                         else:
-                            results.append(f"Custom API: ❌ HTTP {response.status_code}")
+                            results.append(f"Custom API: [ERROR] HTTP {response.status_code}")
                             try:
                                 error_detail = response.json()
                                 results.append(f"Error: {error_detail}")
@@ -291,7 +364,7 @@ class ServerConfigDialog:
                                 logger.warning(f"Failed to extract the error response body: {e}")
                                 pass
                 except Exception as e:
-                    results.append(f"Custom API: ❌ {str(e)}")
+                    results.append(f"Custom API: [ERROR] {str(e)}")
             else:
                 # Test Ollama
                 try:
@@ -299,7 +372,7 @@ class ServerConfigDialog:
 
                     response = requests.get(f"{self.ollama_url_var.get()}/api/tags", timeout=5)
                     if response.status_code == 200:
-                        results.append("Ollama: ✅ Connected")
+                        results.append("Ollama: [OK] Connected")
 
                         # Test embedding model specifically (try new API first, then legacy)
                         embedding_model = self.embedding_model_var.get()
@@ -313,7 +386,7 @@ class ServerConfigDialog:
                                     timeout=10,
                                 )
                                 if embed_response.status_code == 200:
-                                    results.append(f"Embedding Model ({embedding_model}): ✅ Available")
+                                    results.append(f"Embedding Model ({embedding_model}): [OK] Available")
                                     embed_success = True
                             except Exception:
                                 pass
@@ -327,17 +400,17 @@ class ServerConfigDialog:
                                         timeout=10,
                                     )
                                     if embed_response.status_code == 200:
-                                        results.append(f"Embedding Model ({embedding_model}): ✅ Available (legacy API)")
+                                        results.append(f"Embedding Model ({embedding_model}): [OK] Available (legacy API)")
                                         embed_success = True
                                 except Exception:
                                     pass
 
                             if not embed_success:
-                                results.append(f"Embedding Model ({embedding_model}): ❌ Not available")
+                                results.append(f"Embedding Model ({embedding_model}): [ERROR] Not available")
                     else:
-                        results.append(f"Ollama: ❌ HTTP {response.status_code}")
+                        results.append(f"Ollama: [ERROR] HTTP {response.status_code}")
                 except Exception as e:
-                    results.append(f"Ollama: ❌ {str(e)}")
+                    results.append(f"Ollama: [ERROR] {str(e)}")
 
             backend = getattr(self.config.ghidra, "backend", "http")
 
@@ -348,13 +421,13 @@ class ServerConfigDialog:
                     client = PyGhidraClient(self.config.ghidra)
                     try:
                         if client.check_health():
-                            results.append("pyGhidra: ✅ Connected")
+                            results.append("pyGhidra: [OK] Connected")
                         else:
-                            results.append("pyGhidra: ❌ Health check failed")
+                            results.append("pyGhidra: [ERROR] Health check failed")
                     finally:
                         client.close()
                 except Exception as e:
-                    results.append(f"pyGhidra: ❌ {str(e)}")
+                    results.append(f"pyGhidra: [ERROR] {str(e)}")
             else:
                 try:
                     import requests
@@ -365,11 +438,11 @@ class ServerConfigDialog:
                         timeout=5,
                     )
                     if response.status_code == 200:
-                        results.append("GhidraMCP: ✅ Connected")
+                        results.append("GhidraMCP: [OK] Connected")
                     else:
-                        results.append(f"GhidraMCP: ❌ HTTP {response.status_code}")
+                        results.append(f"GhidraMCP: [ERROR] HTTP {response.status_code}")
                 except Exception as e:
-                    results.append(f"GhidraMCP: ❌ {str(e)}")
+                    results.append(f"GhidraMCP: [ERROR] {str(e)}")
 
             # Test GhidraMCP
             try:
@@ -377,11 +450,11 @@ class ServerConfigDialog:
 
                 response = requests.get(f"{self.ghidra_url_var.get()}/methods", params={"offset": 0, "limit": 1}, timeout=5)
                 if response.status_code == 200:
-                    results.append("GhidraMCP: ✅ Connected")
+                    results.append("GhidraMCP: [OK] Connected")
                 else:
-                    results.append(f"GhidraMCP: ❌ HTTP {response.status_code}")
+                    results.append(f"GhidraMCP: [ERROR] HTTP {response.status_code}")
             except Exception as e:
-                results.append(f"GhidraMCP: ❌ {str(e)}")
+                results.append(f"GhidraMCP: [ERROR] {str(e)}")
 
             # Show results (marshal the modal onto the Tk main thread)
             run_on_ui(lambda: messagebox.showinfo("Connection Test", "\n".join(results)))
@@ -419,6 +492,7 @@ class ServerConfigDialog:
             self.config.custom_api.api_key = self.custom_api_key_var.get()
             self.config.custom_api.model = self.custom_api_model_var.get()
             self.config.custom_api.embedding_model = self.custom_api_embed_var.get()
+            self.config.custom_api.verify_ssl = self._custom_api_verify_ssl_enabled()
             try:
                 self.config.custom_api.max_tokens = int(self.custom_api_max_tokens_var.get())
             except ValueError:
@@ -437,25 +511,7 @@ class ServerConfigDialog:
             # (No need to update _bridge_ref here; handled by main UI)
 
             # --- Update .env file ---
-            env_updates = {
-                "OLLAMA_BASE_URL": str(ollama_url),
-                "OLLAMA_MODEL": self.ollama_model_var.get(),
-                "OLLAMA_EMBEDDING_MODEL": self.embedding_model_var.get(),
-                "GHIDRA_BASE_URL": str(ghidra_url),
-                # External Configs
-                "EXTERNAL_PROVIDER": self.ext_provider_var.get(),
-                "EXTERNAL_API_KEY": self.ext_key_var.get(),
-                "EXTERNAL_MODEL": self.ext_model_var.get(),
-                "EXTERNAL_EMBEDDING_MODEL": self.ext_embed_var.get(),
-                # Custom API Configs
-                "CUSTOM_API_URL": self.custom_api_url_var.get(),
-                "CUSTOM_API_KEY": self.custom_api_key_var.get(),
-                "CUSTOM_API_MODEL": self.custom_api_model_var.get(),
-                "CUSTOM_API_EMBEDDING_MODEL": self.custom_api_embed_var.get(),
-                "CUSTOM_API_MAX_TOKENS": self.custom_api_max_tokens_var.get(),
-                # Provider
-                "LLM_PROVIDER": "external" if provider == "google" else provider,
-            }
+            env_updates = self._build_env_updates(ollama_url, ghidra_url, provider)
             self._update_env_file(env_updates)
             # ---
 
