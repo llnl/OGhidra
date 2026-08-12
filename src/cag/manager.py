@@ -767,13 +767,13 @@ class CAGManager:
                 1 for item in self.session.messages[-10:] if item.role == "tool_call" and "get_current_function" in item.content
             )
             if recent_calls >= 2:
-                guidance.append("⚠️  get_current_function has been called multiple times recently.")
+                guidance.append("[WARN] get_current_function has been called multiple times recently.")
                 guidance.append("Consider using cached results or proceeding with analysis.")
 
         elif command_name == "decompile_function":
             func_identifier = params.get("name") or params.get("address", "current")
             if hasattr(self.session, "analysis_state") and func_identifier in self.session.analysis_state.functions_decompiled:
-                guidance.append(f"✅ Function '{func_identifier}' is already decompiled and cached.")
+                guidance.append(f"[OK] Function '{func_identifier}' is already decompiled and cached.")
                 guidance.append("Use the cached result instead of decompiling again.")
 
         elif command_name == "analyze_function":
@@ -787,7 +787,7 @@ class CAGManager:
                 ]
 
             if similar_analyses:
-                guidance.append(f"📋 {len(similar_analyses)} similar analysis result(s) available in cache.")
+                guidance.append(f"[INFO] {len(similar_analyses)} similar analysis result(s) available in cache.")
                 guidance.append("Consider if additional analysis is needed or if cached results suffice.")
 
         return "\n".join(guidance) if guidance else ""
@@ -1019,7 +1019,7 @@ class CAGManager:
             Formatted alert string
         """
         lines = ["\n" + "=" * 70]
-        lines.append("🚨 MALWARE PATTERN DETECTION ALERT")
+        lines.append("[ALERT] MALWARE PATTERN DETECTION ALERT")
         lines.append("=" * 70 + "\n")
 
         if address:
@@ -1027,9 +1027,9 @@ class CAGManager:
 
         # Show HIGH severity patterns first
         if high_severity:
-            lines.append("🔴 HIGH SEVERITY PATTERNS:\n")
+            lines.append("HIGH SEVERITY PATTERNS:\n")
             for match in high_severity:
-                lines.append(f"⚠️  **{match['pattern_name']}**")
+                lines.append(f"[WARN] **{match['pattern_name']}**")
                 lines.append(f"   Confidence: {match['confidence']:.0%}")
                 lines.append(f"   Intent: {match['intent']}")
                 lines.append(f"   MITRE ATT&CK: {match.get('mitre', 'N/A')}")
@@ -1045,13 +1045,13 @@ class CAGManager:
         # Show MEDIUM/LOW severity patterns
         medium_low = [m for m in all_matches if m["severity"] != "HIGH"]
         if medium_low:
-            lines.append(f"ℹ️  Additional {len(medium_low)} pattern(s) detected (MEDIUM/LOW severity):\n")
+            lines.append(f"[INFO] Additional {len(medium_low)} pattern(s) detected (MEDIUM/LOW severity):\n")
             for match in medium_low:
-                lines.append(f"   • {match['pattern_name']} ({match['severity']}, {match['confidence']:.0%} confidence)")
+                lines.append(f"   - {match['pattern_name']} ({match['severity']}, {match['confidence']:.0%} confidence)")
             lines.append("")
 
         lines.append("=" * 70)
-        lines.append("⚡ RECOMMENDATION: Investigate this function immediately!")
+        lines.append("[ACTION] RECOMMENDATION: Investigate this function immediately!")
         lines.append("=" * 70 + "\n")
 
         return "\n".join(lines)

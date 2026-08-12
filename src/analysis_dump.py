@@ -241,7 +241,7 @@ class AnalysisDumper:
                 if entry.entry_type == "tool":
                     truncation_note = ""
                     if entry.was_truncated:
-                        truncation_note = f" ⚠️ *Truncated from {entry.char_count:,} to {entry.truncated_to:,} chars*"
+                        truncation_note = f" [WARN] *Truncated from {entry.char_count:,} to {entry.truncated_to:,} chars*"
 
                     f.write(f"### Step {entry.step_number}: `{entry.tool_name}`{truncation_note}\n\n")
                     f.write(f"**Time:** {entry.timestamp.strftime('%H:%M:%S')}\n")
@@ -263,15 +263,15 @@ class AnalysisDumper:
                     f.write("\n```\n\n")
 
                 elif entry.entry_type == "reasoning":
-                    f.write("### 💭 Reasoning\n\n")
+                    f.write("### Reasoning\n\n")
                     f.write(f"{entry.reasoning}\n\n")
 
                 elif entry.entry_type == "artifact":
-                    f.write(f"### 📦 Artifact: `{entry.tool_name}`\n\n")
+                    f.write(f"### Artifact: `{entry.tool_name}`\n\n")
                     f.write(f"```\n{entry.result}\n```\n\n")
 
                 elif entry.entry_type == "error":
-                    f.write("### ❌ Error\n\n")
+                    f.write("### Error\n\n")
                     f.write(f"```\n{entry.result}\n```\n\n")
 
         logger.info(f"Analysis dump saved to: {filepath}")

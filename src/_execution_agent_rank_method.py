@@ -65,7 +65,7 @@ NO explanations. ONLY the JSON."""
 Output ONLY valid JSON matching the input structure. No markdown. No explanations."""
 
     try:
-        self.logger.info(f"🎯 Ranking {item_count} items from {tool_name} to keep top {max_items}")
+        self.logger.info(f"[INFO] Ranking {item_count} items from {tool_name} to keep top {max_items}")
 
         response = self.ollama.generate(prompt=ranking_prompt, system_prompt=system_prompt, phase="execution")
 
@@ -91,10 +91,10 @@ Output ONLY valid JSON matching the input structure. No markdown. No explanation
             elif "imports" in filtered_result:
                 filtered_count = len(filtered_result.get("imports", []))
 
-        self.logger.info(f"✅ Ranked: Kept {filtered_count}/{item_count} most relevant items")
+        self.logger.info(f"[OK] Ranked: Kept {filtered_count}/{item_count} most relevant items")
 
         return filtered_result
 
     except Exception as e:
-        self.logger.warning(f"⚠️ Ranking failed for {tool_name}: {e}. Using original result.")
+        self.logger.warning(f"[WARN] Ranking failed for {tool_name}: {e}. Using original result.")
         return result

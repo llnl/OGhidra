@@ -361,7 +361,7 @@ class IntelligentContextBuilder:
         if security:
             criticality = security.get("criticality", "low")
             if criticality in ["high", "critical"]:
-                sections.append(f"\n⚠️ **Security:** {criticality.upper()} criticality")
+                sections.append(f"\n[WARN] **Security:** {criticality.upper()} criticality")
 
         # Behavior summary
         summary = func_data.get("summary", {})

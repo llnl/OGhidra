@@ -21,7 +21,7 @@ class ReportSection:
 
     id: str  # e.g., "executive_summary"
     title: str  # e.g., "Executive Summary"
-    icon: str  # e.g., "📋"
+    icon: str  # e.g., "[INFO]"
     content_type: str  # "html", "table", "flow_diagram", "timeline", "cards"
     content: str  # HTML content or JSON data for structured types
 
@@ -1043,8 +1043,8 @@ td {
 
 def _get_severity_icon(severity: str) -> str:
     """Get icon for severity level."""
-    icons = {"CRITICAL": "🔥", "HIGH": "⚠️", "MEDIUM": "🔶", "LOW": "ℹ️"}
-    return icons.get(severity.upper(), "📊")
+    icons = {"CRITICAL": "[CRIT]", "HIGH": "[HIGH]", "MEDIUM": "[MED]", "LOW": "[LOW]"}
+    return icons.get(severity.upper(), "[INFO]")
 
 
 def generate_html_report(sections: List[ReportSection], metadata: ReportMetadata) -> str:
@@ -1068,12 +1068,12 @@ def generate_html_report(sections: List[ReportSection], metadata: ReportMetadata
 
     # Build meta info items
     meta_items = f"""
-        <div class="meta-item">📁 Binary: <span>{html.escape(metadata.binary_name)}</span></div>
-        <div class="meta-item">📅 Analyzed: <span>{html.escape(metadata.analysis_date)}</span></div>
-        <div class="meta-item">🔧 Tool: <span>{html.escape(metadata.tool_name)}</span></div>
+        <div class="meta-item">Binary: <span>{html.escape(metadata.binary_name)}</span></div>
+        <div class="meta-item">Analyzed: <span>{html.escape(metadata.analysis_date)}</span></div>
+        <div class="meta-item">Tool: <span>{html.escape(metadata.tool_name)}</span></div>
     """
     if metadata.duration:
-        meta_items += f'<div class="meta-item">⏱️ Duration: <span>{html.escape(metadata.duration)}</span></div>'
+        meta_items += f'<div class="meta-item">Duration: <span>{html.escape(metadata.duration)}</span></div>'
 
     html_doc = f"""<!DOCTYPE html>
 <html lang="en">

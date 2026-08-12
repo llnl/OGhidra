@@ -217,8 +217,8 @@ class MemoryHealthCheck:
         print("=" * 80)
 
         # Overall health status
-        status_emoji = "✅" if report["health_status"] == "healthy" else "⚠️"
-        print(f"\nOverall Status: {status_emoji} {report['health_status'].upper()}")
+        status_label = "[OK]" if report["health_status"] == "healthy" else "[WARN]"
+        print(f"\nOverall Status: {status_label} {report['health_status'].upper()}")
 
         if report["health_issues"]:
             print("\nDetected Issues:")
@@ -228,27 +228,29 @@ class MemoryHealthCheck:
         # Configuration
         config = report["configuration"]
         print("\nConfiguration:")
-        print(f"  - Session history: {'Enabled ✅' if config['enabled'] else 'Disabled ❌'}")
+        print(f"  - Session history: {'Enabled [OK]' if config['enabled'] else 'Disabled [NO]'}")
         print(f"  - Storage path: {config['storage_path']}")
-        print(f"  - Storage exists: {'Yes ✅' if config['storage_exists'] else 'No ❌'}")
+        print(f"  - Storage exists: {'Yes [OK]' if config['storage_exists'] else 'No [NO]'}")
         if config["storage_exists"]:
             print(f"  - Storage size: {config.get('storage_size_human', 'Unknown')}")
-        print(f"  - Auto summarize: {'Enabled ✅' if config['auto_summarize'] else 'Disabled ❌'}")
+        print(f"  - Auto summarize: {'Enabled [OK]' if config['auto_summarize'] else 'Disabled [NO]'}")
 
         # CAG Configuration
         print("\nContext-Aware Generation (CAG):")
-        print(f"  - Enabled: {'Yes ✅' if config.get('cag_enabled', False) else 'No ❌'}")
+        print(f"  - Enabled: {'Yes [OK]' if config.get('cag_enabled', False) else 'No [NO]'}")
         if config.get("cag_enabled", False):
-            print(f"  - Knowledge cache: {'Enabled ✅' if config.get('cag_knowledge_cache_enabled', False) else 'Disabled ❌'}")
+            print(
+                f"  - Knowledge cache: {'Enabled [OK]' if config.get('cag_knowledge_cache_enabled', False) else 'Disabled [NO]'}"
+            )
             print(f"  - Token limit: {config.get('cag_token_limit', 'Unknown')}")
 
         # Vector embeddings
         vec_config = config["vector_embeddings"]
         print("\nVector Embeddings (RAG):")
-        print(f"  - Enabled: {'Yes ✅' if vec_config['enabled'] else 'No ❌'}")
+        print(f"  - Enabled: {'Yes [OK]' if vec_config['enabled'] else 'No [NO]'}")
         if vec_config["enabled"]:
             print(f"  - Vector DB path: {vec_config['path']}")
-            print(f"  - Path exists: {'Yes ✅' if vec_config['exists'] else 'No ❌'}")
+            print(f"  - Path exists: {'Yes [OK]' if vec_config['exists'] else 'No [NO]'}")
 
         # Sessions
         sessions = report["sessions"]
@@ -288,11 +290,11 @@ class MemoryHealthCheck:
         # Vector store
         vector_store = report["vector_store"]
         print("\nVector Store:")
-        print(f"  - Enabled: {'Yes ✅' if vector_store['enabled'] else 'No ❌'}")
+        print(f"  - Enabled: {'Yes [OK]' if vector_store['enabled'] else 'No [NO]'}")
 
         if vector_store["enabled"]:
             print(f"  - Embedding model: {vector_store['embedding_model']}")
-            print(f"  - Vectors available: {'Yes ✅' if vector_store['vectors_available'] else 'No ❌'}")
+            print(f"  - Vectors available: {'Yes [OK]' if vector_store['vectors_available'] else 'No [NO]'}")
 
             if vector_store["vectors_available"]:
                 print(f"  - Vector count: {vector_store['vector_count']}")

@@ -188,7 +188,7 @@ class CommandParser:
 
             # Skip if we've already seen this exact command
             if cmd_signature in seen_commands:
-                logger.info(f"⚠️  Duplicate command detected and removed: {command_name}({params_text[:30]}...)")
+                logger.info(f"[WARN] Duplicate command detected and removed: {command_name}({params_text[:30]}...)")
                 format_violations.append(f"Duplicate: {command_name}")
                 continue
 
@@ -198,14 +198,14 @@ class CommandParser:
 
         # Log format violations for user feedback
         if format_violations:
-            logger.warning(f"⚠️  FORMAT VIOLATIONS DETECTED ({len(format_violations)}):")
+            logger.warning(f"[WARN] FORMAT VIOLATIONS DETECTED ({len(format_violations)}):")
             for violation in format_violations[:3]:  # Show first 3
                 logger.warning(f"   - {violation}")
-            logger.warning("📝 Reminder: Use ONLY 'EXECUTE: command()' lines with no additional text")
+            logger.warning("[NOTE] Reminder: Use ONLY 'EXECUTE: command()' lines with no additional text")
 
         if has_mixed_text and commands:
             logger.warning(
-                "⚠️  LLM mixed explanatory text with EXECUTE commands - commands extracted successfully but format should be improved"
+                "[WARN] LLM mixed explanatory text with EXECUTE commands - commands extracted successfully but format should be improved"
             )
 
         # If no commands found with correct format, check for alternate formats
@@ -569,7 +569,7 @@ class CommandParser:
                 if match and match.group(1).strip():
                     trailing = match.group(1).strip()
                     if not trailing.startswith("EXECUTE:"):
-                        issues.append(f"❌ Found text after EXECUTE command: '{trailing[:50]}'")
+                        issues.append(f"[ERROR] Found text after EXECUTE command: '{trailing[:50]}'")
                         break
 
         # Check for duplicate commands
@@ -577,7 +577,7 @@ class CommandParser:
             cmd_names = [cmd[0] for cmd in commands]
             duplicates = [cmd for cmd in set(cmd_names) if cmd_names.count(cmd) > 1]
             if duplicates:
-                issues.append(f"❌ Duplicate commands detected: {', '.join(duplicates)}")
+                issues.append(f"[ERROR] Duplicate commands detected: {', '.join(duplicates)}")
 
         # Check for explanatory text between commands
         execute_indices = [i for i, line in enumerate(lines) if "EXECUTE:" in line]
@@ -585,22 +585,22 @@ class CommandParser:
             for i in range(len(execute_indices) - 1):
                 between = "\n".join(lines[execute_indices[i] + 1 : execute_indices[i + 1]]).strip()
                 if between and len(between) > 20:
-                    issues.append("❌ Explanatory text found between EXECUTE commands")
+                    issues.append("[ERROR] Explanatory text found between EXECUTE commands")
                     break
 
         if not issues:
             return None
 
-        feedback = ["⚠️  FORMAT VIOLATIONS DETECTED:"]
+        feedback = ["[WARN] FORMAT VIOLATIONS DETECTED:"]
         feedback.extend(issues)
         feedback.append("")
-        feedback.append("📝 CORRECT FORMAT:")
+        feedback.append("[NOTE] CORRECT FORMAT:")
         feedback.append('EXECUTE: tool_name(param="value")')
         feedback.append('EXECUTE: another_tool(param="value")')
         feedback.append("")
-        feedback.append("❌ INCORRECT - Don't add explanatory text:")
+        feedback.append("[ERROR] INCORRECT - Don't add explanatory text:")
         feedback.append('EXECUTE: tool_name(param="value")')
-        feedback.append("I don't yet have results...  ← WRONG")
+        feedback.append("I don't yet have results...  <- WRONG")
         feedback.append("")
         feedback.append("Please output ONLY the EXECUTE lines with no additional text.")
 

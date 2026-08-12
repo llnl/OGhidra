@@ -19,7 +19,7 @@ class RAGDocumentBuilder:
     Build optimized RAG documents from function metadata.
 
     Capabilities:
-    - Hierarchical content structure (Quick Ref → Details)
+    - Hierarchical content structure (Quick Ref -> Details)
     - Information-dense formatting (no boilerplate)
     - Semantic tagging for filtered search
     - Multi-vector chunking support
@@ -199,19 +199,18 @@ class RAGDocumentBuilder:
         complexity = metrics.get("complexity_tier", "unknown")
         security_level = security.get("criticality", "low")
 
-        # Security indicator emoji
-        security_emoji = {
-            "critical": "🔴 CRITICAL",
-            "high": "🔒 High Security",
-            "medium": "⚠️ Medium Security",
-            "low": "📝 Standard",
-        }.get(security_level, "📝 Standard")
+        security_label = {
+            "critical": "CRITICAL",
+            "high": "High Security",
+            "medium": "Medium Security",
+            "low": "Standard",
+        }.get(security_level, "Standard")
 
         lines = [
             "## Quick Reference",
             f"**Domain:** {domain.replace('_', ' ').title()}",
             f"**Complexity:** {complexity.title()}",
-            f"**Security:** {security_emoji}",
+            f"**Security:** {security_label}",
         ]
 
         # Add operations if present
@@ -246,8 +245,8 @@ class RAGDocumentBuilder:
             # Look for bullet points or numbered lists
             for line in analysis.split("\n"):
                 line = line.strip()
-                if line.startswith(("- ", "* ", "• ", "1.", "2.", "3.")):
-                    clean_line = line.lstrip("-*•0123456789. ")
+                if line.startswith(("- ", "* ", "1.", "2.", "3.")):
+                    clean_line = line.lstrip("-*0123456789. ")
                     if clean_line:
                         operations_found.append(clean_line)
 
@@ -352,17 +351,17 @@ class RAGDocumentBuilder:
         lines = ["## Code Patterns"]
 
         pattern_display = {
-            "error_handling": "✓ Error Handling",
-            "input_validation": "✓ Input Validation",
-            "resource_management": "✓ Resource Management",
-            "iterative_processing": "✓ Loops/Iteration",
-            "state_machine": "✓ State Machine",
-            "callback_usage": "✓ Callbacks",
-            "conditional_return": "✓ Conditional Returns",
+            "error_handling": "[OK] Error Handling",
+            "input_validation": "[OK] Input Validation",
+            "resource_management": "[OK] Resource Management",
+            "iterative_processing": "[OK] Loops/Iteration",
+            "state_machine": "[OK] State Machine",
+            "callback_usage": "[OK] Callbacks",
+            "conditional_return": "[OK] Conditional Returns",
         }
 
         for pattern in patterns:
-            display = pattern_display.get(pattern, f"✓ {pattern.replace('_', ' ').title()}")
+            display = pattern_display.get(pattern, f"[OK] {pattern.replace('_', ' ').title()}")
             lines.append(display)
 
         return "\n".join(lines)

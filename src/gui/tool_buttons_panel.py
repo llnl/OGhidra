@@ -536,7 +536,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                                 else:
                                     self.response_panel.add_response(
                                         "Debug",
-                                        f"⚠️ No function summary extracted from AI response. Summary found: {function_summary is not None}",
+                                                f"[WARN] No function summary extracted from AI response. Summary found: {function_summary is not None}",
                                     )
 
                             except Exception as e:
@@ -579,7 +579,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                         else:
                             self.response_panel.add_response(
                                 "Debug",
-                                f"⚠️ Could not extract function name from AI response. Response contained: {ai_response[:200]}...",
+                                f"[WARN] Could not extract function name from AI response. Response contained: {ai_response[:200]}...",
                             )
                             self.response_panel.add_response(
                                 "Error",
@@ -1579,7 +1579,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                             valid_functions = [f for f in valid_functions if not _already_analyzed(f)]
                             session_skipped = before - len(valid_functions)
                             self.response_panel.add_response(
-                                "⏭️ Session Skip",
+                                "Session Skip",
                                 f"Skipped {session_skipped} function(s) already analyzed in the loaded session; "
                                 f"{len(valid_functions)} left to process.",
                             )
@@ -1717,11 +1717,11 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                                     eta_str = self._format_eta(remaining / rate) if rate > 0 else "calculating..."
                                     self.response_panel.add_response(
                                         "Progress",
-                                        f"⚡ Parallel Progress: {completed_count}/{total_functions} ({progress_pct:.1f}%) | "
-                                        + f"✅ {successful_renames + enumerated_functions} processed | "
-                                        + f"❌ {failed_renames} failed | "
-                                        + f"⏭️ {skipped_functions} skipped | "
-                                        + f"⏳ {remaining} left, ETA {eta_str}",
+                                        f"[INFO] Parallel Progress: {completed_count}/{total_functions} ({progress_pct:.1f}%) | "
+                                        + f"[OK] {successful_renames + enumerated_functions} processed | "
+                                        + f"[ERR] {failed_renames} failed | "
+                                        + f"[SKIP] {skipped_functions} skipped | "
+                                        + f"[ETA] {remaining} left, ETA {eta_str}",
                                     )
 
                             except Exception as e:
@@ -1758,9 +1758,9 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                         elif enumeration_mode == "rename_only":
                             skip_reason_msg += "Rename-only mode: Only generic function names (FUN_*, sub_*) were processed.\n"
                             skip_reason_msg += (
-                                f"💡 **Tip:** {skipped_functions} functions were already renamed and were skipped."
+                                f"**Tip:** {skipped_functions} functions were already renamed and were skipped."
                             )
-                        self.response_panel.add_response("⏭️ Skip Summary", skip_reason_msg)
+                        self.response_panel.add_response("Skip Summary", skip_reason_msg)
 
                     # AUTOMATIC SESSION SAVE
                     session_save_success = False
@@ -1837,12 +1837,12 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                             )
                         else:
                             self.response_panel.add_response(
-                                "⚠️ Auto-Save Warning", "Session save attempted but may have failed. Check logs for details."
+                                "Auto-Save Warning", "Session save attempted but may have failed. Check logs for details."
                             )
 
                     except Exception as save_error:
                         self.response_panel.add_response(
-                            "⚠️ Auto-Save Error",
+                            "Auto-Save Error",
                             f"Could not automatically save session: {save_error}\n"
                             + "You can manually save via File > Save Session",
                         )
@@ -1877,8 +1877,8 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
 • Total requests: {cache_stats["total_requests"]}
 • Ghidra calls saved: {cache_stats["hits"]}
 
-🎯 Mode: {enumeration_mode.replace("_", " ").title()}
-💾 Session Auto-Saved: {"✅ Yes" if session_save_success else "⚠️ Failed (save manually)"}
+Mode: {enumeration_mode.replace("_", " ").title()}
+Session Auto-Saved: {"Yes" if session_save_success else "Failed (save manually)"}
 
 All processed functions have been added to the 'Analyzed Functions' tab with behavior summaries.
 Check the tab to see detailed analysis results and manage function information.
@@ -2085,7 +2085,7 @@ Check the tab to see detailed analysis results and manage function information.
             return
 
         # Single professional warning dialog
-        warning_message = """⚠️ Rename All Functions - Confirmation Required
+        warning_message = """[WARN] Rename All Functions - Confirmation Required
 
 You are about to rename ALL functions in this binary using AI analysis.
 

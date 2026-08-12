@@ -219,9 +219,9 @@ class Bridge:
             from src.function_graph import FunctionGraph
 
             self.function_graph = FunctionGraph()
-            self.logger.info("✅ Knowledge Graph initialized for architectural analysis")
+            self.logger.info("[OK] Knowledge Graph initialized for architectural analysis")
         except Exception as e:
-            self.logger.warning(f"⚠️  Knowledge Graph initialization failed: {e}. Graph features disabled.")
+            self.logger.warning(f"[WARN] Knowledge Graph initialization failed: {e}. Graph features disabled.")
 
         # Initialize caches and statistics
         self._init_caches()
@@ -282,11 +282,11 @@ class Bridge:
         self.execution_gate = ExecutionGatekeeper(self.llm_config)
         self._ui_gate_callback = None  # Set by UI for gate events
 
-        # Question Tool — AI asks user mid-investigation (OpenCode-inspired)
+        # Question Tool - AI asks user mid-investigation (OpenCode-inspired)
         self.question_handler = QuestionHandler()
         self._ui_question_callback = None  # Set by UI for question display
 
-        # Session Compactor — Smart context pruning (OpenCode-inspired)
+        # Session Compactor - Smart context pruning (OpenCode-inspired)
         self.session_compactor = SessionCompactor(self.llm_config, self.ollama)
 
         # Coverage Tracker        # Initialize coverage tracker
@@ -517,8 +517,8 @@ class Bridge:
                 recent_tools.append(ex.get("cmd_name", "unknown"))
 
         checkpoint_prompt = f"""
-🔍 ANALYSIS CHECKPOINT
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[ANALYSIS CHECKPOINT]
+=================================================================
 
 You have executed: {", ".join(recent_tools)}
 
@@ -542,10 +542,10 @@ MANDATORY REFLECTION: Before executing more tools, analyze your findings:
    - Trace cross-references? (provide address)
    - Declare investigation complete? (provide evidence)
 
-⚠️  CRITICAL: You must complete this analysis before executing more tools.
+[CRITICAL] You must complete this analysis before executing more tools.
 Do NOT skip to tool execution. Provide concrete details from the data above.
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+=================================================================
 """
         return checkpoint_prompt
 
@@ -1962,12 +1962,12 @@ You can help analyze binary files by executing commands through GhidraMCP."""
 
         # Check if result is an error - don't cache errors
         if isinstance(result, str) and result.startswith("ERROR:"):
-            self.logger.debug(f"⚠️ Not caching error result for {command_name}")
+            self.logger.debug(f"[WARN] Not caching error result for {command_name}")
             return
 
         # Check if result is empty or indicates failure - don't cache
         if isinstance(result, (list, dict)) and not result:
-            self.logger.debug(f"⚠️ Not caching empty result for {command_name}")
+            self.logger.debug(f"[WARN] Not caching empty result for {command_name}")
             return
 
         # Cache in appropriate store
@@ -2131,14 +2131,14 @@ You can help analyze binary files by executing commands through GhidraMCP."""
                 if exec_results.gates_triggered:
                     gate_count = len(exec_results.gates_triggered)
                     gate_summary = "; ".join(g.reason[:60] for g in exec_results.gates_triggered[-3:])
-                    self._emit_cot("Gate", f"⚠️ {gate_count} gate(s) triggered this cycle: {gate_summary}")
+                    self._emit_cot("Gate", f"[WARN] {gate_count} gate(s) triggered this cycle: {gate_summary}")
                     self.logger.info(f"🚧 {gate_count} gate(s) fired during execution: {gate_summary}")
 
-                # Check if AI asked a question — pause for user input
+                # Check if AI asked a question - pause for user input
                 if exec_results.pending_question:
                     q = exec_results.pending_question
-                    self._emit_cot("Status", f"⏸️ Waiting for user answer: {q.question[:80]}")
-                    self.logger.info("⏸️ Question pending — Phase 1: Log and continue")
+                    self._emit_cot("Status", f"[PAUSED] Waiting for user answer: {q.question[:80]}")
+                    self.logger.info("[PAUSED] Question pending - Phase 1: Log and continue")
                     # Phase 1: Log and continue (Phase 2 will add UI blocking)
                     # Clear the question so the loop can proceed
                     exec_results.pending_question = None
@@ -2204,18 +2204,18 @@ You can help analyze binary files by executing commands through GhidraMCP."""
                     self.goal_achieved = True
                     break
                 else:
-                    self.logger.warning(f"⚠️ Goal not achieved in cycle {cycle}")
+                    self.logger.warning(f"[WARN] Goal not achieved in cycle {cycle}")
                     self.logger.warning(f"   Reason: {reason}")
                     self._emit_cot("Status", f"Goal not yet achieved: {reason[:100]}...")
 
                     if cycle < max_cycles:
-                        self.logger.info(f"🔄 Looping back to planning for cycle {cycle + 1}")
+                        self.logger.info(f"[INFO] Looping back to planning for cycle {cycle + 1}")
                         self._emit_cot("Status", f"Looping back to planning for cycle {cycle + 1}")
                         # Add evaluation result to context for next planning
                         eval_context = f"Cycle {cycle} evaluation: Goal not yet achieved. {reason}"
                         self.add_to_context("evaluation", eval_context)
                     else:
-                        self.logger.warning(f"⚠️ Max cycles ({max_cycles}) reached")
+                        self.logger.warning(f"[WARN] Max cycles ({max_cycles}) reached")
                         self.logger.warning(f"   Returning best effort response from {len(all_cycle_results)} cycles")
                         self._emit_cot("Status", f"Max cycles ({max_cycles}) reached - returning best effort response")
 
@@ -2357,10 +2357,10 @@ You can help analyze binary files by executing commands through GhidraMCP."""
         """
         # Check if agentic loop is enabled
         if self.llm_config.agentic_loop_enabled:
-            self.logger.info("🔄 Using multi-cycle agentic loop mode")
+            self.logger.info("[INFO] Using multi-cycle agentic loop mode")
             return self.process_query_with_agentic_loop(query)
         else:
-            self.logger.info("➡️ Using single-pass mode (legacy)")
+            self.logger.info("[INFO] Using single-pass mode (legacy)")
             return self.process_query_single_pass(query)
 
     def _generate_plan(self, query: str) -> str:
@@ -2674,7 +2674,8 @@ You can help analyze binary files by executing commands through GhidraMCP."""
             for cmd_name, cmd_params in commands:
                 try:
                     # Add tool call to context
-                    tool_call = f"EXECUTE: {cmd_name}({', '.join([f'{k}="{v}"' for k, v in cmd_params.items()])})"
+                    param_text = ", ".join([f'{k}="{v}"' for k, v in cmd_params.items()])
+                    tool_call = f"EXECUTE: {cmd_name}({param_text})"
                     self.add_to_context("tool_call", tool_call)
 
                     # Execute command with parameter normalization
@@ -2897,7 +2898,7 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
                     # Don't treat this as a valid final response, continue review loop
                     final_response = None
                     review_results.append(
-                        f"⚠️ Review step {review_steps}: AI provided instructions instead of executing tools. Response ignored."
+                        f"[WARN] Review step {review_steps}: AI provided instructions instead of executing tools. Response ignored."
                     )
                     continue
 
@@ -3029,18 +3030,18 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
                 # CRITICAL: Check if LLM violated completion rules by mixing commands and completion
                 if commands:
                     self.logger.error(
-                        "⚠️  COMPLETION RULE VIOLATION: LLM output EXECUTE commands AND completion signal in same response!"
+                        "[WARN] COMPLETION RULE VIOLATION: LLM output EXECUTE commands AND completion signal in same response!"
                     )
                     self.logger.warning(
-                        "📝 This violates the prompt rules. Ignoring completion signal and continuing execution..."
+                        "[NOTE] This violates the prompt rules. Ignoring completion signal and continuing execution..."
                     )
 
                     # Add feedback to help LLM learn
                     self.add_to_context(
                         "system",
-                        "⚠️  FORMAT VIOLATION: You output both EXECUTE commands and 'INVESTIGATION COMPLETE' in the same response.\n"
+                        "[WARN] FORMAT VIOLATION: You output both EXECUTE commands and 'INVESTIGATION COMPLETE' in the same response.\n"
                         "This is explicitly forbidden. You must:\n"
-                        "1. Execute tools → Wait for results → Then decide\n"
+                        "1. Execute tools -> Wait for results -> Then decide\n"
                         "2. NEVER output completion signals in the same response as tool calls\n"
                         "Please continue with analysis of the tool results.",
                     )
@@ -3065,7 +3066,7 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
                         self._ui_question_callback(question)
 
                     exec_results.pending_question = question
-                    self.logger.info("⏸️ Execution paused — waiting for user input")
+                    self.logger.info("[PAUSED] Execution paused - waiting for user input")
                     break  # Pause execution loop
 
             # Live CoT View - emit reasoning to both terminal and UI
@@ -3074,7 +3075,7 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
 
             # Check if any commands were extracted
             if not commands:
-                self.logger.warning(f"⚠️ No tool call found in response at step {step}")
+                self.logger.warning(f"[WARN] No tool call found in response at step {step}")
                 # Give AI one more chance
                 if step < max_steps:
                     continue
@@ -3178,10 +3179,10 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
                                         # Remove header from continuation
                                         remaining_clean = re.sub(r"\[Total Lines:.*?\].*?\n", "", remaining_result, count=1)
                                         result = result + "\n" + remaining_clean
-                                        self.logger.info(f"✅ Auto-continuation complete: Now showing all {total_lines} lines")
+                                        self.logger.info(f"[OK] Auto-continuation complete: Now showing all {total_lines} lines")
 
                                 except Exception as e:
-                                    self.logger.warning(f"⚠️  Auto-continuation failed: {e}. Original result kept.")
+                                    self.logger.warning(f"[WARN] Auto-continuation failed: {e}. Original result kept.")
 
                     # EXECUTION-PHASE RANKING: Filter large results to preserve analysis context
                     LARGE_RESULT_TOOLS = ["list_functions", "list_imports", "list_strings", "list_exports"]
@@ -3425,9 +3426,9 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
         # Mark as complete
         if not exec_results.investigation_complete:
             exec_results.completed_at = datetime.now()
-            self.logger.warning(f"⚠️ Execution loop ended after {step} steps (max reached)")
+            self.logger.warning(f"[WARN] Execution loop ended after {step} steps (max reached)")
 
-        self.logger.info(f"✅ Execution loop complete: {exec_results.total_steps} steps executed")
+        self.logger.info(f"[OK] Execution loop complete: {exec_results.total_steps} steps executed")
         return exec_results
 
     def _execution_agent_rank(self, tool_name: str, result: Any, goal: str, max_items: int = 20) -> Any:
@@ -3455,11 +3456,11 @@ Output ONLY JSON (same structure), top {max_items} items."""
             cleaned = "\n".join([line for line in resp.strip().split("\n") if not line.startswith("```")]).strip()
             filtered = json.loads(cleaned)
             self.logger.info(
-                f"✅ Kept {len(filtered) if isinstance(filtered, list) else len(filtered.get('items', []))}/{item_count}"
+                f"[OK] Kept {len(filtered) if isinstance(filtered, list) else len(filtered.get('items', []))}/{item_count}"
             )
             return filtered
         except Exception as e:
-            self.logger.warning(f"⚠️ Ranking failed: {e}")
+            self.logger.warning(f"[WARN] Ranking failed: {e}")
             return result
 
     def _build_execution_loop_prompt(self, exec_results: ExecutionPhaseResults, current_step: int) -> Tuple[str, str]:
@@ -3662,9 +3663,9 @@ If done: "INVESTIGATION COMPLETE"
         if cycle_conclusions:
             self.cycle_conclusions_history.append(cycle_conclusions)
             self.last_cycle_conclusions = cycle_conclusions
-            self.logger.info(f"📝 Stored conclusions for cycle {current_cycle}")
+            self.logger.info(f"[NOTE] Stored conclusions for cycle {current_cycle}")
         else:
-            self.logger.warning(f"⚠️ No conclusions generated for cycle {current_cycle}")
+            self.logger.warning(f"[WARN] No conclusions generated for cycle {current_cycle}")
 
         # Clean up the response
         final_response = self._clean_final_response(response)
@@ -3852,8 +3853,8 @@ Output ONLY valid JSON. No markdown code blocks. No explanations. Just the JSON 
 
             # CRITICAL: Check if response is empty (happens with reasoning models)
             if not response or len(response.strip()) == 0:
-                self.logger.error("⚠️  Consolidation returned EMPTY response - likely exhausted tokens on reasoning")
-                self.logger.info("📝 Generating minimal findings structure from raw results...")
+                self.logger.error("[WARN] Consolidation returned EMPTY response - likely exhausted tokens on reasoning")
+                self.logger.info("[NOTE] Generating minimal findings structure from raw results...")
                 return self._generate_minimal_findings_from_raw(exec_results, formatted_ranked, formatted_hints)
 
             # Clean response - remove any markdown code blocks if present
@@ -4189,8 +4190,8 @@ IMPORTANT: You must provide a COMPLETE report with a conclusion. Do not truncate
 
             # CRITICAL: Check if response is empty (happens with reasoning models)
             if not response or len(response.strip()) == 0:
-                self.logger.error("⚠️  LLM returned EMPTY response - likely exhausted tokens on reasoning")
-                self.logger.info("📝 Generating fallback report from structured findings...")
+                self.logger.error("[WARN] LLM returned EMPTY response - likely exhausted tokens on reasoning")
+                self.logger.info("[NOTE] Generating fallback report from structured findings...")
 
                 # Generate a comprehensive fallback report from findings
                 return self._generate_fallback_report(findings, goal)
@@ -4488,7 +4489,7 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
             else:
                 reason = response_clean
 
-        self.logger.info(f"{'✅' if goal_achieved else '⚠️'} Evaluation: {'Achieved' if goal_achieved else 'Not achieved'}")
+        self.logger.info(f"{'[OK]' if goal_achieved else '[WARN]'} Evaluation: {'Achieved' if goal_achieved else 'Not achieved'}")
         if not goal_achieved:
             self.logger.info(f"   Reason: {reason}")
 
@@ -6386,7 +6387,7 @@ Provide final risk assessment in this EXACT format:
                     all_context.append("")
 
                 if utility_behavior:
-                    all_context.append("### ⚙️ UTILITY / HELPER FUNCTIONS:")
+                    all_context.append("### UTILITY / HELPER FUNCTIONS:")
                     for result in utility_behavior[:8]:
                         self._format_behavioral_function(result, all_context)
                     all_context.append("")
@@ -6941,7 +6942,7 @@ Provide final risk assessment in this EXACT format:
 
 ---
 
-## 🏗️ Architecture Analysis
+## Architecture Analysis
 
 ### Design Pattern
 **Pattern:** {analysis.get("architecture_analysis", {}).get("pattern", "Not identified")}
@@ -7013,7 +7014,7 @@ This section provides specific addresses and evidence for key findings identifie
 
 ---
 
-## ⚠️ Risk Mitigation
+## [WARN] Risk Mitigation
 
 ### Recommended Actions
 {analysis.get("risk_assessment", {}).get("recommendations", "No specific recommendations")}
@@ -7781,18 +7782,18 @@ def main():
     if args.interactive:
         # Display banner
         print(
-            "╔══════════════════════════════════════════════════════════════════╗\n"
-            "║                                                                  ║\n"
-            "║  OGhidra - Simplified Three-Phase Architecture                   ║\n"
-            "║  ------------------------------------------                      ║\n"
-            "║                                                                  ║\n"
-            "║  1. Planning Phase: Create a plan for addressing the query       ║\n"
-            "║  2. Tool Calling Phase: Execute tools to gather information      ║\n"
-            "║  3. Analysis Phase: Analyze results and provide answers          ║\n"
-            "║                                                                  ║\n"
-            "║  For more information, see README-ARCHITECTURE.md                ║\n"
-            "║                                                                  ║\n"
-            "╚══════════════════════════════════════════════════════════════════╝"
+            "+==================================================================+\n"
+            "|                                                                  |\n"
+            "|  OGhidra - Simplified Three-Phase Architecture                   |\n"
+            "|  ------------------------------------------                      |\n"
+            "|                                                                  |\n"
+            "|  1. Planning Phase: Create a plan for addressing the query       |\n"
+            "|  2. Tool Calling Phase: Execute tools to gather information      |\n"
+            "|  3. Analysis Phase: Analyze results and provide answers          |\n"
+            "|                                                                  |\n"
+            "|  For more information, see README-ARCHITECTURE.md                |\n"
+            "|                                                                  |\n"
+            "+==================================================================+"
         )
 
         print("Ollama-GhidraMCP Bridge (Interactive Mode)")
