@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Focused regression tests for the Slasher-fix hardening pass.
+Focused regression tests for recent security hardening changes.
 """
 
 import hashlib
@@ -38,7 +38,7 @@ class FakeVar:
         return self._value
 
 
-class SlasherFixRegressionTests(unittest.TestCase):
+class SecurityHardeningRegressionTests(unittest.TestCase):
     def test_result_cache_uses_sha256_for_short_parameter_hash(self):
         cache = ResultCache(max_cache_size=5)
         params = {"name": "main", "offset": 1}
