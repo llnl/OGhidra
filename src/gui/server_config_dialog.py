@@ -337,9 +337,7 @@ class ServerConfigDialog:
                         results.append("Custom API: [ERROR] API URL is missing")
                     else:
                         if not verify_ssl:
-                            warning_msg = (
-                                "Custom API: [WARN] TLS certificate verification is disabled for this test request"
-                            )
+                            warning_msg = "Custom API: [WARN] TLS certificate verification is disabled for this test request"
                             logger.warning(warning_msg)
                             results.append(warning_msg)
 

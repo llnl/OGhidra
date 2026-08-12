@@ -536,7 +536,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                                 else:
                                     self.response_panel.add_response(
                                         "Debug",
-                                                f"[WARN] No function summary extracted from AI response. Summary found: {function_summary is not None}",
+                                        f"[WARN] No function summary extracted from AI response. Summary found: {function_summary is not None}",
                                     )
 
                             except Exception as e:
@@ -1757,9 +1757,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                             skip_reason_msg += f"\n💡 **Tip:** Use 'Enumerate All Functions' to process ALL {total_functions} functions without filtering."
                         elif enumeration_mode == "rename_only":
                             skip_reason_msg += "Rename-only mode: Only generic function names (FUN_*, sub_*) were processed.\n"
-                            skip_reason_msg += (
-                                f"**Tip:** {skipped_functions} functions were already renamed and were skipped."
-                            )
+                            skip_reason_msg += f"**Tip:** {skipped_functions} functions were already renamed and were skipped."
                         self.response_panel.add_response("Skip Summary", skip_reason_msg)
 
                     # AUTOMATIC SESSION SAVE

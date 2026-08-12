@@ -3179,7 +3179,9 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
                                         # Remove header from continuation
                                         remaining_clean = re.sub(r"\[Total Lines:.*?\].*?\n", "", remaining_result, count=1)
                                         result = result + "\n" + remaining_clean
-                                        self.logger.info(f"[OK] Auto-continuation complete: Now showing all {total_lines} lines")
+                                        self.logger.info(
+                                            f"[OK] Auto-continuation complete: Now showing all {total_lines} lines"
+                                        )
 
                                 except Exception as e:
                                     self.logger.warning(f"[WARN] Auto-continuation failed: {e}. Original result kept.")
@@ -4489,7 +4491,9 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
             else:
                 reason = response_clean
 
-        self.logger.info(f"{'[OK]' if goal_achieved else '[WARN]'} Evaluation: {'Achieved' if goal_achieved else 'Not achieved'}")
+        self.logger.info(
+            f"{'[OK]' if goal_achieved else '[WARN]'} Evaluation: {'Achieved' if goal_achieved else 'Not achieved'}"
+        )
         if not goal_achieved:
             self.logger.info(f"   Reason: {reason}")
 
