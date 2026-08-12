@@ -11,6 +11,8 @@ import sys
 import tempfile
 import types
 import unittest
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -24,6 +26,7 @@ if "tkinter" not in sys.modules:
     sys.modules["tkinter.ttk"] = fake_ttk
 
 from src.context_manager import ResultCache
+from src.custom_api_client import CustomAPIClient
 from src.enhanced_session_manager import EnhancedSessionManager
 from src.gui.server_config_dialog import ServerConfigDialog, _ValueProxy
 
@@ -39,6 +42,18 @@ class FakeVar:
 
 
 class SecurityHardeningRegressionTests(unittest.TestCase):
+    @staticmethod
+    def _make_custom_api_config(**overrides):
+        config = {
+            "api_url": "https://api.example.com/v1/chat/completions",
+            "api_key": "secret",
+            "model": "gpt-test",
+            "verify_ssl": False,
+            "llm_logging_enabled": False,
+        }
+        config.update(overrides)
+        return SimpleNamespace(**config)
+
     def test_result_cache_uses_sha256_for_short_parameter_hash(self):
         cache = ResultCache(max_cache_size=5)
         params = {"name": "main", "offset": 1}
@@ -91,6 +106,40 @@ class SecurityHardeningRegressionTests(unittest.TestCase):
         self.assertEqual(env_updates["CUSTOM_API_VERIFY_SSL"], "false")
         self.assertEqual(env_updates["CUSTOM_API_MODEL"], "gpt-test")
         self.assertEqual(env_updates["LLM_PROVIDER"], "custom_api")
+
+    def test_custom_api_tls_warning_emits_only_once(self):
+        ui_callback = Mock()
+        client = CustomAPIClient(self._make_custom_api_config(ui_event_callback=ui_callback, verify_ssl=False))
+        client.logger = Mock()
+
+        client._warn_if_tls_verification_disabled("chat completions")
+        client._warn_if_tls_verification_disabled("embeddings")
+
+        client.logger.warning.assert_called_once()
+        warning_message = client.logger.warning.call_args[0][0]
+        self.assertIn("TLS certificate verification is disabled", warning_message)
+        self.assertIn("chat completions", warning_message)
+        ui_callback.assert_called_once_with(
+            "security_warning",
+            {
+                "provider": "custom_api",
+                "operation": "chat completions",
+                "verify_ssl": False,
+                "message": warning_message,
+            },
+        )
+        self.assertTrue(client._tls_warning_emitted)
+
+    def test_custom_api_tls_warning_skipped_when_verification_enabled(self):
+        ui_callback = Mock()
+        client = CustomAPIClient(self._make_custom_api_config(ui_event_callback=ui_callback, verify_ssl=True))
+        client.logger = Mock()
+
+        client._warn_if_tls_verification_disabled("chat completions")
+
+        client.logger.warning.assert_not_called()
+        ui_callback.assert_not_called()
+        self.assertFalse(client._tls_warning_emitted)
 
     def test_touched_files_use_ascii_only(self):
         files_to_check = [
