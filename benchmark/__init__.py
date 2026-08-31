@@ -30,7 +30,7 @@ from .metrics.evaluator import SemanticEvaluator
 from .runners.benchmark_runner import BenchmarkRunner
 
 __all__ = [
-    "SemanticEvaluator",
     "BenchmarkRunner",
     "GroundTruthExtractor",
+    "SemanticEvaluator",
 ]

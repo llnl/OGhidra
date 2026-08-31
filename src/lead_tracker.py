@@ -7,9 +7,8 @@ before moving to new areas. Prevents the "breadth-over-depth" failure mode.
 """
 
 import logging
-from dataclasses import dataclass
-from typing import List, Optional, Set
 import re
+from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +19,7 @@ class Lead:
 
     description: str
     priority: str  # HIGH, MEDIUM, LOW
-    source_address: Optional[str] = None
+    source_address: str | None = None
     status: str = "new"  # new, in_progress, completed, abandoned
 
     def __str__(self):
@@ -34,8 +33,8 @@ class LeadTracker:
     """
 
     def __init__(self):
-        self.leads: List[Lead] = []
-        self.seen_leads: Set[str] = set()  # To prevent duplicates
+        self.leads: list[Lead] = []
+        self.seen_leads: set[str] = set()  # To prevent duplicates
 
     def reset(self):
         """Reset the tracker state, clearing all leads."""
@@ -95,7 +94,7 @@ class LeadTracker:
 
         return count
 
-    def get_active_leads(self, limit: int = 3) -> List[Lead]:
+    def get_active_leads(self, limit: int = 3) -> list[Lead]:
         """Get top N active (new/in_progress) leads."""
         active = [lead for lead in self.leads if lead.status in ["new", "in_progress"]]
         return active[:limit]

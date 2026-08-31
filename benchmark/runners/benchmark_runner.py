@@ -12,7 +12,7 @@ import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from ..ground_truth.extractor import FunctionGroundTruth, GroundTruthDataset
 from ..metrics.evaluator import SemanticEvaluator
@@ -36,7 +36,7 @@ class BenchmarkConfig:
     # Filtering
     min_complexity: int = 0
     max_complexity: int = 100
-    required_tags: List[str] = field(default_factory=list)
+    required_tags: list[str] = field(default_factory=list)
 
     # Output
     save_intermediate: bool = True
@@ -56,10 +56,10 @@ class FunctionBenchmarkResult:
     # Summaries
     ground_truth_summary: str
     oghidra_summary: str
-    suggested_name: Optional[str]
+    suggested_name: str | None
 
     # Evaluation scores
-    scores: Dict[str, float]
+    scores: dict[str, float]
     combined_score: float
 
     # Metadata
@@ -78,17 +78,17 @@ class BenchmarkResults:
     run_timestamp: str
 
     # Results
-    function_results: List[FunctionBenchmarkResult]
+    function_results: list[FunctionBenchmarkResult]
 
     # Aggregate statistics
-    statistics: Dict[str, Any] = field(default_factory=dict)
+    statistics: dict[str, Any] = field(default_factory=dict)
 
     # Timing
     total_time: float = 0.0
     functions_evaluated: int = 0
     functions_failed: int = 0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
         return {
             "config": asdict(self.config),
@@ -122,7 +122,7 @@ class BenchmarkRunner:
     def __init__(
         self,
         bridge: Any,
-        config: Optional[BenchmarkConfig] = None,
+        config: BenchmarkConfig | None = None,
     ):
         """
         Initialize the benchmark runner.
@@ -150,7 +150,7 @@ class BenchmarkRunner:
     def run(
         self,
         dataset: GroundTruthDataset,
-        progress_callback: Optional[callable] = None,
+        progress_callback: callable | None = None,
     ) -> BenchmarkResults:
         """
         Run the complete benchmark on a ground truth dataset.
@@ -211,8 +211,8 @@ class BenchmarkRunner:
 
     def _filter_functions(
         self,
-        functions: List[FunctionGroundTruth],
-    ) -> List[FunctionGroundTruth]:
+        functions: list[FunctionGroundTruth],
+    ) -> list[FunctionGroundTruth]:
         """Filter functions based on benchmark config."""
         filtered = []
 
@@ -276,8 +276,8 @@ class BenchmarkRunner:
 
     def _compute_statistics(
         self,
-        results: List[FunctionBenchmarkResult],
-    ) -> Dict[str, Any]:
+        results: list[FunctionBenchmarkResult],
+    ) -> dict[str, Any]:
         """Compute aggregate statistics from results."""
         if not results:
             return {}

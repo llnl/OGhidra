@@ -3,7 +3,8 @@ Vector store implementation for the CAG system.
 """
 
 import logging
-from typing import List, Dict, Any, Optional
+from typing import Any
+
 import numpy as np
 
 # Optional FAISS import
@@ -23,7 +24,7 @@ EMBEDDINGS_AVAILABLE = True
 class SimpleVectorStore:
     """Simple vector store implementation for document search."""
 
-    def __init__(self, documents: List[Dict[str, Any]], embeddings: List[np.ndarray]):
+    def __init__(self, documents: list[dict[str, Any]], embeddings: list[np.ndarray]):
         """
         Initialize the vector store.
 
@@ -45,7 +46,7 @@ class SimpleVectorStore:
         self.analysis_rules = []
         self.common_workflows = []
 
-    def search(self, query: str, top_k: int = 3) -> List[Dict[str, Any]]:
+    def search(self, query: str, top_k: int = 3) -> list[dict[str, Any]]:
         """
         Search the vector store for documents similar to the query.
 
@@ -121,7 +122,7 @@ class SimpleVectorStore:
 
     def search_hybrid(
         self, query: str, top_k: int = 5, use_keywords: bool = True, keyword_weight: float = 0.4
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         Hybrid search combining keyword matching and semantic similarity.
 
@@ -160,7 +161,7 @@ class SimpleVectorStore:
 
         return []
 
-    def _keyword_search(self, query: str, top_k: int = 10) -> List[Dict[str, Any]]:
+    def _keyword_search(self, query: str, top_k: int = 10) -> list[dict[str, Any]]:
         """
         Keyword-based search through document text (grep-style).
 
@@ -202,7 +203,7 @@ class SimpleVectorStore:
         # Sort by score and return top-K
         return sorted(matches, key=lambda x: x["score"], reverse=True)[:top_k]
 
-    def _merge_and_rerank(self, results: List[Dict[str, Any]], top_k: int, keyword_weight: float = 0.4) -> List[Dict[str, Any]]:
+    def _merge_and_rerank(self, results: list[dict[str, Any]], top_k: int, keyword_weight: float = 0.4) -> list[dict[str, Any]]:
         """
         Merge keyword and semantic results, removing duplicates and re-ranking.
 
@@ -259,7 +260,7 @@ class SimpleVectorStore:
 
         return merged[:top_k]
 
-    def search_by_function_name(self, name_pattern: str, exact: bool = False) -> List[Dict[str, Any]]:
+    def search_by_function_name(self, name_pattern: str, exact: bool = False) -> list[dict[str, Any]]:
         """
         Search for functions by name pattern.
 
@@ -343,7 +344,7 @@ class SimpleVectorStore:
         logger.info("CAG FAISS index built with %d documents", len(self.embeddings))
 
 
-def create_vector_store_from_docs(documents: List[Dict[str, Any]]) -> Optional[SimpleVectorStore]:
+def create_vector_store_from_docs(documents: list[dict[str, Any]]) -> SimpleVectorStore | None:
     """
     Create a vector store from documents.
 
@@ -388,5 +389,5 @@ def create_vector_store_from_docs(documents: List[Dict[str, Any]]) -> Optional[S
             logger.warning("Bridge not available for embeddings")
             return None
     except Exception as e:
-        logger.error(f"Error creating vector store: {str(e)}")
+        logger.error(f"Error creating vector store: {e!s}")
         return None

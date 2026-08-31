@@ -9,7 +9,7 @@ Date: 2026-02-19
 """
 
 import logging
-from typing import Dict, Any, Optional
+from typing import Any
 
 logger = logging.getLogger("ollama-ghidra-bridge.intelligent_context")
 
@@ -153,7 +153,7 @@ class IntelligentContextBuilder:
             return max(scores, key=scores.get)
         return "general"
 
-    def _get_function_data(self, function_addr: str) -> Optional[Dict[str, Any]]:
+    def _get_function_data(self, function_addr: str) -> dict[str, Any] | None:
         """Get function metadata from bridge if available."""
         if not self.bridge:
             return None
@@ -177,7 +177,7 @@ class IntelligentContextBuilder:
 
     # ========== Context Builders by Intent ==========
 
-    def _build_dataflow_context(self, func_data: Dict, max_tokens: int) -> str:
+    def _build_dataflow_context(self, func_data: dict, max_tokens: int) -> str:
         """Build data flow-focused context."""
         sections = []
 
@@ -217,7 +217,7 @@ class IntelligentContextBuilder:
 
         return "\n".join(sections)[: max_tokens * 4]  # Rough token estimate
 
-    def _build_security_context(self, func_data: Dict, max_tokens: int) -> str:
+    def _build_security_context(self, func_data: dict, max_tokens: int) -> str:
         """Build security-focused context."""
         sections = []
 
@@ -254,7 +254,7 @@ class IntelligentContextBuilder:
 
         return "\n".join(sections)[: max_tokens * 4]
 
-    def _build_implementation_context(self, func_data: Dict, max_tokens: int) -> str:
+    def _build_implementation_context(self, func_data: dict, max_tokens: int) -> str:
         """Build implementation-focused context."""
         sections = []
 
@@ -292,7 +292,7 @@ class IntelligentContextBuilder:
 
         return "\n".join(sections)[: max_tokens * 4]
 
-    def _build_callflow_context(self, func_data: Dict, max_tokens: int) -> str:
+    def _build_callflow_context(self, func_data: dict, max_tokens: int) -> str:
         """Build call flow-focused context."""
         sections = []
 
@@ -328,7 +328,7 @@ class IntelligentContextBuilder:
 
         return "\n".join(sections)[: max_tokens * 4]
 
-    def _build_general_context(self, func_data: Dict, max_tokens: int) -> str:
+    def _build_general_context(self, func_data: dict, max_tokens: int) -> str:
         """Build general-purpose context."""
         sections = []
 

@@ -2,13 +2,13 @@
 Client for interacting with the GhidraMCP API.
 """
 
+import base64
 import logging
 import re
 import struct
-import base64
 import threading
 from abc import ABC, abstractmethod
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Any
 from urllib.parse import urlparse
 
 import httpx
@@ -59,7 +59,7 @@ class AbstractGhidraClient(ABC):
         """Describe the current active instance/program."""
 
     @abstractmethod
-    def get_current_program_info(self) -> Dict[str, str]:
+    def get_current_program_info(self) -> dict[str, str]:
         """Return structured metadata for the active program."""
 
     # ------------------------------------------------------------------
@@ -93,7 +93,7 @@ class AbstractGhidraClient(ABC):
         logger.warning(f"Invalid {param_name} type={type(value).__name__}; using default={default}")
         return default
 
-    def _get_offset_limit(self, offset: Any, limit: Any, *, default_limit: int = 100) -> Tuple[int, int]:
+    def _get_offset_limit(self, offset: Any, limit: Any, *, default_limit: int = 100) -> tuple[int, int]:
         """Parse non-negative offset/limit pairs consistently across backends."""
         parsed_offset = max(0, self._coerce_int_param(offset, param_name="offset", default=0))
         parsed_limit = max(
@@ -103,13 +103,13 @@ class AbstractGhidraClient(ABC):
         return parsed_offset, parsed_limit
 
     @staticmethod
-    def _paginate_lines(lines: List[str], offset: int, limit: int) -> List[str]:
+    def _paginate_lines(lines: list[str], offset: int, limit: int) -> list[str]:
         """Slice a list of rendered lines using MCP-style pagination."""
         if limit == 0:
             return []
         return lines[offset : offset + limit]
 
-    def _render_paginated_lines(self, lines: List[str], offset: int, limit: int) -> List[str]:
+    def _render_paginated_lines(self, lines: list[str], offset: int, limit: int) -> list[str]:
         """Render list pagination metadata in the same shape as the HTTP plugin."""
         total = len(lines)
         start = max(0, offset)
@@ -150,7 +150,7 @@ class AbstractGhidraClient(ABC):
         if value is None:
             return ""
 
-        pieces: List[str] = []
+        pieces: list[str] = []
         for char in value:
             codepoint = ord(char)
             if 32 <= codepoint < 127:
@@ -184,11 +184,11 @@ class AbstractGhidraClient(ABC):
         return identifier
 
     @abstractmethod
-    def list_methods(self, offset: int = 0, limit: int = 100) -> List[str]:
+    def list_methods(self, offset: int = 0, limit: int = 100) -> list[str]:
         """List all function names in the program with pagination."""
 
     @abstractmethod
-    def list_classes(self, offset: int = 0, limit: int = 100) -> List[str]:
+    def list_classes(self, offset: int = 0, limit: int = 100) -> list[str]:
         """List all namespace/class names in the program with pagination."""
 
     @abstractmethod
@@ -204,31 +204,31 @@ class AbstractGhidraClient(ABC):
         """Rename a data label at the specified address."""
 
     @abstractmethod
-    def list_segments(self, offset: int = 0, limit: int = 100) -> List[str]:
+    def list_segments(self, offset: int = 0, limit: int = 100) -> list[str]:
         """List all memory segments in the program with pagination."""
 
     @abstractmethod
-    def list_imports(self, offset: int = 0, limit: int = 100) -> List[str]:
+    def list_imports(self, offset: int = 0, limit: int = 100) -> list[str]:
         """List imported symbols in the program with pagination."""
 
     @abstractmethod
-    def list_exports(self, offset: int = 0, limit: int = 100) -> List[str]:
+    def list_exports(self, offset: int = 0, limit: int = 100) -> list[str]:
         """List exported functions/symbols with pagination."""
 
     @abstractmethod
-    def list_namespaces(self, offset: int = 0, limit: int = 100) -> List[str]:
+    def list_namespaces(self, offset: int = 0, limit: int = 100) -> list[str]:
         """List all non-global namespaces in the program with pagination."""
 
     @abstractmethod
-    def list_data_items(self, offset: int = 0, limit: int = 100) -> List[str]:
+    def list_data_items(self, offset: int = 0, limit: int = 100) -> list[str]:
         """List defined data labels and their values with pagination."""
 
     @abstractmethod
-    def list_strings(self, offset: int = 0, limit: int = 100, filter: str | None = None) -> List[str]:
+    def list_strings(self, offset: int = 0, limit: int = 100, filter: str | None = None) -> list[str]:
         """List defined strings or search them by substring."""
 
     @abstractmethod
-    def search_functions_by_name(self, query: str, offset: int = 0, limit: int = 100) -> List[str]:
+    def search_functions_by_name(self, query: str, offset: int = 0, limit: int = 100) -> list[str]:
         """Search for functions whose name contains the given substring."""
 
     @abstractmethod
@@ -248,7 +248,7 @@ class AbstractGhidraClient(ABC):
         """Get the function currently selected by the user."""
 
     @abstractmethod
-    def list_functions(self, offset: int = 0, limit: int = 100) -> List[str]:
+    def list_functions(self, offset: int = 0, limit: int = 100) -> list[str]:
         """List all functions in the database with pagination."""
 
     @abstractmethod
@@ -256,7 +256,7 @@ class AbstractGhidraClient(ABC):
         """Decompile a function by address and return the decompiled C code."""
 
     @abstractmethod
-    def disassemble_function(self, address: str) -> List[str]:
+    def disassemble_function(self, address: str) -> list[str]:
         """Get assembly code for a function."""
 
     @abstractmethod
@@ -455,7 +455,7 @@ class AbstractGhidraClient(ABC):
         pointer_size: int = 8,
         max_scan_size: int = 524288,  # 512KB per segment max
         alignment: int = 8,
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """
         Scan the binary for function pointer tables without LLM assistance.
 
@@ -604,13 +604,13 @@ class AbstractGhidraClient(ABC):
         self,
         start_addr: int,
         scan_length: int,
-        function_map: Dict[int, str],
+        function_map: dict[int, str],
         min_func_addr: int,
         max_func_addr: int,
         pointer_size: int,
         min_table_entries: int,
         alignment: int,
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """
         Scan a memory region for function pointer tables.
 
@@ -654,13 +654,13 @@ class AbstractGhidraClient(ABC):
         self,
         data: bytes,
         base_addr: int,
-        function_map: Dict[int, str],
+        function_map: dict[int, str],
         min_func_addr: int,
         max_func_addr: int,
         pointer_size: int,
         min_table_entries: int,
         alignment: int,
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """
         Find sequences of consecutive function pointers in a byte array.
         """
@@ -729,7 +729,7 @@ class AbstractGhidraClient(ABC):
 
         return tables
 
-    def format_table_scan_results(self, tables: List[Dict], max_entries_shown: int = 10) -> str:
+    def format_table_scan_results(self, tables: list[dict], max_entries_shown: int = 10) -> str:
         """
         Format the scan results for human-readable output.
 
@@ -826,7 +826,7 @@ class GhidraMCPClient(AbstractGhidraClient):
             else:
                 logger.warning(f"Failed to connect to GhidraMCP API: {response}")
         except Exception as e:
-            logger.warning(f"Error detecting API: {str(e)}")
+            logger.warning(f"Error detecting API: {e!s}")
 
     def _get_base_url(self) -> str:
         """Get the base URL for the current active instance."""
@@ -839,8 +839,8 @@ class GhidraMCPClient(AbstractGhidraClient):
         method: str,
         endpoint: str,
         *,
-        params: Dict[str, Any] | None = None,
-        data: Dict[str, Any] | str | None = None,
+        params: dict[str, Any] | None = None,
+        data: dict[str, Any] | str | None = None,
     ) -> str:
         """Execute an HTTP request against the current GhidraMCP instance."""
         if params is None:
@@ -880,7 +880,7 @@ class GhidraMCPClient(AbstractGhidraClient):
             return response.text if method.upper() == "GET" else response.text.strip()
         return f"Error {response.status_code}: {response.text.strip()}"
 
-    def _http_get_lines(self, endpoint: str, params: Dict[str, Any] | None = None) -> List[str]:
+    def _http_get_lines(self, endpoint: str, params: dict[str, Any] | None = None) -> list[str]:
         """GET an endpoint and return split text lines."""
         text = self._http_request_text("GET", endpoint, params=params)
         return text.splitlines()
@@ -888,9 +888,9 @@ class GhidraMCPClient(AbstractGhidraClient):
     def _http_post_text(
         self,
         endpoint: str,
-        data: Dict[str, Any] | str,
+        data: dict[str, Any] | str,
         *,
-        params: Dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
     ) -> str:
         """POST to an endpoint and return response text."""
         return self._http_request_text("POST", endpoint, params=params, data=data)
@@ -906,7 +906,7 @@ class GhidraMCPClient(AbstractGhidraClient):
             response = self._http_get_lines("methods", {"offset": 0, "limit": 1})
             return bool(response) and not response[0].startswith(("Error", "Request failed"))
         except Exception as e:
-            logger.error(f"GhidraMCP server health check failed: {str(e)}")
+            logger.error(f"GhidraMCP server health check failed: {e!s}")
             return False
 
     def check_health(self) -> bool:
@@ -920,7 +920,7 @@ class GhidraMCPClient(AbstractGhidraClient):
             response = self._http_get_lines("methods", {"offset": 0, "limit": 1})
             return bool(response) and not response[0].startswith(("Error", "Request failed"))
         except Exception as e:
-            logger.error(f"GhidraMCP health check failed: {str(e)}")
+            logger.error(f"GhidraMCP health check failed: {e!s}")
             return False
 
     # =========================================================================
@@ -1036,7 +1036,7 @@ class GhidraMCPClient(AbstractGhidraClient):
         ]
         return "\n".join(result)
 
-    def get_current_program_info(self) -> Dict[str, str]:
+    def get_current_program_info(self) -> dict[str, str]:
         """
         Get structured information about the currently active program.
 
@@ -1063,7 +1063,7 @@ class GhidraMCPClient(AbstractGhidraClient):
             "plugin_version": info.get("plugin_version", "Unknown"),
         }
 
-    def _discover_instances_internal(self, ports: List[int], host: str = "localhost") -> int:
+    def _discover_instances_internal(self, ports: list[int], host: str = "localhost") -> int:
         """Internal helper to scan ports and update active_instances."""
         count = 0
 
@@ -1120,11 +1120,11 @@ class GhidraMCPClient(AbstractGhidraClient):
     # HTTP-backed public tool surface
     # ------------------------------------------------------------------
 
-    def list_methods(self, offset: int = 0, limit: int = 100) -> List[str]:
+    def list_methods(self, offset: int = 0, limit: int = 100) -> list[str]:
         offset, limit = self._get_offset_limit(offset, limit)
         return self._http_get_lines("methods", {"offset": offset, "limit": limit})
 
-    def list_classes(self, offset: int = 0, limit: int = 100) -> List[str]:
+    def list_classes(self, offset: int = 0, limit: int = 100) -> list[str]:
         offset, limit = self._get_offset_limit(offset, limit)
         return self._http_get_lines("classes", {"offset": offset, "limit": limit})
 
@@ -1142,7 +1142,7 @@ class GhidraMCPClient(AbstractGhidraClient):
     def rename_data(self, address: str, new_name: str) -> str:
         return self._http_post_text("renameData", {"address": address, "newName": new_name})
 
-    def list_segments(self, offset: int = 0, limit: int = 100) -> List[str]:
+    def list_segments(self, offset: int = 0, limit: int = 100) -> list[str]:
         offset, limit = self._get_offset_limit(offset, limit)
         if limit > self.MAX_SAFE_LIMIT:
             logger.warning(
@@ -1155,7 +1155,7 @@ class GhidraMCPClient(AbstractGhidraClient):
             limit = self.MAX_SAFE_LIMIT
         return self._http_get_lines("segments", {"offset": offset, "limit": limit})
 
-    def list_imports(self, offset: int = 0, limit: int = 100) -> List[str]:
+    def list_imports(self, offset: int = 0, limit: int = 100) -> list[str]:
         offset, limit = self._get_offset_limit(offset, limit)
         if limit > self.MAX_SAFE_LIMIT:
             logger.warning(
@@ -1168,7 +1168,7 @@ class GhidraMCPClient(AbstractGhidraClient):
             limit = self.MAX_SAFE_LIMIT
         return self._http_get_lines("imports", {"offset": offset, "limit": limit})
 
-    def list_exports(self, offset: int = 0, limit: int = 100) -> List[str]:
+    def list_exports(self, offset: int = 0, limit: int = 100) -> list[str]:
         offset, limit = self._get_offset_limit(offset, limit)
         if limit > self.MAX_SAFE_LIMIT:
             logger.warning(
@@ -1181,11 +1181,11 @@ class GhidraMCPClient(AbstractGhidraClient):
             limit = self.MAX_SAFE_LIMIT
         return self._http_get_lines("exports", {"offset": offset, "limit": limit})
 
-    def list_namespaces(self, offset: int = 0, limit: int = 100) -> List[str]:
+    def list_namespaces(self, offset: int = 0, limit: int = 100) -> list[str]:
         offset, limit = self._get_offset_limit(offset, limit)
         return self._http_get_lines("namespaces", {"offset": offset, "limit": limit})
 
-    def list_data_items(self, offset: int = 0, limit: int = 100) -> List[str]:
+    def list_data_items(self, offset: int = 0, limit: int = 100) -> list[str]:
         offset, limit = self._get_offset_limit(offset, limit)
         if limit > self.MAX_SAFE_LIMIT:
             logger.warning(
@@ -1198,7 +1198,7 @@ class GhidraMCPClient(AbstractGhidraClient):
             limit = self.MAX_SAFE_LIMIT
         return self._http_get_lines("data", {"offset": offset, "limit": limit})
 
-    def list_strings(self, offset: int = 0, limit: int = 100, filter: str | None = None) -> List[str]:
+    def list_strings(self, offset: int = 0, limit: int = 100, filter: str | None = None) -> list[str]:
         offset = self._coerce_int_param(offset, param_name="offset", default=0)
         limit = self._coerce_int_param(limit, param_name="limit", default=100)
 
@@ -1210,12 +1210,12 @@ class GhidraMCPClient(AbstractGhidraClient):
             )
             limit = max_limit
 
-        params: Dict[str, Any] = {"offset": offset, "limit": limit}
+        params: dict[str, Any] = {"offset": offset, "limit": limit}
         if filter:
             params["filter"] = filter
         return self._http_get_lines("strings", params)
 
-    def search_functions_by_name(self, query: str, offset: int = 0, limit: int = 100) -> List[str]:
+    def search_functions_by_name(self, query: str, offset: int = 0, limit: int = 100) -> list[str]:
         if not query:
             return ["Error: query string is required"]
         offset, limit = self._get_offset_limit(offset, limit)
@@ -1239,7 +1239,7 @@ class GhidraMCPClient(AbstractGhidraClient):
     def get_current_function(self) -> str:
         return "\n".join(self._http_get_lines("get_current_function"))
 
-    def list_functions(self, offset: int = 0, limit: int = 100) -> List[str]:
+    def list_functions(self, offset: int = 0, limit: int = 100) -> list[str]:
         offset, limit = self._get_offset_limit(offset, limit)
         max_functions_limit = 10000
         if limit > max_functions_limit:
@@ -1261,7 +1261,7 @@ class GhidraMCPClient(AbstractGhidraClient):
             )
         )
 
-    def disassemble_function(self, address: str) -> List[str]:
+    def disassemble_function(self, address: str) -> list[str]:
         return self._http_get_lines("disassemble_function", {"address": address})
 
     def set_decompiler_comment(self, address: str, comment: str) -> str:
@@ -1511,8 +1511,8 @@ class PyGhidraClient(AbstractGhidraClient):
         # directory under the current working directory, or can be overridden
         # via config.ghidra.pyghidra_projects_dir / PYGHIDRA_PROJECTS_DIR.
         if binary_path and not project_path:
-            from pathlib import Path
             import os
+            from pathlib import Path
 
             bpath = Path(binary_path)
             if not bpath.is_file():
@@ -1613,7 +1613,7 @@ class PyGhidraClient(AbstractGhidraClient):
         # the requested program or auto-select when only one exists. Prefer the
         # modern pyghidra.walk_programs / program_context API when available.
 
-        discovered: List[Tuple[str, str]] = []  # (name, project_path)
+        discovered: list[tuple[str, str]] = []  # (name, project_path)
 
         walk_programs = getattr(self._pyghidra, "walk_programs", None)
         program_context = getattr(self._pyghidra, "program_context", None)
@@ -1659,7 +1659,7 @@ class PyGhidraClient(AbstractGhidraClient):
 
         # Decide which program to open
         target_program = program_name
-        selected_path: Optional[str] = None
+        selected_path: str | None = None
 
         if target_program:
             # If the user provided a project path (starts with "/"), use it
@@ -1810,7 +1810,7 @@ class PyGhidraClient(AbstractGhidraClient):
             ]
         )
 
-    def get_current_program_info(self) -> Dict[str, str]:
+    def get_current_program_info(self) -> dict[str, str]:
         """Return structured information about the currently opened program."""
         if self._program is None:
             return {
@@ -1883,7 +1883,7 @@ class PyGhidraClient(AbstractGhidraClient):
         logger.error("pyGhidra %s failed: %s", operation, exc)
         return f"Error: pyGhidra {operation} failed: {exc}"
 
-    def _operation_error_lines(self, operation: str, exc: Exception) -> List[str]:
+    def _operation_error_lines(self, operation: str, exc: Exception) -> list[str]:
         return [self._operation_error(operation, exc)]
 
     def _address_from_hex(self, addr_str: str):
@@ -1982,12 +1982,12 @@ class PyGhidraClient(AbstractGhidraClient):
 
         action()
 
-    def _list_function_lines(self, *, offset: int, limit: int, include_addresses: bool) -> List[str]:
+    def _list_function_lines(self, *, offset: int, limit: int, include_addresses: bool) -> list[str]:
         program = self._require_program()
         func_mgr = program.getFunctionManager()
         funcs_iter = func_mgr.getFunctions(True)
 
-        lines: List[str] = []
+        lines: list[str] = []
         for func in funcs_iter:
             try:
                 name = str(func.getName())
@@ -2074,14 +2074,14 @@ class PyGhidraClient(AbstractGhidraClient):
             return entry.getAddress()
         return ""
 
-    def list_methods(self, offset: int = 0, limit: int = 100) -> List[str]:
+    def list_methods(self, offset: int = 0, limit: int = 100) -> list[str]:
         try:
             offset, limit = self._get_offset_limit(offset, limit)
             return self._list_function_lines(offset=offset, limit=limit, include_addresses=False)
         except Exception as exc:
             return self._operation_error_lines("list_methods", exc)
 
-    def list_classes(self, offset: int = 0, limit: int = 100) -> List[str]:
+    def list_classes(self, offset: int = 0, limit: int = 100) -> list[str]:
         return self.list_namespaces(offset=offset, limit=limit)
 
     def decompile_function(self, name: str, offset: int = 0, limit: int = 500) -> str:
@@ -2153,7 +2153,7 @@ class PyGhidraClient(AbstractGhidraClient):
         except Exception as exc:
             return self._operation_error("renameData", exc)
 
-    def list_segments(self, offset: int = 0, limit: int = 100) -> List[str]:
+    def list_segments(self, offset: int = 0, limit: int = 100) -> list[str]:
         try:
             offset, limit = self._get_offset_limit(offset, limit)
             if limit > self.MAX_SAFE_LIMIT:
@@ -2168,7 +2168,7 @@ class PyGhidraClient(AbstractGhidraClient):
 
             program = self._require_program()
             mem = program.getMemory()
-            lines: List[str] = []
+            lines: list[str] = []
             for blk in mem.getBlocks():
                 try:
                     name = blk.getName()
@@ -2181,7 +2181,7 @@ class PyGhidraClient(AbstractGhidraClient):
         except Exception as exc:
             return self._operation_error_lines("list_segments", exc)
 
-    def list_imports(self, offset: int = 0, limit: int = 100) -> List[str]:
+    def list_imports(self, offset: int = 0, limit: int = 100) -> list[str]:
         try:
             offset, limit = self._get_offset_limit(offset, limit)
             if limit > self.MAX_SAFE_LIMIT:
@@ -2198,11 +2198,11 @@ class PyGhidraClient(AbstractGhidraClient):
             st = program.getSymbolTable()
             ref_mgr = program.getReferenceManager()
             func_mgr = program.getFunctionManager()
-            lines: List[str] = []
+            lines: list[str] = []
             for sym in st.getExternalSymbols():
                 try:
                     line = f"{sym.getName()} -> {sym.getAddress()}"
-                    callers: List[str] = []
+                    callers: list[str] = []
                     ref_count = 0
                     for ref in ref_mgr.getReferencesTo(sym.getAddress()):
                         ref_count += 1
@@ -2226,7 +2226,7 @@ class PyGhidraClient(AbstractGhidraClient):
         except Exception as exc:
             return self._operation_error_lines("list_imports", exc)
 
-    def list_exports(self, offset: int = 0, limit: int = 100) -> List[str]:
+    def list_exports(self, offset: int = 0, limit: int = 100) -> list[str]:
         try:
             offset, limit = self._get_offset_limit(offset, limit)
             if limit > self.MAX_SAFE_LIMIT:
@@ -2241,7 +2241,7 @@ class PyGhidraClient(AbstractGhidraClient):
 
             program = self._require_program()
             st = program.getSymbolTable()
-            lines: List[str] = []
+            lines: list[str] = []
             for sym in st.getAllSymbols(True):
                 try:
                     if hasattr(sym, "isExternalEntryPoint") and sym.isExternalEntryPoint():
@@ -2253,7 +2253,7 @@ class PyGhidraClient(AbstractGhidraClient):
         except Exception as exc:
             return self._operation_error_lines("list_exports", exc)
 
-    def list_namespaces(self, offset: int = 0, limit: int = 100) -> List[str]:
+    def list_namespaces(self, offset: int = 0, limit: int = 100) -> list[str]:
         try:
             offset, limit = self._get_offset_limit(offset, limit)
             program = self._require_program()
@@ -2280,7 +2280,7 @@ class PyGhidraClient(AbstractGhidraClient):
         except Exception as exc:
             return self._operation_error_lines("list_namespaces", exc)
 
-    def list_data_items(self, offset: int = 0, limit: int = 100) -> List[str]:
+    def list_data_items(self, offset: int = 0, limit: int = 100) -> list[str]:
         try:
             offset, limit = self._get_offset_limit(offset, limit)
             if limit > self.MAX_SAFE_LIMIT:
@@ -2295,7 +2295,7 @@ class PyGhidraClient(AbstractGhidraClient):
 
             program = self._require_program()
             listing = program.getListing()
-            lines: List[str] = []
+            lines: list[str] = []
             for data in listing.getDefinedData(True):
                 try:
                     label = data.getLabel() if hasattr(data, "getLabel") else None
@@ -2311,7 +2311,7 @@ class PyGhidraClient(AbstractGhidraClient):
         except Exception as exc:
             return self._operation_error_lines("list_data_items", exc)
 
-    def list_strings(self, offset: int = 0, limit: int = 100, filter: str | None = None) -> List[str]:
+    def list_strings(self, offset: int = 0, limit: int = 100, filter: str | None = None) -> list[str]:
         offset = self._coerce_int_param(offset, param_name="offset", default=0)
         limit = self._coerce_int_param(limit, param_name="limit", default=100)
 
@@ -2346,7 +2346,7 @@ class PyGhidraClient(AbstractGhidraClient):
         except Exception as exc:
             return self._operation_error_lines("list_strings", exc)
 
-    def search_functions_by_name(self, query: str, offset: int = 0, limit: int = 100) -> List[str]:
+    def search_functions_by_name(self, query: str, offset: int = 0, limit: int = 100) -> list[str]:
         if not query:
             return ["Error: query string is required"]
 
@@ -2354,7 +2354,7 @@ class PyGhidraClient(AbstractGhidraClient):
             offset, limit = self._get_offset_limit(offset, limit)
             program = self._require_program()
             func_mgr = program.getFunctionManager()
-            matches: List[str] = []
+            matches: list[str] = []
             for func in func_mgr.getFunctions(True):
                 try:
                     name = str(func.getName())
@@ -2438,7 +2438,7 @@ class PyGhidraClient(AbstractGhidraClient):
             "function address or name instead."
         )
 
-    def list_functions(self, offset: int = 0, limit: int = 100) -> List[str]:
+    def list_functions(self, offset: int = 0, limit: int = 100) -> list[str]:
         try:
             offset, limit = self._get_offset_limit(offset, limit)
             max_functions_limit = 10000
@@ -2474,7 +2474,7 @@ class PyGhidraClient(AbstractGhidraClient):
         except Exception as exc:
             return self._operation_error("decompile_function", exc)
 
-    def disassemble_function(self, address: str) -> List[str]:
+    def disassemble_function(self, address: str) -> list[str]:
         if not address:
             return ["Error: 'address' parameter is required for disassemble_function"]
 
@@ -2487,7 +2487,7 @@ class PyGhidraClient(AbstractGhidraClient):
 
             listing = program.getListing()
             body = func.getBody()
-            lines: List[str] = []
+            lines: list[str] = []
             for cu in listing.getCodeUnits(body, True):
                 try:
                     comment = listing.getComment(cu.EOL_COMMENT, cu.getAddress())
@@ -2609,8 +2609,8 @@ class PyGhidraClient(AbstractGhidraClient):
             return "Error: 'function_address', 'variable_name', and 'new_type' are required for set_local_variable_type"
 
         try:
-            from ghidra.program.model.symbol import SourceType  # type: ignore[import]
             from ghidra.app.util.cparser.C import CParser  # type: ignore[import]
+            from ghidra.program.model.symbol import SourceType  # type: ignore[import]
 
             program = self._require_program()
             addr = self._address_from_hex(str(function_address))
@@ -2665,7 +2665,7 @@ class PyGhidraClient(AbstractGhidraClient):
             addr = self._address_from_hex(norm_addr)
             ref_mgr = program.getReferenceManager()
             func_mgr = program.getFunctionManager()
-            lines: List[str] = []
+            lines: list[str] = []
             for ref in ref_mgr.getReferencesTo(addr):
                 try:
                     from_addr = ref.getFromAddress()
@@ -2691,7 +2691,7 @@ class PyGhidraClient(AbstractGhidraClient):
             ref_mgr = program.getReferenceManager()
             func_mgr = program.getFunctionManager()
             listing = program.getListing()
-            lines: List[str] = []
+            lines: list[str] = []
             for ref in ref_mgr.getReferencesFrom(addr):
                 try:
                     to_addr = ref.getToAddress()
@@ -2757,7 +2757,7 @@ class PyGhidraClient(AbstractGhidraClient):
             if target_address is None:
                 return [f"Error: function or symbol '{name}' not found"]
 
-            lines: List[str] = []
+            lines: list[str] = []
             for ref in ref_mgr.getReferencesTo(target_address):
                 try:
                     from_addr = ref.getFromAddress()
@@ -2803,7 +2803,7 @@ class PyGhidraClient(AbstractGhidraClient):
                 return base64.b64encode(raw_bytes).decode("ascii")
 
             bytes_per_line = 16
-            lines: List[str] = []
+            lines: list[str] = []
             for chunk_offset in range(0, len(raw_bytes), bytes_per_line):
                 chunk = raw_bytes[chunk_offset : chunk_offset + bytes_per_line]
                 try:

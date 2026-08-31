@@ -1,7 +1,7 @@
 exclude: ^(.gitignore)
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.15.22
+    rev: v0.16.5
     hooks:
       # Run the linter
       - id: ruff
@@ -22,7 +22,7 @@ repos:
         args:
           - --autofix
   - repo: https://github.com/shellcheck-py/shellcheck-py
-    rev: v0.11.0.1
+    rev: v0.11.0.1-1
     hooks:
       - id: shellcheck
         args: [-x]

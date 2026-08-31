@@ -9,13 +9,13 @@ This module provides intelligent context management for LLM interactions:
 - Smart content prioritization
 """
 
-import logging
 import hashlib
 import json
-from typing import Dict, List, Optional, Any, Tuple
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
+from typing import Any
 
 logger = logging.getLogger("ollama-ghidra-bridge.context")
 
@@ -40,10 +40,10 @@ class CachedResult:
 
     result_id: str
     tool_name: str
-    parameters: Dict[str, Any]
+    parameters: dict[str, Any]
     full_result: str
-    summary: Optional[str] = None
-    excerpt: Optional[str] = None
+    summary: str | None = None
+    excerpt: str | None = None
     token_estimate: int = 0
     priority: ResultPriority = ResultPriority.MEDIUM
     timestamp: datetime = field(default_factory=datetime.now)
@@ -70,11 +70,11 @@ class ResultCache:
     """
 
     def __init__(self, max_cache_size: int = 100):
-        self.cache: Dict[str, CachedResult] = {}
+        self.cache: dict[str, CachedResult] = {}
         self.max_cache_size = max_cache_size
         self.result_counter = 0
 
-    def store(self, tool_name: str, parameters: Dict[str, Any], result: str, custom_id: Optional[str] = None) -> CachedResult:
+    def store(self, tool_name: str, parameters: dict[str, Any], result: str, custom_id: str | None = None) -> CachedResult:
         """
         Store a result and return a CachedResult object.
 
@@ -120,11 +120,11 @@ class ResultCache:
 
         return cached
 
-    def get(self, result_id: str) -> Optional[CachedResult]:
+    def get(self, result_id: str) -> CachedResult | None:
         """Retrieve a cached result by ID."""
         return self.cache.get(result_id)
 
-    def get_full_result(self, result_id: str) -> Optional[str]:
+    def get_full_result(self, result_id: str) -> str | None:
         """Get the full result content for a cached result."""
         cached = self.cache.get(result_id)
         return cached.full_result if cached else None
@@ -322,7 +322,7 @@ class ContextManager:
         self.budget = ContextBudget(context_budget, execution_fraction)
 
         # Track recent results for tiered context
-        self.recent_results: List[CachedResult] = []
+        self.recent_results: list[CachedResult] = []
         self.max_recent_detailed = 3  # Last 3 get full detail
 
         # Tiered context limits based on loop age (chars) - all from config
@@ -343,8 +343,8 @@ class ContextManager:
         )
 
     def process_result(
-        self, tool_name: str, parameters: Dict[str, Any], result: str, goal: str = ""
-    ) -> Tuple[str, CachedResult]:
+        self, tool_name: str, parameters: dict[str, Any], result: str, goal: str = ""
+    ) -> tuple[str, CachedResult]:
         """
         Process a tool execution result for context-aware inclusion.
 
@@ -392,7 +392,7 @@ class ContextManager:
 
         return display_content, cached
 
-    def format_results_for_prompt(self, tool_executions: List[Any], goal: str = "") -> str:
+    def format_results_for_prompt(self, tool_executions: list[Any], goal: str = "") -> str:
         """
         Format tool execution results for inclusion in prompt.
 
@@ -443,7 +443,7 @@ class ContextManager:
 
         return "\n".join(sections)
 
-    def _get_result_content(self, result: str, tool_name: str, parameters: Dict, goal: str, detail_level: str) -> str:
+    def _get_result_content(self, result: str, tool_name: str, parameters: dict, goal: str, detail_level: str) -> str:
         """Get result content at specified detail level."""
         if detail_level == "full":
             # Apply smart truncation if still too large
@@ -542,7 +542,7 @@ Summary:"""
 
         return f"{result[:first_portion]}\n... [truncated {len(result) - max_chars} chars] ...\n{result[-last_portion:]}"
 
-    def prioritize_results(self, results: List[Any], goal: str) -> List[Any]:
+    def prioritize_results(self, results: list[Any], goal: str) -> list[Any]:
         """
         Prioritize results by relevance to goal.
 
@@ -585,7 +585,7 @@ Summary:"""
 
         return [exec_result for _, exec_result in scored]
 
-    def get_full_result(self, result_id: str) -> Optional[str]:
+    def get_full_result(self, result_id: str) -> str | None:
         """Retrieve the full cached result by ID."""
         if self.result_cache:
             return self.result_cache.get_full_result(result_id)
@@ -714,7 +714,7 @@ Summary:"""
 
         return summary
 
-    def format_results_with_sliding_window(self, tool_executions: List[Any], current_loop: int, goal: str = "") -> str:
+    def format_results_with_sliding_window(self, tool_executions: list[Any], current_loop: int, goal: str = "") -> str:
         """
         Format results with sliding window: recent steps get full detail,
         older steps get compressed.
@@ -822,7 +822,7 @@ class RelevanceRanker:
         self.top_n = top_n_per_category
         self.logger = logging.getLogger("ollama-ghidra-bridge.ranker")
 
-    def rank_results(self, tool_executions: List[Any], goal: str) -> Dict[str, List[Any]]:
+    def rank_results(self, tool_executions: list[Any], goal: str) -> dict[str, list[Any]]:
         """
         Rank and group tool execution results by category.
 
@@ -836,7 +836,7 @@ class RelevanceRanker:
         goal_tokens = self._tokenize(goal)
 
         # Score and categorize all results
-        categorized: Dict[str, List[Tuple[float, Any]]] = {}
+        categorized: dict[str, list[tuple[float, Any]]] = {}
 
         for tool_exec in tool_executions:
             tool_name = getattr(tool_exec, "tool_name", str(tool_exec))
@@ -853,7 +853,7 @@ class RelevanceRanker:
             categorized[category].append((score, tool_exec))
 
         # Sort each category by score (descending) and take top N
-        ranked: Dict[str, List[Any]] = {}
+        ranked: dict[str, list[Any]] = {}
         for category, items in categorized.items():
             sorted_items = sorted(items, key=lambda x: x[0], reverse=True)
             ranked[category] = [item[1] for item in sorted_items[: self.top_n]]
@@ -922,7 +922,7 @@ class RelevanceRanker:
 
         return score
 
-    def format_ranked_for_prompt(self, ranked_results: Dict[str, List[Any]], max_chars_per_category: int = 3000) -> str:
+    def format_ranked_for_prompt(self, ranked_results: dict[str, list[Any]], max_chars_per_category: int = 3000) -> str:
         """
         Format ranked results for inclusion in consolidation prompt.
 
@@ -995,7 +995,7 @@ class CorrelationHintBuilder:
             re.compile(r"FUN_([0-9a-fA-F]{8,16})"),  # Ghidra function format
         ]
 
-    def build_hints(self, tool_executions: List[Any]) -> List[Dict[str, Any]]:
+    def build_hints(self, tool_executions: list[Any]) -> list[dict[str, Any]]:
         """
         Find addresses mentioned across multiple tool results.
 
@@ -1007,7 +1007,7 @@ class CorrelationHintBuilder:
             [{"address": "140001234", "mentions": ["strings: '...'", "xref: ..."], "significance": "HIGH"}]
         """
         # Map: normalized_address -> list of (tool_name, context_snippet)
-        address_mentions: Dict[str, List[Tuple[str, str]]] = {}
+        address_mentions: dict[str, list[tuple[str, str]]] = {}
 
         for tool_exec in tool_executions:
             tool_name = getattr(tool_exec, "tool_name", str(tool_exec))
@@ -1043,7 +1043,7 @@ class CorrelationHintBuilder:
         self.logger.info(f"Built {len(hints)} correlation hints from {len(tool_executions)} tool results")
         return hints
 
-    def _extract_addresses_with_context(self, text: str, tool_name: str) -> List[Tuple[str, str]]:
+    def _extract_addresses_with_context(self, text: str, tool_name: str) -> list[tuple[str, str]]:
         """Extract addresses and surrounding context from text."""
         results = []
 
@@ -1069,7 +1069,7 @@ class CorrelationHintBuilder:
         addr = addr.lower().replace("0x", "").lstrip("0") or "0"
         return addr.zfill(8)  # Pad to 8 chars minimum
 
-    def _assess_significance(self, mentions: List[Tuple[str, str]]) -> str:
+    def _assess_significance(self, mentions: list[tuple[str, str]]) -> str:
         """Assess the significance of a correlation."""
         tools = {m[0] for m in mentions}
 
@@ -1083,16 +1083,14 @@ class CorrelationHintBuilder:
         }
         high_matches = len(tools & high_value)
 
-        if high_matches >= 2:
-            return "HIGH"
-        elif high_matches >= 1 and len(tools) >= 3:
+        if high_matches >= 2 or high_matches >= 1 and len(tools) >= 3:
             return "HIGH"
         elif len(tools) >= 3:
             return "MEDIUM"
         else:
             return "LOW"
 
-    def format_for_prompt(self, hints: List[Dict[str, Any]], max_hints: int = 15) -> str:
+    def format_for_prompt(self, hints: list[dict[str, Any]], max_hints: int = 15) -> str:
         """
         Format correlation hints for inclusion in consolidation prompt.
 

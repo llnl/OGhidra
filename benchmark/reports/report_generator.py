@@ -11,7 +11,7 @@ Generates comprehensive benchmark reports in multiple formats:
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 logger = logging.getLogger("oghidra.benchmark.reports")
 
@@ -42,7 +42,7 @@ class ReportGenerator:
     def generate_markdown(
         self,
         results: Any,  # BenchmarkResults
-        output_path: Optional[str] = None,
+        output_path: str | None = None,
     ) -> str:
         """
         Generate a Markdown report from benchmark results.
@@ -190,7 +190,7 @@ class ReportGenerator:
     def generate_html(
         self,
         results: Any,
-        output_path: Optional[str] = None,
+        output_path: str | None = None,
     ) -> str:
         """
         Generate an interactive HTML report.
@@ -445,8 +445,8 @@ class ReportGenerator:
     def generate_all(
         self,
         results: Any,
-        base_name: Optional[str] = None,
-    ) -> Dict[str, str]:
+        base_name: str | None = None,
+    ) -> dict[str, str]:
         """
         Generate reports in all supported formats.
 

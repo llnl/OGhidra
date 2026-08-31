@@ -5,12 +5,12 @@ This module implements a session cache that persists relevant information across
 a session, such as conversation history and previous analysis results.
 """
 
-import os
 import json
-import time
 import logging
-from typing import Dict, List, Set, Optional, Any
+import os
+import time
 from dataclasses import dataclass, field
+from typing import Any
 
 logger = logging.getLogger("ollama-ghidra-bridge.cag.session")
 
@@ -71,14 +71,14 @@ class SessionCache:
         self.session_id = session_id or f"session_{int(time.time())}"
         self.cache_dir = os.path.join(cache_dir, self.session_id)
 
-        self.context_history: List[ContextItem] = []
-        self.decompiled_functions: Dict[str, DecompiledFunction] = {}  # Keyed by address
-        self.renamed_entities: Dict[str, RenamedEntity] = {}  # Keyed by old_address_or_name
-        self.analysis_results: List[AnalysisResult] = []
+        self.context_history: list[ContextItem] = []
+        self.decompiled_functions: dict[str, DecompiledFunction] = {}  # Keyed by address
+        self.renamed_entities: dict[str, RenamedEntity] = {}  # Keyed by old_address_or_name
+        self.analysis_results: list[AnalysisResult] = []
 
         # Track seen addresses and names to avoid duplicates
-        self.seen_addresses: Set[str] = set()
-        self.seen_names: Set[str] = set()
+        self.seen_addresses: set[str] = set()
+        self.seen_names: set[str] = set()
 
         # Ensure cache directory exists
         os.makedirs(self.cache_dir, exist_ok=True)
@@ -162,7 +162,7 @@ class SessionCache:
         self.analysis_results.append(analysis)
         self.logger.debug(f"Added analysis result for query: {query[:50]}... ({token_count} tokens)")
 
-    def find_similar_analysis(self, query: str, threshold: float = 0.7) -> Optional[str]:
+    def find_similar_analysis(self, query: str, threshold: float = 0.7) -> str | None:
         """
         Find a similar previous analysis result.
 
@@ -201,7 +201,7 @@ class SessionCache:
 
         return None
 
-    def get_function_by_name(self, function_name: str) -> Optional[DecompiledFunction]:
+    def get_function_by_name(self, function_name: str) -> DecompiledFunction | None:
         """
         Get a function by name.
 
@@ -217,7 +217,7 @@ class SessionCache:
 
         return None
 
-    def get_function_by_address(self, address: str) -> Optional[DecompiledFunction]:
+    def get_function_by_address(self, address: str) -> DecompiledFunction | None:
         """
         Get a function by address.
 
@@ -229,7 +229,7 @@ class SessionCache:
         """
         return self.decompiled_functions.get(address)
 
-    def get_renamed_entity(self, old_address_or_name: str) -> Optional[RenamedEntity]:
+    def get_renamed_entity(self, old_address_or_name: str) -> RenamedEntity | None:
         """
         Get a renamed entity by old address or name.
 
@@ -241,7 +241,7 @@ class SessionCache:
         """
         return self.renamed_entities.get(old_address_or_name)
 
-    def get_context_history(self, limit: int = 5) -> List[ContextItem]:
+    def get_context_history(self, limit: int = 5) -> list[ContextItem]:
         """
         Get recent context history.
 
@@ -253,7 +253,7 @@ class SessionCache:
         """
         return self.context_history[-limit:] if self.context_history else []
 
-    def prune_cache_for_query(self, query: str, token_limit: int = 4000) -> Dict[str, Any]:
+    def prune_cache_for_query(self, query: str, token_limit: int = 4000) -> dict[str, Any]:
         """
         Prune the cache to fit within token limits while retaining relevant information.
 
@@ -322,7 +322,7 @@ class SessionCache:
 
         return pruned_cache
 
-    def format_pruned_cache(self, pruned_cache: Dict[str, Any]) -> str:
+    def format_pruned_cache(self, pruned_cache: dict[str, Any]) -> str:
         """
         Format the pruned cache for inclusion in the prompt.
 
@@ -475,7 +475,7 @@ class SessionCache:
 
             self.logger.info(f"Session cache saved to {self.cache_dir}")
         except Exception as e:
-            self.logger.error(f"Error saving session cache to disk: {str(e)}")
+            self.logger.error(f"Error saving session cache to disk: {e!s}")
 
     def load_from_disk(self, session_id: str) -> bool:
         """
@@ -532,10 +532,10 @@ class SessionCache:
             )
             return True
         except Exception as e:
-            self.logger.error(f"Error loading session cache: {str(e)}")
+            self.logger.error(f"Error loading session cache: {e!s}")
             return False
 
-    def list_available_sessions() -> List[str]:
+    def list_available_sessions() -> list[str]:
         """
         List available session IDs.
 
