@@ -9,36 +9,36 @@ and GhidraMCP, enabling AI-assisted reverse engineering tasks within Ghidra.
 import argparse
 import json
 import logging
-import sys
 import os
 import re  # Added for pattern matching in enhanced error feedback
-from typing import Dict, Any, List, Optional, Tuple
+import sys
 import threading
-
-from src.config import BridgeConfig
-from src.ollama_client import OllamaClient
-from src.external_client import ExternalClient
-from src.custom_api_client import CustomAPIClient
-from src.ghidra_client import GhidraMCPClient, AbstractGhidraClient, PyGhidraClient
-from src.command_parser import CommandParser
-from src.models.memory import (
-    SessionMemory,
-    MessageRole,
-    CAGContext,
-    StructuredPrompt,
-    ExecutionPhaseResults,
-    ToolExecution,
-    ExecutionSignal,
-    ExecutionGate,
-)
-from src.execution_gate import ExecutionGatekeeper
-from src.user_question import QuestionHandler
-from src.session_compactor import SessionCompactor
-from src.context_manager import ContextManager
-from src.analysis_dump import AnalysisDumper
-from src.coverage_tracker import CoverageTracker
-from src.lead_tracker import LeadTracker
 from datetime import datetime
+from typing import Any
+
+from src.analysis_dump import AnalysisDumper
+from src.command_parser import CommandParser
+from src.config import BridgeConfig
+from src.context_manager import ContextManager
+from src.coverage_tracker import CoverageTracker
+from src.custom_api_client import CustomAPIClient
+from src.execution_gate import ExecutionGatekeeper
+from src.external_client import ExternalClient
+from src.ghidra_client import AbstractGhidraClient, GhidraMCPClient, PyGhidraClient
+from src.lead_tracker import LeadTracker
+from src.models.memory import (
+    CAGContext,
+    ExecutionGate,
+    ExecutionPhaseResults,
+    ExecutionSignal,
+    MessageRole,
+    SessionMemory,
+    StructuredPrompt,
+    ToolExecution,
+)
+from src.ollama_client import OllamaClient
+from src.session_compactor import SessionCompactor
+from src.user_question import QuestionHandler
 
 
 # Configure logging
@@ -169,7 +169,7 @@ class Bridge:
 
         # Deterministic compaction for prompt stability (reduces 429/504)
         try:
-            from src.result_compactor import ResultCompactor, CompactionConfig
+            from src.result_compactor import CompactionConfig, ResultCompactor
 
             max_chars = int(getattr(self.llm_config, "compaction_max_chars", 2000))
             self.result_compactor = ResultCompactor(CompactionConfig(max_chars=max_chars))
@@ -494,7 +494,7 @@ class Bridge:
         # After every 3 tool executions, force analysis
         return tools_executed > 0 and tools_executed % 3 == 0
 
-    def _create_analysis_checkpoint(self, execution_results: List) -> str:
+    def _create_analysis_checkpoint(self, execution_results: list) -> str:
         """
         Create analysis checkpoint prompt that forces reflection.
 
@@ -588,10 +588,9 @@ Do NOT skip to tool execution. Provide concrete details from the data above.
         logger.warning("To ensure no HuggingFace API calls, this method now returns None.")
 
         # Return None to force usage of Ollama embeddings
-        return None
 
     @classmethod
-    def get_embeddings(cls, texts: List[str], model: str = None) -> List[List[float]]:
+    def get_embeddings(cls, texts: list[str], model: str = None) -> list[list[float]]:
         """Get embeddings using the configured LLM client's embedding service (Ollama or External)."""
         logger = logging.getLogger("ollama-ghidra-bridge")
 
@@ -634,7 +633,7 @@ Do NOT skip to tool execution. Provide concrete details from the data above.
             return []
 
     @classmethod
-    def get_ollama_embeddings(cls, texts: List[str], model: str = None) -> List[List[float]]:
+    def get_ollama_embeddings(cls, texts: list[str], model: str = None) -> list[list[float]]:
         """DEPRECATED: Use get_embeddings instead. Legacy alias for backward compatibility."""
         return cls.get_embeddings(texts, model)
 
@@ -683,7 +682,7 @@ Do NOT skip to tool execution. Provide concrete details from the data above.
     #     """Parse text-based artifacts from LLM response."""
     #     pass
 
-    def _load_capabilities_text(self) -> Optional[str]:
+    def _load_capabilities_text(self) -> str | None:
         """Load the capabilities text from the file if the flag is set."""
         if not self.include_capabilities:
             return None
@@ -706,7 +705,7 @@ Do NOT skip to tool execution. Provide concrete details from the data above.
                     self.logger.warning(f"Capabilities file '{capabilities_file}' not found.")
                     return None
         except Exception as e:
-            self.logger.error(f"Error reading capabilities file '{capabilities_file}': {str(e)}")
+            self.logger.error(f"Error reading capabilities file '{capabilities_file}': {e!s}")
             return None
 
         # Conditionally add search_function_summaries when Hybrid Search is enabled
@@ -1210,7 +1209,7 @@ You can help analyze binary files by executing commands through GhidraMCP."""
 
         return ""
 
-    def _check_command_exists(self, command_name: str) -> Tuple[bool, str, List[str], List[str]]:
+    def _check_command_exists(self, command_name: str) -> tuple[bool, str, list[str], list[str]]:
         """
         Check if a command exists and provide suggestions if it doesn't.
 
@@ -1252,7 +1251,7 @@ You can help analyze binary files by executing commands through GhidraMCP."""
         error_message = f"Unknown command: {command_name}{suggestion_msg}"
         return False, error_message, similar_commands, available_commands
 
-    def _normalize_command_params(self, command_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
+    def _normalize_command_params(self, command_name: str, params: dict[str, Any]) -> dict[str, Any]:
         """
         Normalize command parameters based on command requirements.
 
@@ -1682,7 +1681,7 @@ You can help analyze binary files by executing commands through GhidraMCP."""
 
         return aggregated
 
-    def execute_command(self, command_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
+    def execute_command(self, command_name: str, params: dict[str, Any]) -> dict[str, Any]:
         """
         Execute a command with parameters.
 
@@ -1856,7 +1855,7 @@ You can help analyze binary files by executing commands through GhidraMCP."""
             enhanced_error = self.command_parser.get_enhanced_error_message(command_name, params, error_message)
             raise ValueError(enhanced_error) from e
 
-    def _generate_cache_key(self, command_name: str, params: Dict[str, Any]) -> str:
+    def _generate_cache_key(self, command_name: str, params: dict[str, Any]) -> str:
         """
         Generate a cache key for a command and its parameters.
 
@@ -1869,9 +1868,9 @@ You can help analyze binary files by executing commands through GhidraMCP."""
         """
         # For functions, use name if available, otherwise use current function
         if command_name in ["decompile_function", "analyze_function"]:
-            if "name" in params and params["name"]:
+            if params.get("name"):
                 return f"{command_name}:{params['name']}"
-            elif "address" in params and params["address"]:
+            elif params.get("address"):
                 return f"{command_name}:{params['address']}"
             else:
                 # For current function, we need to get the current function name/address
@@ -1887,7 +1886,6 @@ You can help analyze binary files by executing commands through GhidraMCP."""
                             return f"{command_name}:current:{func_name}"
                 except Exception as e:
                     self.logger.warning(f"Failed to resolve current function for {command_name}: {e}")
-                    pass
                 return f"{command_name}:current"
 
         elif command_name == "get_current_function":
@@ -1899,7 +1897,7 @@ You can help analyze binary files by executing commands through GhidraMCP."""
             param_str = ":".join([f"{k}={v}" for k, v in sorted(params.items())])
             return f"{command_name}:{param_str}" if param_str else command_name
 
-    def _get_cached_result(self, command_name: str, cache_key: str, params: Dict[str, Any]):
+    def _get_cached_result(self, command_name: str, cache_key: str, params: dict[str, Any]):
         """
         Get a cached result if available.
 
@@ -1935,7 +1933,7 @@ You can help analyze binary files by executing commands through GhidraMCP."""
             # Generic cache for other commands
             return self.decompilation_cache.get(cache_key)
 
-    def _cache_result(self, command_name: str, cache_key: str, params: Dict[str, Any], result: Any):
+    def _cache_result(self, command_name: str, cache_key: str, params: dict[str, Any], result: Any):
         """
         Cache a command result.
 
@@ -1990,7 +1988,7 @@ You can help analyze binary files by executing commands through GhidraMCP."""
         self.cache_stats = {"hits": 0, "misses": 0, "cache_size": 0}
         self.logger.info("🧹 All caches cleared")
 
-    def get_cache_stats(self) -> Dict[str, Any]:
+    def get_cache_stats(self) -> dict[str, Any]:
         """Get cache statistics."""
         total_requests = self.cache_stats["hits"] + self.cache_stats["misses"]
         hit_rate = (self.cache_stats["hits"] / total_requests * 100) if total_requests > 0 else 0
@@ -2240,14 +2238,14 @@ You can help analyze binary files by executing commands through GhidraMCP."""
             # Log the exception with full traceback
             import traceback
 
-            self.logger.error(f"❌ Error in agentic query processing: {str(e)}")
+            self.logger.error(f"❌ Error in agentic query processing: {e!s}")
             self.logger.error(f"Full traceback: {traceback.format_exc()}")
 
             # Reset workflow stage on error
             self.current_workflow_stage = None
 
             # Return error message
-            return f"Error in query processing: {str(e)}"
+            return f"Error in query processing: {e!s}"
 
     def process_query_single_pass(self, query: str) -> str:
         """
@@ -2332,14 +2330,14 @@ You can help analyze binary files by executing commands through GhidraMCP."""
             # Log the exception with full traceback
             import traceback
 
-            self.logger.error(f"❌ Error in query processing: {str(e)}")
+            self.logger.error(f"❌ Error in query processing: {e!s}")
             self.logger.error(f"Full traceback: {traceback.format_exc()}")
 
             # Reset workflow stage on error
             self.current_workflow_stage = None
 
             # Return error message
-            return f"Error in query processing: {str(e)}"
+            return f"Error in query processing: {e!s}"
 
     def process_query(self, query: str) -> str:
         """
@@ -2735,7 +2733,7 @@ You can help analyze binary files by executing commands through GhidraMCP."""
                     all_results.append(f"Command: {cmd_name}\nResult: {execution_result}\n")
 
                 except Exception as e:
-                    error_msg = f"ERROR: {str(e)}"
+                    error_msg = f"ERROR: {e!s}"
                     logging.error(f"Error executing {cmd_name}: {error_msg}")
                     execution_result = error_msg
                     self.add_to_context("tool_error", error_msg)
@@ -2937,7 +2935,7 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
                         review_results.append(tool_result_entry)
                         new_execution_results.append(tool_result_entry)
                     except Exception as e:
-                        error_msg = f"ERROR: {str(e)}"
+                        error_msg = f"ERROR: {e!s}"
                         logging.error(f"Error executing review command {cmd_name}: {error_msg}")
                         self.add_to_context("tool_error", error_msg)
                         error_entry = f"Error executing {cmd_name}: {error_msg}"
@@ -3408,7 +3406,7 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
                         # Phase 1: Log and continue (Phase 2 will truly block)
 
                 except Exception as e:
-                    error_msg = f"ERROR: {str(e)}"
+                    error_msg = f"ERROR: {e!s}"
                     self.logger.error(f"❌ Error in execution loop step {step}: {error_msg}")
 
                     # Add error to execution results
@@ -3465,7 +3463,7 @@ Output ONLY JSON (same structure), top {max_items} items."""
             self.logger.warning(f"[WARN] Ranking failed: {e}")
             return result
 
-    def _build_execution_loop_prompt(self, exec_results: ExecutionPhaseResults, current_step: int) -> Tuple[str, str]:
+    def _build_execution_loop_prompt(self, exec_results: ExecutionPhaseResults, current_step: int) -> tuple[str, str]:
         """
         Build prompt for execution loop iteration.
 
@@ -3610,7 +3608,7 @@ If done: "INVESTIGATION COMPLETE"
         self.logger.info("📊 Starting analysis phase (hybrid approach)")
 
         # Import the hybrid context components
-        from src.context_manager import RelevanceRanker, CorrelationHintBuilder
+        from src.context_manager import CorrelationHintBuilder, RelevanceRanker
 
         # Reset context manager for fresh budget tracking
         self.context_manager.reset()
@@ -3921,7 +3919,7 @@ Output ONLY valid JSON. No markdown code blocks. No explanations. Just the JSON 
                 hints_preview = str(formatted_hints)[:800]
 
             return {
-                "binary_purpose": f"Consolidation error: {str(e)}",
+                "binary_purpose": f"Consolidation error: {e!s}",
                 "security_apis": [],
                 "investigation_leads": [],
                 "artifacts": [],
@@ -4122,7 +4120,7 @@ Output ONLY valid JSON. No markdown code blocks. No explanations. Just the JSON 
         except Exception as e:
             self.logger.error(f"Consolidation failed: {e}")
             return {
-                "binary_purpose": f"Consolidation error: {str(e)}",
+                "binary_purpose": f"Consolidation error: {e!s}",
                 "security_apis": [],
                 "investigation_leads": [],
                 "artifacts": [],
@@ -4303,7 +4301,7 @@ IMPORTANT: You must provide a COMPLETE report with a conclusion. Do not truncate
 
     def _synthesize_report_with_conclusions(
         self, findings: dict, goal: str, cycle_number: int, correlation_hints: list
-    ) -> Tuple[str, Any]:
+    ) -> tuple[str, Any]:
         """
         Phase 3b: Generate final report AND extract CycleConclusions for next planning.
 
@@ -4376,7 +4374,7 @@ IMPORTANT: You must provide a COMPLETE report with a conclusion. Do not truncate
 
         return report, conclusions
 
-    def _evaluate_goal_achievement(self, goal: str, analysis: str, exec_results: ExecutionPhaseResults) -> Tuple[bool, str]:
+    def _evaluate_goal_achievement(self, goal: str, analysis: str, exec_results: ExecutionPhaseResults) -> tuple[bool, str]:
         """
         Evaluate if the investigation goal has been achieved.
 
@@ -4535,7 +4533,7 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
         else:
             self.logger.warning(f"DEBUG: No valid summary extracted for {function_identifier}")
 
-    def _add_function_to_rag(self, function_identifier: str, func_data: Dict[str, Any]) -> None:
+    def _add_function_to_rag(self, function_identifier: str, func_data: dict[str, Any]) -> None:
         """
         Add a function with enhanced metadata as a RAG vector AND to the knowledge graph.
 
@@ -4705,12 +4703,10 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
                 line_lower = line.lower()
                 if any(indicator in line_lower for indicator in summary_indicators):
                     # Clean up the line
-                    if line.endswith("."):
-                        line = line[:-1]
+                    line = line.removesuffix(".")
                     # Remove common prefixes
                     for prefix in ["Based on the analysis, ", "It appears that ", "The function "]:
-                        if line.startswith(prefix):
-                            line = line[len(prefix) :]
+                        line = line.removeprefix(prefix)
 
                     if len(line) > len(best_summary) and len(line) < 150:
                         best_summary = line
@@ -4732,7 +4728,7 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
 
         return best_summary[:150] if best_summary else "Analysis performed"
 
-    def _update_analysis_state(self, command: Dict[str, Any], result: str) -> None:
+    def _update_analysis_state(self, command: dict[str, Any], result: str) -> None:
         """
         Update the internal analysis state based on the executed command and result.
 
@@ -4926,7 +4922,7 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
                     return True
         return False
 
-    def _extract_suggestions(self, response: str) -> Tuple[str, List[str]]:
+    def _extract_suggestions(self, response: str) -> tuple[str, list[str]]:
         """
         Extract tool improvement suggestions from the AI's response.
 
@@ -5163,7 +5159,7 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
                     x
                     for x in report_sections[section]
                     if not (
-                        (x.lower() if isinstance(x, str) else x) in seen or seen.add((x.lower() if isinstance(x, str) else x))
+                        (x.lower() if isinstance(x, str) else x) in seen or seen.add(x.lower() if isinstance(x, str) else x)
                     )
                 ]
 
@@ -5215,7 +5211,7 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
 
         return report.strip()
 
-    def _parse_plan_tools(self, plan: str) -> List[Dict[str, Any]]:
+    def _parse_plan_tools(self, plan: str) -> list[dict[str, Any]]:
         """Parses the PLAN section from the AI's response."""
         tools = []
         # Regex to find all TOOL: lines
@@ -5255,7 +5251,7 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
         self.logger.info(f"Extracted {len(tools)} planned tools from plan")
         return tools
 
-    def _mark_tool_as_executed(self, command_name: str, params: Dict[str, Any]) -> None:
+    def _mark_tool_as_executed(self, command_name: str, params: dict[str, Any]) -> None:
         """
         Mark a tool as executed in the planned tools tracker.
 
@@ -5477,7 +5473,7 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
             self.current_workflow_stage = None
             return f"Error generating software report: {e}"
 
-    def _collect_comprehensive_binary_data(self) -> Dict[str, Any]:
+    def _collect_comprehensive_binary_data(self) -> dict[str, Any]:
         """Collect all available binary data for analysis."""
         data = {
             "functions": [],
@@ -5604,7 +5600,7 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
 
         return data
 
-    def _perform_comprehensive_ai_analysis(self, data: Dict[str, Any]) -> Dict[str, Any]:
+    def _perform_comprehensive_ai_analysis(self, data: dict[str, Any]) -> dict[str, Any]:
         """Perform AI-powered analysis of collected binary data."""
         analysis = {
             "software_classification": {},
@@ -5653,7 +5649,7 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
 
         return analysis
 
-    def _format_agent_analysis_context(self, data: Dict[str, Any], analysis_type: str = "analysis") -> str:
+    def _format_agent_analysis_context(self, data: dict[str, Any], analysis_type: str = "analysis") -> str:
         """
         Format the agent analysis history section for prompts.
 
@@ -5682,7 +5678,7 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
         else:
             return analysis_history
 
-    def _build_classification_prompt(self, data: Dict[str, Any]) -> str:
+    def _build_classification_prompt(self, data: dict[str, Any]) -> str:
         """Build prompt for software classification analysis."""
         return f"""Analyze this binary and classify the software type and purpose.
 
@@ -5715,7 +5711,7 @@ Provide a structured classification following this EXACT format:
 
 **IMPORTANT:** If prior analysis exists, use it as the PRIMARY SOURCE of truth. Otherwise, base your classification on the Binary Information above."""
 
-    def _build_security_assessment_prompt(self, data: Dict[str, Any]) -> str:
+    def _build_security_assessment_prompt(self, data: dict[str, Any]) -> str:
         """Build prompt for security risk assessment."""
         return f"""Perform a comprehensive security assessment of this binary.
 
@@ -5755,7 +5751,7 @@ Analyze for security risks and provide assessment in this EXACT format:
 
 **IMPORTANT:** If prior analysis exists, use it as the PRIMARY SOURCE of truth. Otherwise, assess security risks based on the imports, function names, and behaviors observable in the Binary Data above."""
 
-    def _build_function_categorization_prompt(self, data: Dict[str, Any]) -> str:
+    def _build_function_categorization_prompt(self, data: dict[str, Any]) -> str:
         """Build prompt for function categorization analysis."""
         return f"""Categorize all functions in this binary by their primary purpose and behavior.
 
@@ -5798,7 +5794,7 @@ Analyze and categorize functions into standard categories. Provide results in th
 
 **IMPORTANT:** If prior analysis exists, use it to guide categorization. Otherwise, categorize based on function names, import patterns, and observable code structure."""
 
-    def _build_behavioral_analysis_prompt(self, data: Dict[str, Any]) -> str:
+    def _build_behavioral_analysis_prompt(self, data: dict[str, Any]) -> str:
         """Build prompt for behavioral pattern analysis."""
         return f"""Analyze behavioral patterns and workflows in this binary.
 
@@ -5829,7 +5825,7 @@ Identify patterns, workflows, and behavioral characteristics. Format response as
 
 **IMPORTANT:** If prior analysis exists, use it as the PRIMARY SOURCE. Otherwise, infer behavioral patterns from imports, exports, and function structures."""
 
-    def _build_architecture_prompt(self, data: Dict[str, Any]) -> str:
+    def _build_architecture_prompt(self, data: dict[str, Any]) -> str:
         """Build prompt for software architecture analysis."""
         return f"""Analyze the software architecture and design patterns used in this binary.
 
@@ -5860,7 +5856,7 @@ Analyze the software architecture and provide results in this EXACT format:
 
 **IMPORTANT:** If prior analysis exists, align your architecture analysis with it. Otherwise, derive architectural insights from code organization and structure."""
 
-    def _build_risk_assessment_prompt(self, data: Dict[str, Any], analysis: Dict[str, Any]) -> str:
+    def _build_risk_assessment_prompt(self, data: dict[str, Any], analysis: dict[str, Any]) -> str:
         """Build prompt for overall risk assessment."""
         return f"""Provide a comprehensive risk assessment based on all analysis conducted.
 
@@ -5890,7 +5886,7 @@ Provide final risk assessment in this EXACT format:
 
 **IMPORTANT:** If prior analysis exists, use it as the PRIMARY SOURCE for risk calculation. Otherwise, assess risks based on the analysis summary and observable indicators."""
 
-    def _format_summaries_for_prompt(self, summaries: Dict[str, str]) -> str:
+    def _format_summaries_for_prompt(self, summaries: dict[str, str]) -> str:
         """Format function summaries for AI prompts with comprehensive RAG retrieval."""
         if not summaries:
             return "No function summaries available."
@@ -5920,7 +5916,7 @@ Provide final risk assessment in this EXACT format:
 
         return "\n".join(formatted)
 
-    def _get_comprehensive_function_context(self, summaries: Dict[str, str]) -> str:
+    def _get_comprehensive_function_context(self, summaries: dict[str, str]) -> str:
         """Get comprehensive function context using multi-vector RAG retrieval."""
         try:
             vector_store = self.cag_manager.vector_store
@@ -6040,7 +6036,7 @@ Provide final risk assessment in this EXACT format:
 
         return None
 
-    def _format_function_behaviors_for_security(self, data: Dict[str, Any]) -> str:
+    def _format_function_behaviors_for_security(self, data: dict[str, Any]) -> str:
         """Format function behaviors specifically for security analysis with comprehensive RAG."""
         # Enhanced RAG approach for security analysis
         if (
@@ -6065,7 +6061,7 @@ Provide final risk assessment in this EXACT format:
 
         return "\n".join(formatted) if formatted else "No renamed functions with behavioral data available."
 
-    def _get_comprehensive_security_context(self, data: Dict[str, Any]) -> str:
+    def _get_comprehensive_security_context(self, data: dict[str, Any]) -> str:
         """Get comprehensive security-focused function context using RAG."""
         try:
             vector_store = self.cag_manager.vector_store
@@ -6248,14 +6244,14 @@ Provide final risk assessment in this EXACT format:
 
         return min(score, 1.0)  # Cap at 1.0
 
-    def _find_renamed_function(self, old_name: str, data: Dict[str, Any]) -> str:
+    def _find_renamed_function(self, old_name: str, data: dict[str, Any]) -> str:
         """Find the new name for a renamed function."""
         for old, new in data["renamed_functions"]:
             if old == old_name:
                 return new
         return old_name  # Return original if not renamed
 
-    def _format_security_function(self, result: Dict[str, Any], context_list: List[str]) -> None:
+    def _format_security_function(self, result: dict[str, Any], context_list: list[str]) -> None:
         """Format a security function result for the context."""
         old_name = result["old_name"]
         new_name = result["new_name"]
@@ -6270,12 +6266,12 @@ Provide final risk assessment in this EXACT format:
         else:
             context_list.append(f"- **{old_name}** (Security Risk: {security_score:.2f}): {truncated_content}")
 
-    def _format_summaries_for_categorization(self, summaries: Dict[str, str]) -> str:
+    def _format_summaries_for_categorization(self, summaries: dict[str, str]) -> str:
         """Format summaries for function categorization with comprehensive RAG."""
         # Use the same comprehensive approach as the main formatter
         return self._format_summaries_for_prompt(summaries)
 
-    def _format_renamed_functions(self, renamed_functions: List[tuple]) -> str:
+    def _format_renamed_functions(self, renamed_functions: list[tuple]) -> str:
         """Format renamed functions list."""
         if not renamed_functions:
             return "No functions have been renamed yet."
@@ -6289,7 +6285,7 @@ Provide final risk assessment in this EXACT format:
 
         return "\n".join(formatted)
 
-    def _format_behavioral_data(self, data: Dict[str, Any]) -> str:
+    def _format_behavioral_data(self, data: dict[str, Any]) -> str:
         """Format behavioral data with comprehensive RAG analysis."""
         # Enhanced RAG approach for behavioral analysis
         if (
@@ -6307,7 +6303,7 @@ Provide final risk assessment in this EXACT format:
         # Fallback to basic behavioral data
         return self._format_summaries_for_prompt(data["function_summaries"])
 
-    def _get_comprehensive_behavioral_context(self, data: Dict[str, Any]) -> str:
+    def _get_comprehensive_behavioral_context(self, data: dict[str, Any]) -> str:
         """Get comprehensive behavioral context using RAG."""
         try:
             vector_store = self.cag_manager.vector_store
@@ -6514,7 +6510,7 @@ Provide final risk assessment in this EXACT format:
 
         return min(score, 1.0)  # Cap at 1.0
 
-    def _format_behavioral_function(self, result: Dict[str, Any], context_list: List[str]) -> None:
+    def _format_behavioral_function(self, result: dict[str, Any], context_list: list[str]) -> None:
         """Format a behavioral function result for the context."""
         name = result["name"]
         content = result["content"]
@@ -6525,7 +6521,7 @@ Provide final risk assessment in this EXACT format:
 
         context_list.append(f"- **{name}** (Behavioral Score: {behavioral_score:.2f}): {truncated_content}")
 
-    def _format_architecture_data(self, data: Dict[str, Any]) -> str:
+    def _format_architecture_data(self, data: dict[str, Any]) -> str:
         """Format architecture data with comprehensive analysis."""
         # Enhanced RAG approach for architecture analysis
         if (
@@ -6543,7 +6539,7 @@ Provide final risk assessment in this EXACT format:
         # Fallback to basic architecture data
         return self._format_summaries_for_prompt(data["function_summaries"])
 
-    def _get_comprehensive_architecture_context(self, data: Dict[str, Any]) -> str:
+    def _get_comprehensive_architecture_context(self, data: dict[str, Any]) -> str:
         """Get comprehensive architecture context using RAG."""
         try:
             vector_store = self.cag_manager.vector_store
@@ -6681,7 +6677,7 @@ Provide final risk assessment in this EXACT format:
 
         return min(score, 1.0)  # Cap at 1.0
 
-    def _format_architecture_function(self, result: Dict[str, Any], context_list: List[str]) -> None:
+    def _format_architecture_function(self, result: dict[str, Any], context_list: list[str]) -> None:
         """Format an architecture function result for the context."""
         name = result["name"]
         content = result["content"]
@@ -6692,12 +6688,12 @@ Provide final risk assessment in this EXACT format:
 
         context_list.append(f"- **{name}** (Arch Score: {architecture_score:.2f}): {truncated_content}")
 
-    def _format_summaries_for_categorization(self, summaries: Dict[str, str]) -> str:
+    def _format_summaries_for_categorization(self, summaries: dict[str, str]) -> str:
         """Format summaries for function categorization with comprehensive RAG."""
         # Use the same comprehensive approach as the main formatter
         return self._format_summaries_for_prompt(summaries)
 
-    def _format_renamed_functions(self, renamed_functions: List[tuple]) -> str:
+    def _format_renamed_functions(self, renamed_functions: list[tuple]) -> str:
         """Format renamed functions list."""
         if not renamed_functions:
             return "No functions have been renamed yet."
@@ -6711,11 +6707,11 @@ Provide final risk assessment in this EXACT format:
 
         return "\n".join(formatted)
 
-    def _format_behavioral_data(self, data: Dict[str, Any]) -> str:
+    def _format_behavioral_data(self, data: dict[str, Any]) -> str:
         """Format data for behavioral analysis."""
         return self._format_summaries_for_prompt(data["function_summaries"])
 
-    def _format_architecture_data(self, data: Dict[str, Any]) -> str:
+    def _format_architecture_data(self, data: dict[str, Any]) -> str:
         """Format data for architecture analysis."""
         formatted = []
         if data["classes"]:
@@ -6728,7 +6724,7 @@ Provide final risk assessment in this EXACT format:
         return "\n".join(formatted) if formatted else "Limited architecture data available."
 
     # Response parsing methods
-    def _parse_classification_response(self, response: str) -> Dict[str, str]:
+    def _parse_classification_response(self, response: str) -> dict[str, str]:
         """Parse software classification response."""
         parsed = {}
         try:
@@ -6751,7 +6747,7 @@ Provide final risk assessment in this EXACT format:
 
         return parsed
 
-    def _parse_security_response(self, response: str) -> Dict[str, str]:
+    def _parse_security_response(self, response: str) -> dict[str, str]:
         """Parse security assessment response."""
         parsed = {}
         try:
@@ -6792,7 +6788,7 @@ Provide final risk assessment in this EXACT format:
 
         return parsed
 
-    def _parse_function_response(self, response: str) -> Dict[str, str]:
+    def _parse_function_response(self, response: str) -> dict[str, str]:
         """Parse function categorization response."""
         parsed = {}
         try:
@@ -6820,7 +6816,7 @@ Provide final risk assessment in this EXACT format:
 
         return parsed
 
-    def _parse_behavioral_response(self, response: str) -> Dict[str, str]:
+    def _parse_behavioral_response(self, response: str) -> dict[str, str]:
         """Parse behavioral analysis response."""
         parsed = {}
         try:
@@ -6840,7 +6836,7 @@ Provide final risk assessment in this EXACT format:
 
         return parsed
 
-    def _parse_architecture_response(self, response: str) -> Dict[str, str]:
+    def _parse_architecture_response(self, response: str) -> dict[str, str]:
         """Parse architecture analysis response."""
         parsed = {}
         try:
@@ -6856,7 +6852,7 @@ Provide final risk assessment in this EXACT format:
 
         return parsed
 
-    def _parse_risk_response(self, response: str) -> Dict[str, str]:
+    def _parse_risk_response(self, response: str) -> dict[str, str]:
         """Parse risk assessment response."""
         parsed = {}
         try:
@@ -6892,7 +6888,7 @@ Provide final risk assessment in this EXACT format:
 
         return parsed
 
-    def _generate_structured_software_report(self, data: Dict[str, Any], analysis: Dict[str, Any], format_type: str) -> str:
+    def _generate_structured_software_report(self, data: dict[str, Any], analysis: dict[str, Any], format_type: str) -> str:
         """Generate the final structured software report."""
         if format_type.lower() == "json":
             return self._generate_json_report(data, analysis)
@@ -6903,7 +6899,7 @@ Provide final risk assessment in this EXACT format:
         else:  # Default to markdown
             return self._generate_markdown_report(data, analysis)
 
-    def _generate_markdown_report(self, data: Dict[str, Any], analysis: Dict[str, Any]) -> str:
+    def _generate_markdown_report(self, data: dict[str, Any], analysis: dict[str, Any]) -> str:
         """Generate markdown-formatted software report."""
         timestamp = self._get_current_timestamp()
 
@@ -7041,7 +7037,7 @@ This section provides specific addresses and evidence for key findings identifie
 """
         return report
 
-    def _generate_html_report(self, data: Dict[str, Any], analysis: Dict[str, Any]) -> str:
+    def _generate_html_report(self, data: dict[str, Any], analysis: dict[str, Any]) -> str:
         """
         Generate HTML-formatted vulnerability report using AI.
 
@@ -7051,7 +7047,7 @@ This section provides specific addresses and evidence for key findings identifie
         3. Parses the JSON response into sections
         4. Assembles final HTML using the report_template module
         """
-        from src.report_template import generate_html_report, ReportMetadata
+        from src.report_template import ReportMetadata, generate_html_report
 
         # Build context for the AI
         context = self._build_html_report_context(data, analysis)
@@ -7132,7 +7128,7 @@ Now generate the JSON report based on this data.
             # Fallback to a basic HTML report
             return self._generate_fallback_html_report(data, analysis)
 
-    def _build_html_report_context(self, data: Dict[str, Any], analysis: Dict[str, Any]) -> str:
+    def _build_html_report_context(self, data: dict[str, Any], analysis: dict[str, Any]) -> str:
         """Build context string for HTML report generation."""
         context_parts = []
 
@@ -7145,13 +7141,13 @@ Now generate the JSON report based on this data.
 
         return "\n".join(context_parts)
 
-    def _format_imports_sample(self, imports: List[str]) -> str:
+    def _format_imports_sample(self, imports: list[str]) -> str:
         """Format a sample of imports for the prompt."""
         if not imports:
             return "No imports available"
         return "\n".join(f"- {imp}" for imp in imports[:15])
 
-    def _format_address_evidence(self, analysis: Dict[str, Any]) -> str:
+    def _format_address_evidence(self, analysis: dict[str, Any]) -> str:
         """Format address evidence from analysis for the prompt."""
         evidence = []
 
@@ -7188,9 +7184,10 @@ Now generate the JSON report based on this data.
         Returns:
             Tuple of (List[ReportSection], metadata_dict)
         """
-        from src.report_template import ReportSection, build_stats_grid, build_attack_vectors, build_timeline, build_table
         import json
         import re
+
+        from src.report_template import ReportSection, build_attack_vectors, build_stats_grid, build_table, build_timeline
 
         sections = []
         metadata = {"severity": "MEDIUM", "subtitle": "Binary Analysis Report"}
@@ -7231,7 +7228,6 @@ Now generate the JSON report based on this data.
                             content = json.loads(content)
                         except Exception as e:
                             self.logger.warning(f"Failed to load JSON for 'stats': {e}")
-                            pass
                     if isinstance(content, list):
                         content = build_stats_grid(content)
 
@@ -7241,7 +7237,6 @@ Now generate the JSON report based on this data.
                             content = json.loads(content)
                         except Exception as e:
                             self.logger.warning(f"Failed to load JSON for 'attack_vectors': {e}")
-                            pass
                     if isinstance(content, list):
                         content = build_attack_vectors(content)
 
@@ -7251,7 +7246,6 @@ Now generate the JSON report based on this data.
                             content = json.loads(content)
                         except Exception as e:
                             self.logger.warning(f"Failed to load JSON for 'timeline': {e}")
-                            pass
                     if isinstance(content, list):
                         content = build_timeline(content)
 
@@ -7261,7 +7255,6 @@ Now generate the JSON report based on this data.
                             content = json.loads(content)
                         except Exception as e:
                             self.logger.warning(f"Failed to load JSON for 'table': {e}")
-                            pass
                     if isinstance(content, dict):
                         headers = content.get("headers", [])
                         rows = content.get("rows", [])
@@ -7276,7 +7269,6 @@ Now generate the JSON report based on this data.
                             content = json.loads(content)
                         except Exception as e:
                             self.logger.warning(f"Failed to load JSON for 'discovery': {e}")
-                            pass
                     if isinstance(content, list):
                         content = build_vulnerability_discovery(content)
 
@@ -7288,7 +7280,6 @@ Now generate the JSON report based on this data.
                             content = json.loads(content)
                         except Exception as e:
                             self.logger.warning(f"Failed to load JSON for 'key_findings': {e}")
-                            pass
                     if isinstance(content, list):
                         content = build_key_findings(content)
 
@@ -7300,7 +7291,6 @@ Now generate the JSON report based on this data.
                             content = json.loads(content)
                         except Exception as e:
                             self.logger.warning(f"Failed to load JSON for 'security_imports': {e}")
-                            pass
                     if isinstance(content, list):
                         content = build_security_imports(content)
 
@@ -7331,9 +7321,9 @@ Now generate the JSON report based on this data.
 
         return sections, metadata
 
-    def _generate_fallback_html_report(self, data: Dict[str, Any], analysis: Dict[str, Any]) -> str:
+    def _generate_fallback_html_report(self, data: dict[str, Any], analysis: dict[str, Any]) -> str:
         """Generate a basic HTML report without AI, as fallback."""
-        from src.report_template import generate_html_report, ReportSection, ReportMetadata
+        from src.report_template import ReportMetadata, ReportSection, generate_html_report
 
         binary_name = data.get("metadata", {}).get("binary_name", "Unknown Binary")
 
@@ -7392,7 +7382,7 @@ Now generate the JSON report based on this data.
 
         return generate_html_report(sections, metadata)
 
-    def _generate_json_report(self, data: Dict[str, Any], analysis: Dict[str, Any]) -> str:
+    def _generate_json_report(self, data: dict[str, Any], analysis: dict[str, Any]) -> str:
         """Generate JSON-formatted software report."""
         report_data = {
             "metadata": {
@@ -7435,7 +7425,7 @@ Now generate the JSON report based on this data.
 
         return json.dumps(report_data, indent=2, default=str)
 
-    def _generate_text_report(self, data: Dict[str, Any], analysis: Dict[str, Any]) -> str:
+    def _generate_text_report(self, data: dict[str, Any], analysis: dict[str, Any]) -> str:
         """Generate plain text software report."""
         # Convert markdown to plain text by removing markdown formatting
         markdown_report = self._generate_markdown_report(data, analysis)
@@ -7449,7 +7439,7 @@ Now generate the JSON report based on this data.
 
         return text_report
 
-    def _format_imports_for_report(self, imports: List[str]) -> str:
+    def _format_imports_for_report(self, imports: list[str]) -> str:
         """Format imports for report display."""
         if not imports:
             return "- No imports detected"
@@ -7463,7 +7453,7 @@ Now generate the JSON report based on this data.
 
         return "\n".join(formatted)
 
-    def _format_exports_for_report(self, exports: List[str]) -> str:
+    def _format_exports_for_report(self, exports: list[str]) -> str:
         """Format exports for report display."""
         if not exports:
             return "- No exports detected"
@@ -7477,7 +7467,7 @@ Now generate the JSON report based on this data.
 
         return "\n".join(formatted)
 
-    def _format_function_categories_for_report(self, categories: Dict[str, str]) -> str:
+    def _format_function_categories_for_report(self, categories: dict[str, str]) -> str:
         """Format function categories for report display."""
         if not categories:
             return "- Function categorization not available"
@@ -7489,7 +7479,7 @@ Now generate the JSON report based on this data.
 
         return "\n".join(formatted) if formatted else "- No function categories identified"
 
-    def _format_renamed_functions_for_report(self, renamed_functions: List[tuple]) -> str:
+    def _format_renamed_functions_for_report(self, renamed_functions: list[tuple]) -> str:
         """Format renamed functions for report display."""
         if not renamed_functions:
             return "- No functions have been renamed in this analysis"
@@ -7507,7 +7497,7 @@ Now generate the JSON report based on this data.
     # Address and Evidence Extraction Helpers
     # ------------------------------------------------------------------
 
-    def _extract_addresses_from_analysis(self, analysis_text: str) -> List[Dict[str, str]]:
+    def _extract_addresses_from_analysis(self, analysis_text: str) -> list[dict[str, str]]:
         """
         Extract addresses and their associated findings from AI analysis text.
 
@@ -7557,7 +7547,7 @@ Now generate the JSON report based on this data.
 
         return findings
 
-    def _format_findings_with_addresses(self, findings: List[Dict[str, str]], max_findings: int = 20) -> str:
+    def _format_findings_with_addresses(self, findings: list[dict[str, str]], max_findings: int = 20) -> str:
         """
         Format a list of findings with addresses for report display.
 
@@ -7586,7 +7576,7 @@ Now generate the JSON report based on this data.
 
         return "\n".join(formatted)
 
-    def _enrich_findings_with_locations(self, analysis: Dict[str, Any], data: Dict[str, Any]) -> Dict[str, Any]:
+    def _enrich_findings_with_locations(self, analysis: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
         """
         Enrich analysis findings with specific location data.
 
@@ -7678,7 +7668,7 @@ Now generate the JSON report based on this data.
     #  Address normalisation helpers
     # ------------------------------------------------------------------
 
-    def _normalize_address(self, identifier: str) -> Optional[str]:
+    def _normalize_address(self, identifier: str) -> str | None:
         """Try to extract a pure hexadecimal address from various identifier
         forms (e.g. 'FUN_401000', 'thunk_FUN_401000', '0x401000',
         'Function: FUN_401000 at 401000').
@@ -7838,7 +7828,7 @@ def main():
                 break
 
             except Exception as e:
-                print(f"Error: {str(e)}")
+                print(f"Error: {e!s}")
 
         return 0
 

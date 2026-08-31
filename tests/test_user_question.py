@@ -11,7 +11,8 @@ Verifies:
 """
 
 import unittest
-from src.user_question import UserQuestion, QuestionHandler
+
+from src.user_question import QuestionHandler, UserQuestion
 
 
 class TestParseFromResponse(unittest.TestCase):

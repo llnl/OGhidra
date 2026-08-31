@@ -18,9 +18,9 @@ from .rouge import RougeMetric
 from .sentence_bert import SentenceBERTMetric
 
 __all__ = [
-    "SemanticEvaluator",
     "BERTScoreMetric",
-    "SentenceBERTMetric",
-    "RougeMetric",
     "LLMJudgeMetric",
+    "RougeMetric",
+    "SemanticEvaluator",
+    "SentenceBERTMetric",
 ]

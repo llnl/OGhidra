@@ -1,15 +1,15 @@
-import unittest
-from unittest.mock import MagicMock
+import os
 import re
 import sys
-import os
+import unittest
+from unittest.mock import MagicMock
 
 # Add project root to path for imports
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from src.bridge import Bridge
-from src.config import BridgeConfig
 from src.command_parser import CommandParser
+from src.config import BridgeConfig
 
 
 class TestCommandNormalization(unittest.TestCase):
@@ -23,13 +23,13 @@ class TestCommandNormalization(unittest.TestCase):
 
         # Create a basic mock for the ghidra client with snake_case methods
         self.mock_ghidra = MagicMock()
-        setattr(self.mock_ghidra, "get_current_function", lambda: None)
-        setattr(self.mock_ghidra, "decompile_function", lambda: None)
-        setattr(self.mock_ghidra, "decompile_function_by_address", lambda: None)
-        setattr(self.mock_ghidra, "rename_function_by_address", lambda: None)
+        self.mock_ghidra.get_current_function = lambda: None
+        self.mock_ghidra.decompile_function = lambda: None
+        self.mock_ghidra.decompile_function_by_address = lambda: None
+        self.mock_ghidra.rename_function_by_address = lambda: None
 
         # Also add a camelCase method for testing that existing camelCase is preserved
-        setattr(self.mock_ghidra, "camelCaseMethod", lambda: None)
+        self.mock_ghidra.camelCaseMethod = lambda: None
 
         self.bridge.ghidra = self.mock_ghidra
         self.bridge.logger = MagicMock()

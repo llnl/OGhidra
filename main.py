@@ -3,8 +3,8 @@
 Main entry point for the Ollama-GhidraMCP Bridge application.
 """
 
-import json
 import argparse
+import json
 import sys
 
 from dotenv import load_dotenv
@@ -13,9 +13,9 @@ from dotenv import load_dotenv
 load_dotenv(override=True)
 
 # Import after loading environment variables
-from src.bridge import Bridge  # noqa: E402
-from src.config import BridgeConfig, get_config  # noqa: E402
-from src.ghidra_client import GhidraMCPClient  # noqa: E402
+from src.bridge import Bridge
+from src.config import BridgeConfig, get_config
+from src.ghidra_client import GhidraMCPClient
 
 
 def print_header():
@@ -263,7 +263,7 @@ def run_interactive_mode(bridge: Bridge, config: BridgeConfig):
                         print(f"    {doc}")
                         print()
                 except Exception as e:
-                    print(f"Error loading tools: {str(e)}")
+                    print(f"Error loading tools: {e!s}")
                 print("===========================\n")
                 continue
             elif user_input.lower() == "cag":  # Restored CAG command
@@ -420,7 +420,7 @@ def run_interactive_mode(bridge: Bridge, config: BridgeConfig):
                     if hasattr(bridge.ghidra, tool_name):
                         tool_method = getattr(bridge.ghidra, tool_name)
 
-                        params_for_log = ", ".join([f"{k}={repr(v)}" for k, v in params.items()])
+                        params_for_log = ", ".join([f"{k}={v!r}" for k, v in params.items()])
                         bridge.logger.info(f"Executing direct tool call via 'run-tool': {tool_name} with params: {params}")
                         raw_tool_result = tool_method(**params)
 
@@ -600,7 +600,7 @@ Tool Output:
                         print("Use: analyze-function 0x401000\n")
                         continue
 
-                    params_for_log = f"address={repr(address)}" if address else ""
+                    params_for_log = f"address={address!r}" if address else ""
 
                     raw_tool_result = (
                         bridge.ghidra.analyze_function(address=address)
@@ -677,7 +677,7 @@ Tool Output:
                         print(f"Skipping AI analysis due to tool error: {raw_tool_result}")
 
                 except Exception as e:
-                    print(f"Error analyzing function: {str(e)}")
+                    print(f"Error analyzing function: {e!s}")
                     bridge.logger.error(f"Error in 'analyze-function' shortcut: {e}", exc_info=True)
                     current_session_log.append(f"=== Error in analyze-function shortcut: {e} ===\\n")
                 continue  # Keep continue for now, as this block is self-contained for analysis

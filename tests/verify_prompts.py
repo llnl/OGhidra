@@ -1,15 +1,16 @@
-import sys
 import os
+import sys
 import unittest
 from unittest.mock import patch
 
 # Add src to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
+from datetime import datetime
+
 from src.bridge import Bridge
 from src.config import BridgeConfig
 from src.models.memory import ToolExecution
-from datetime import datetime
 
 
 class TestPromptConstruction(unittest.TestCase):

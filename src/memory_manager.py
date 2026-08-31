@@ -6,14 +6,14 @@ and vector database for RAG capabilities.
 """
 
 import logging
-from typing import List, Dict, Any, Optional
+from typing import Any
 
+from .active_session import ActiveSessionManager
 from .config import BridgeConfig
 from .memory_models import SessionRecord
 from .session_store import SessionHistoryStore
-from .active_session import ActiveSessionManager
-from .vector_store import SimpleVectorStore
 from .session_utils import SessionEmbedder, SessionSummarizer
+from .vector_store import SimpleVectorStore
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +74,7 @@ class MemoryManager:
         return session_id
 
     def log_tool_call(
-        self, tool_name: str, parameters: Dict[str, Any], status: Optional[str] = None, result_preview: Optional[str] = None
+        self, tool_name: str, parameters: dict[str, Any], status: str | None = None, result_preview: str | None = None
     ) -> bool:
         """
         Log a tool call in the current session.
@@ -95,7 +95,7 @@ class MemoryManager:
             logger.debug(f"Logged tool call '{tool_name}' to session {self.active_session_manager.get_current_session_id()}")
         return result
 
-    def update_tool_status(self, index: int, status: str, result_preview: Optional[str] = None) -> bool:
+    def update_tool_status(self, index: int, status: str, result_preview: str | None = None) -> bool:
         """
         Update the status of a previously logged tool call.
 
@@ -109,7 +109,7 @@ class MemoryManager:
         """
         return self.active_session_manager.update_tool_call_status(index=index, status=status, result_preview=result_preview)
 
-    def end_session(self, outcome: str, reason: Optional[str] = None, generate_summary: bool = None) -> Optional[str]:
+    def end_session(self, outcome: str, reason: str | None = None, generate_summary: bool = None) -> str | None:
         """
         End the current session and optionally generate a summary.
 
@@ -154,7 +154,7 @@ class MemoryManager:
 
         return session_id if result else None
 
-    def get_similar_sessions(self, query: str, top_k: int = 3) -> List[Dict[str, Any]]:
+    def get_similar_sessions(self, query: str, top_k: int = 3) -> list[dict[str, Any]]:
         """
         Find sessions similar to the given query.
 
@@ -179,7 +179,7 @@ class MemoryManager:
         similar_sessions = self.vector_store.search(query_embedding, top_k=top_k)
         return similar_sessions
 
-    def get_recent_sessions(self, limit: int = 5) -> List[SessionRecord]:
+    def get_recent_sessions(self, limit: int = 5) -> list[SessionRecord]:
         """
         Get the most recent sessions.
 
@@ -193,7 +193,7 @@ class MemoryManager:
         sorted_sessions = sorted(self.sessions, key=lambda s: s.start_time, reverse=True)
         return sorted_sessions[:limit]
 
-    def get_successful_sessions(self, limit: int = None) -> List[SessionRecord]:
+    def get_successful_sessions(self, limit: int = None) -> list[SessionRecord]:
         """
         Get sessions with 'success' outcome.
 
@@ -208,7 +208,7 @@ class MemoryManager:
         successful.sort(key=lambda s: s.start_time, reverse=True)
         return successful[:limit] if limit is not None else successful
 
-    def get_session_by_id(self, session_id: str) -> Optional[SessionRecord]:
+    def get_session_by_id(self, session_id: str) -> SessionRecord | None:
         """
         Get a session by its ID.
 

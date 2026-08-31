@@ -6,11 +6,11 @@
 # ]
 # ///
 
-import requests
 import argparse
 import logging
 from urllib.parse import urljoin
 
+import requests
 from mcp.server.fastmcp import FastMCP
 
 DEFAULT_GHIDRA_SERVER = "http://127.0.0.1:8080/"
@@ -40,7 +40,7 @@ def safe_get(endpoint: str, params: dict = None) -> list:
         else:
             return [f"Error {response.status_code}: {response.text.strip()}"]
     except Exception as e:
-        return [f"Request failed: {str(e)}"]
+        return [f"Request failed: {e!s}"]
 
 
 def safe_post(endpoint: str, data: dict | str) -> str:
@@ -56,7 +56,7 @@ def safe_post(endpoint: str, data: dict | str) -> str:
         else:
             return f"Error {response.status_code}: {response.text.strip()}"
     except Exception as e:
-        return f"Request failed: {str(e)}"
+        return f"Request failed: {e!s}"
 
 
 @mcp.tool()

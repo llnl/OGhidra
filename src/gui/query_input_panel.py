@@ -1,12 +1,13 @@
-import tkinter as tk
-from tkinter import ttk, messagebox
+import logging
 import threading
 import time
+import tkinter as tk
+from tkinter import messagebox, ttk
+
 from ..bridge import Bridge
 from .ai_response_panel import AIResponsePanel
-from .workflow_diagram import WorkflowDiagram
 from .ui_thread import ui_safe
-import logging
+from .workflow_diagram import WorkflowDiagram
 
 logger = logging.getLogger(__name__)
 

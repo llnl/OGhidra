@@ -146,12 +146,12 @@ grep -c '"interaction_type"' logs/llm_interactions.log
 import json
 
 total_tokens = 0
-with open('logs/llm_interactions.log') as f:
+with open("logs/llm_interactions.log") as f:
     for line in f:
         try:
             entry = json.loads(line)
-            if 'tokens' in entry:
-                total_tokens += entry['tokens']['total_count']
+            if "tokens" in entry:
+                total_tokens += entry["tokens"]["total_count"]
         except json.JSONDecodeError:
             pass
 
@@ -163,17 +163,19 @@ print(f"Total tokens: {total_tokens}")
 import json
 
 slow_interactions = []
-with open('logs/llm_interactions.log') as f:
+with open("logs/llm_interactions.log") as f:
     for line in f:
         try:
             entry = json.loads(line)
-            if 'timing' in entry:
-                if entry['timing']['total_duration_seconds'] > 5:
-                    slow_interactions.append({
-                        'timestamp': entry['timestamp'],
-                        'duration': entry['timing']['total_duration_seconds'],
-                        'model': entry['model']
-                    })
+            if "timing" in entry:
+                if entry["timing"]["total_duration_seconds"] > 5:
+                    slow_interactions.append(
+                        {
+                            "timestamp": entry["timestamp"],
+                            "duration": entry["timing"]["total_duration_seconds"],
+                            "model": entry["model"],
+                        }
+                    )
         except json.JSONDecodeError:
             pass
 
