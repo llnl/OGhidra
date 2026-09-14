@@ -14,14 +14,14 @@ import ttkbootstrap as tb
 
 from ..bridge import Bridge
 from ..config import BridgeConfig
-from .memory_info_panel import MemoryInfoPanel
+from . import ui_thread
 from .ai_response_panel import AIResponsePanel
+from .memory_info_panel import MemoryInfoPanel
 from .query_input_panel import QueryInputPanel
 from .renamed_functions_panel import RenamedFunctionsPanel
 from .server_config_dialog import ServerConfigDialog
 from .tool_buttons_panel import ToolButtonsPanel
 from .workflow_diagram import WorkflowDiagram
-from . import ui_thread
 
 logger = logging.getLogger("ollama-ghidra-bridge.ui")
 
@@ -35,7 +35,7 @@ class OGhidraUI:
 
         # Allow Bridge to access UI state (e.g., analyzed functions tree) for prompt enrichment.
         try:
-            setattr(self.bridge, "_ui_instance", self)
+            self.bridge._ui_instance = self
         except Exception:
             pass
 
@@ -153,7 +153,7 @@ class OGhidraUI:
         # accurately reflect whether summaries are available.
         try:
             if hasattr(self, "query_panel") and self.query_panel:
-                setattr(self.query_panel, "renamed_functions_panel", self.renamed_functions_panel)
+                self.query_panel.renamed_functions_panel = self.renamed_functions_panel
                 if hasattr(self.query_panel, "_on_grep_layer_change"):
                     self.query_panel._on_grep_layer_change()
         except Exception:
@@ -248,7 +248,7 @@ class OGhidraUI:
         try:
             import time
             from datetime import datetime
-            import tkinter.messagebox as messagebox
+            from tkinter import messagebox
 
             # Import the enhanced session manager with absolute import
             try:
@@ -441,8 +441,7 @@ class OGhidraUI:
                         def _looks_like_address(txt: str) -> bool:
                             if not isinstance(txt, str):
                                 return False
-                            if txt.startswith("0x"):
-                                txt = txt[2:]
+                            txt = txt.removeprefix("0x")
                             return (len(txt) >= 4 and all(c in "0123456789abcdefABCDEF" for c in txt)) or (
                                 txt.isdigit() and len(txt) >= 8
                             )
@@ -533,7 +532,7 @@ class OGhidraUI:
         """Load a session with enhanced session management."""
         try:
             from datetime import datetime
-            import tkinter.messagebox as messagebox
+            from tkinter import messagebox
 
             # Import the enhanced session manager with absolute import
             from src.enhanced_session_manager import EnhancedSessionManager
@@ -729,7 +728,7 @@ class OGhidraUI:
         loop run in a worker, and every widget update is marshalled back to the
         main thread via ui_thread.run_on_ui.
         """
-        from tkinter import Toplevel, Label
+        from tkinter import Label, Toplevel
 
         # ---- progress dialog (built on the main thread) ----
         dlg = Toplevel(self.root)
@@ -942,7 +941,6 @@ class OGhidraUI:
                         count = len(vector_store.embeddings)
                     except Exception as e:
                         logger.warning(f"Failed to get the vector count from the vector store embeddings : {e}")
-                        pass
             return count
 
         # Get initial values

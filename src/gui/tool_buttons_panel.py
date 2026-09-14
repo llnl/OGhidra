@@ -1,17 +1,18 @@
-import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
-from ..bridge import Bridge
-from .ai_response_panel import AIResponsePanel
-from .workflow_diagram import WorkflowDiagram
+import json
+import logging
+import re
 import threading
 import time
-import json
-import re
-from typing import Dict, Any
+import tkinter as tk
+from concurrent.futures import as_completed
+from tkinter import filedialog, messagebox, ttk
+from typing import Any
+
+from ..bridge import Bridge
+from .ai_response_panel import AIResponsePanel
 from .daemon_thread_pool_executor import DaemonThreadPoolExecutor
 from .ui_thread import ui_safe
-from concurrent.futures import as_completed
-import logging
+from .workflow_diagram import WorkflowDiagram
 
 logger = logging.getLogger(__name__)
 
@@ -540,7 +541,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                                     )
 
                             except Exception as e:
-                                rename_result = f"Error: {str(e)}"
+                                rename_result = f"Error: {e!s}"
 
                             if isinstance(rename_result, str) and rename_result.lower().startswith("error:"):
                                 self.response_panel.add_response("Error", f"Failed to rename function: {rename_result}")
@@ -1232,10 +1233,10 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                                 context["callers_code"].append({"address": caller_addr, "code": caller_code})
                         except Exception as e:
                             logger.warning(f"Failed to decompile the caller {caller_addr}: {e}")
-                            pass  # Skip if can't decompile caller
+                            # Skip if can't decompile caller
             except Exception as e:
                 logger.warning(f"Failed to get the callers to function {function_name} at {address}: {e}")
-                pass  # Skip if can't get callers
+                # Skip if can't get callers
 
             # Get callees (what does this function call?)
             try:
@@ -1272,10 +1273,10 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                                 context["callees_code"].append({"address": callee_addr, "code": callee_code})
                         except Exception as e:
                             logger.warning(f"Failed to decompile the callee {callee_addr}: {e}")
-                            pass  # Skip if can't decompile callee
+                            # Skip if can't decompile callee
             except Exception as e:
                 logger.warning(f"Failed to get the callee to function {function_name} at {address}: {e}")
-                pass  # Skip if can't get callees
+                # Skip if can't get callees
 
             # Calculate total context size
             total_chars = sum(len(c["code"]) for c in context["callers_code"])
@@ -1328,7 +1329,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
 
         return "\n".join(sections)
 
-    def _parse_ai_response_sections(self, ai_response: str) -> Dict[str, Any]:
+    def _parse_ai_response_sections(self, ai_response: str) -> dict[str, Any]:
         """
         Parse AI response into structured sections.
 
@@ -1403,10 +1404,8 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
     def _canon_addr(value):
         """Normalize an address string so it compares across sources (0x/name_/leading zeros)."""
         a = str(value).strip().lower()
-        if a.startswith("name_"):
-            a = a[5:]
-        if a.startswith("0x"):
-            a = a[2:]
+        a = a.removeprefix("name_")
+        a = a.removeprefix("0x")
         return a.lstrip("0") or "0"
 
     @staticmethod
@@ -2565,7 +2564,7 @@ Please provide:
             except Exception as e:
                 import traceback
 
-                self.response_panel.add_response("Error", f"Scan failed: {str(e)}\n\n{traceback.format_exc()}")
+                self.response_panel.add_response("Error", f"Scan failed: {e!s}\n\n{traceback.format_exc()}")
                 self.workflow_diagram.set_current_stage("error")
             finally:
                 self._set_tool_running(False, "")

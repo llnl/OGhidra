@@ -7,14 +7,13 @@ Handles communication with the Ollama API for AI model interactions.
 
 import json
 import logging
-import requests
 import time
 from datetime import datetime
-from typing import Dict, Any, List, Optional, Union, Tuple
 from pathlib import Path
+from typing import Any
 
-from tenacity import Retrying, stop_after_attempt, wait_exponential, retry_if_exception
-
+import requests
+from tenacity import Retrying, retry_if_exception, stop_after_attempt, wait_exponential
 
 # =============================================================================
 # Text Chunking Utilities for Embedding Context Limits
@@ -28,7 +27,7 @@ MAX_EMBEDDING_CHARS = MAX_EMBEDDING_TOKENS * CHARS_PER_TOKEN  # ~32,768 chars
 SAFE_EMBEDDING_CHARS = int(MAX_EMBEDDING_CHARS * 0.95)  # 95% to be safe (~31,129 chars)
 
 
-def chunk_text_for_embedding(text: str, max_chars: int = SAFE_EMBEDDING_CHARS, overlap_chars: int = 500) -> List[str]:
+def chunk_text_for_embedding(text: str, max_chars: int = SAFE_EMBEDDING_CHARS, overlap_chars: int = 500) -> list[str]:
     """
     Split text into chunks that fit within embedding model context window.
 
@@ -94,7 +93,7 @@ def chunk_text_for_embedding(text: str, max_chars: int = SAFE_EMBEDDING_CHARS, o
     return chunks if chunks else [text[:max_chars]]
 
 
-def average_embeddings(embeddings: List[List[float]]) -> List[float]:
+def average_embeddings(embeddings: list[list[float]]) -> list[float]:
     """
     Average multiple embeddings into a single embedding vector.
 
@@ -222,7 +221,7 @@ class OllamaClient:
 
         self.logger.info(f"LLM logging initialized. Log file: {self.llm_log_file}")
 
-    def _log_llm_interaction(self, interaction_type: str, data: Dict[str, Any]):
+    def _log_llm_interaction(self, interaction_type: str, data: dict[str, Any]):
         """
         Log LLM interaction to dedicated log file.
 
@@ -259,7 +258,7 @@ class OllamaClient:
             lines.append(f"{'=' * 80}")
             self.llm_logger.info("\n".join(lines))
 
-    def query(self, prompt: Union[str, Tuple[str, str]], phase: Optional[str] = None) -> str:
+    def query(self, prompt: str | tuple[str, str], phase: str | None = None) -> str:
         """
         High-level query interface compatible with Bridge.
         Handles both string prompts and (system, user) tuples.
@@ -283,11 +282,11 @@ class OllamaClient:
     def generate(
         self,
         prompt: str,
-        model: Optional[str] = None,
-        system_prompt: Optional[str] = None,
-        temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None,
-        phase: Optional[str] = None,
+        model: str | None = None,
+        system_prompt: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        phase: str | None = None,
     ) -> str:
         """
         Generate a response from the Ollama model.
@@ -385,7 +384,7 @@ class OllamaClient:
 
             return response_text
         except requests.exceptions.RequestException as e:
-            self.logger.error(f"Error calling Ollama API: {str(e)}")
+            self.logger.error(f"Error calling Ollama API: {e!s}")
 
             # Log failed interaction
             if self.llm_logging_enabled:
@@ -398,10 +397,10 @@ class OllamaClient:
 
             raise
         except json.JSONDecodeError as e:
-            self.logger.error(f"Error parsing Ollama API response: {str(e)}")
+            self.logger.error(f"Error parsing Ollama API response: {e!s}")
             raise
 
-    def generate_with_phase(self, prompt: str, phase: Optional[str] = None, system_prompt: Optional[str] = None) -> str:
+    def generate_with_phase(self, prompt: str, phase: str | None = None, system_prompt: str | None = None) -> str:
         """
         Generate a response using a phase-specific model if configured.
 
@@ -419,7 +418,7 @@ class OllamaClient:
         # Generate the response using the phase-specific model or default
         return self.generate(prompt=prompt, model=model, system_prompt=system_prompt, phase=phase)
 
-    def list_models(self) -> List[str]:
+    def list_models(self) -> list[str]:
         """
         List available models from Ollama.
 
@@ -433,10 +432,10 @@ class OllamaClient:
             response.raise_for_status()
             return [model["name"] for model in response.json()["models"]]
         except requests.exceptions.RequestException as e:
-            self.logger.error(f"Error listing Ollama models: {str(e)}")
+            self.logger.error(f"Error listing Ollama models: {e!s}")
             raise
 
-    def embed(self, text: str, model: str = None) -> List[float]:
+    def embed(self, text: str, model: str = None) -> list[float]:
         """
         Generate embeddings using Ollama embedding model.
 
@@ -471,7 +470,7 @@ class OllamaClient:
         # Normal embedding for text within context limit
         return self._embed_single(text, embedding_model, start_time)
 
-    def _embed_chunked(self, text: str, embedding_model: str, start_time: Optional[float]) -> List[float]:
+    def _embed_chunked(self, text: str, embedding_model: str, start_time: float | None) -> list[float]:
         """
         Handle embedding for text that exceeds context limit by chunking.
 
@@ -527,7 +526,7 @@ class OllamaClient:
 
         return averaged
 
-    def _embed_single(self, text: str, embedding_model: str, start_time: Optional[float]) -> List[float]:
+    def _embed_single(self, text: str, embedding_model: str, start_time: float | None) -> list[float]:
         """
         Embed a single text chunk (must be within context limit).
         """
@@ -559,7 +558,7 @@ class OllamaClient:
                     # Other error (500, connection error, etc.) - don't fallback, just raise
                     raise
 
-    def _embed_new_api(self, text: str, embedding_model: str, start_time: Optional[float]) -> List[float]:
+    def _embed_new_api(self, text: str, embedding_model: str, start_time: float | None) -> list[float]:
         """
         Generate embeddings using the new Ollama API (/api/embed).
         Introduced in Ollama 0.1.26+.
@@ -609,10 +608,10 @@ class OllamaClient:
             self._log_embed_error(embedding_model, text, e, start_time)
             raise
         except json.JSONDecodeError as e:
-            self.logger.error(f"Error parsing Ollama embed response: {str(e)}")
+            self.logger.error(f"Error parsing Ollama embed response: {e!s}")
             raise
 
-    def _embed_old_api(self, text: str, embedding_model: str, start_time: Optional[float]) -> List[float]:
+    def _embed_old_api(self, text: str, embedding_model: str, start_time: float | None) -> list[float]:
         """
         Generate embeddings using the legacy Ollama API (/api/embeddings).
         For Ollama versions prior to 0.1.26.
@@ -659,10 +658,10 @@ class OllamaClient:
             self._log_embed_error(embedding_model, text, e, start_time)
             raise
         except json.JSONDecodeError as e:
-            self.logger.error(f"Error parsing Ollama embeddings response: {str(e)}")
+            self.logger.error(f"Error parsing Ollama embeddings response: {e!s}")
             raise
 
-    def _log_embed_success(self, embedding_model: str, text: str, embedding: List[float], start_time: Optional[float]):
+    def _log_embed_success(self, embedding_model: str, text: str, embedding: list[float], start_time: float | None):
         """Log successful embedding generation."""
         if self.llm_logging_enabled:
             log_data = {"model": embedding_model, "method": "embed", "embedding_dimension": len(embedding)}
@@ -677,9 +676,9 @@ class OllamaClient:
             log_data["status"] = "success"
             self._log_llm_interaction("embed", log_data)
 
-    def _log_embed_error(self, embedding_model: str, text: str, error: Exception, start_time: Optional[float]):
+    def _log_embed_error(self, embedding_model: str, text: str, error: Exception, start_time: float | None):
         """Log failed embedding generation."""
-        self.logger.error(f"Error calling Ollama embed API: {str(error)}")
+        self.logger.error(f"Error calling Ollama embed API: {error!s}")
 
         if self.llm_logging_enabled:
             log_data = {"model": embedding_model, "method": "embed", "status": "error", "error": str(error)}

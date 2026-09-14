@@ -2,11 +2,12 @@
 Health check utilities for the memory system.
 """
 
-import os
 import logging
-import numpy as np
-from typing import Dict, Any, Optional
+import os
 from datetime import datetime, timedelta
+from typing import Any
+
+import numpy as np
 
 from .config import BridgeConfig
 from .memory_manager import MemoryManager
@@ -28,7 +29,7 @@ class MemoryHealthCheck:
         self.config = config
         self.memory_manager = memory_manager
 
-    def check_configuration(self) -> Dict[str, Any]:
+    def check_configuration(self) -> dict[str, Any]:
         """
         Check the memory system configuration.
 
@@ -66,7 +67,7 @@ class MemoryHealthCheck:
 
         return result
 
-    def check_sessions(self) -> Dict[str, Any]:
+    def check_sessions(self) -> dict[str, Any]:
         """
         Check the status of stored sessions.
 
@@ -117,7 +118,7 @@ class MemoryHealthCheck:
 
         return result
 
-    def check_vector_store(self) -> Dict[str, Any]:
+    def check_vector_store(self) -> dict[str, Any]:
         """
         Check the status of the vector store.
 
@@ -165,7 +166,7 @@ class MemoryHealthCheck:
 
         return result
 
-    def check_all(self) -> Dict[str, Any]:
+    def check_all(self) -> dict[str, Any]:
         """
         Run all health checks and return a comprehensive report.
 
@@ -316,7 +317,7 @@ class MemoryHealthCheck:
         print("\n" + "=" * 80 + "\n")
 
 
-def run_health_check(config: BridgeConfig, memory_manager: Optional[MemoryManager] = None) -> None:
+def run_health_check(config: BridgeConfig, memory_manager: MemoryManager | None = None) -> None:
     """
     Run a health check and display the results.
 
