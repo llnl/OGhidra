@@ -10,7 +10,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger("oghidra.benchmark.runners.oghidra")
 
@@ -23,10 +23,10 @@ class OGhidraResult:
     function_name: str
     decompiled_code: str
     ai_summary: str
-    suggested_name: Optional[str]
+    suggested_name: str | None
     analysis_time: float
     context_chars: int
-    metadata: Dict[str, Any]
+    metadata: dict[str, Any]
 
 
 class OGhidraRunner:
@@ -63,7 +63,7 @@ class OGhidraRunner:
     def analyze_function(
         self,
         address: str,
-        function_name: Optional[str] = None,
+        function_name: str | None = None,
     ) -> OGhidraResult:
         """
         Analyze a single function using OGhidra.
@@ -233,10 +233,10 @@ Based on the function's code and context, provide:
 
     def batch_analyze(
         self,
-        addresses: List[str],
-        function_names: Optional[List[str]] = None,
-        progress_callback: Optional[callable] = None,
-    ) -> List[OGhidraResult]:
+        addresses: list[str],
+        function_names: list[str] | None = None,
+        progress_callback: callable | None = None,
+    ) -> list[OGhidraResult]:
         """
         Analyze multiple functions.
 

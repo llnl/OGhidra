@@ -12,6 +12,7 @@ Verifies:
 
 import unittest
 from unittest.mock import MagicMock
+
 from src.session_compactor import SessionCompactor
 
 

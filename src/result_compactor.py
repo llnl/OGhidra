@@ -7,10 +7,10 @@ get_cached_result().
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Iterable
 import json
-
+from collections.abc import Iterable
+from dataclasses import dataclass
+from typing import Any
 
 _DEFAULT_KEYWORDS = [
     # execution

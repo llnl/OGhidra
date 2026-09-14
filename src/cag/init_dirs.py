@@ -2,8 +2,8 @@
 Utility script to initialize directory structures for CAG.
 """
 
-import os
 import logging
+import os
 import shutil
 from pathlib import Path
 
@@ -38,7 +38,7 @@ def ensure_cag_directories():
                 shutil.copy2(source_path, dest_path)
                 logger.info(f"Copied default knowledge file: {filename}")
             except Exception as e:
-                logger.error(f"Error copying {filename}: {str(e)}")
+                logger.error(f"Error copying {filename}: {e!s}")
 
 
 if __name__ == "__main__":

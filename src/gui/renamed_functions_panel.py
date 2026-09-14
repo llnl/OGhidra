@@ -1,10 +1,11 @@
-from ..bridge import Bridge
-from .ui_thread import run_on_ui
-import tkinter as tk
-from tkinter import ttk, messagebox, scrolledtext, filedialog
-from datetime import datetime
 import json
 import logging
+import tkinter as tk
+from datetime import datetime
+from tkinter import filedialog, messagebox, scrolledtext, ttk
+
+from ..bridge import Bridge
+from .ui_thread import run_on_ui
 
 logger = logging.getLogger(__name__)
 
@@ -16,8 +17,8 @@ class RenamedFunctionsPanel:
     _UI_POLL_INTERVAL_MS = 50
 
     def __init__(self, parent, bridge: Bridge):
-        import threading
         import queue
+        import threading
 
         self.frame = ttk.LabelFrame(parent, text="Analyzed Functions", padding=10)
         self.bridge = bridge
@@ -166,8 +167,8 @@ class RenamedFunctionsPanel:
 
     def _load_vectors_from_functions(self):
         """Load all analyzed functions into the vector store for RAG enhancement."""
-        import tkinter.messagebox as messagebox
         import threading
+        from tkinter import messagebox
 
         # Check if CAG/RAG is available
         if not (
