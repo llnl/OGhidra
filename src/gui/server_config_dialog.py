@@ -262,7 +262,7 @@ class ServerConfigDialog:
             "json": {
                 "model": self.custom_api_model_var.get(),
                 "messages": [{"role": "user", "content": "test"}],
-                "max_tokens": 1,
+                "max_tokens": 4096,
             },
             "timeout": 10,
             "verify": self._custom_api_verify_ssl_enabled(),

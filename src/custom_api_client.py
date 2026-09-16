@@ -747,7 +747,7 @@ class CustomAPIClient:
         try:
             self._warn_if_tls_verification_disabled("health check")
             headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
-            test_payload = {"model": self.default_model, "messages": [{"role": "user", "content": "test"}], "max_tokens": 1}
+            test_payload = {"model": self.default_model, "messages": [{"role": "user", "content": "test"}], "max_tokens": 4096}
 
             if self.base_url.endswith("/chat/completions") or self.base_url.endswith("/v1/chat/completions"):
                 api_url = self.base_url
