@@ -18,6 +18,8 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional, Union, Tuple
 from tenacity import Retrying, stop_after_attempt, wait_exponential, retry_if_exception
 
+from .api_health import build_health_request, health_error_detail, post_health_request
+
 
 def is_retryable_exception(e):
     """Check if an exception is retryable (429, 500, 503, or connection/timeout)."""
@@ -743,22 +745,17 @@ class CustomAPIClient:
                 pass
 
     def check_health(self) -> bool:
-        """Check if the Custom API endpoint is reachable."""
+        """Check whether the configured endpoint accepts a minimal generation request."""
         try:
             self._warn_if_tls_verification_disabled("health check")
-            headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
-            test_payload = {"model": self.default_model, "messages": [{"role": "user", "content": "test"}], "max_tokens": 4096}
-
-            if self.base_url.endswith("/chat/completions") or self.base_url.endswith("/v1/chat/completions"):
-                api_url = self.base_url
-            else:
-                api_url = f"{self.base_url}/v1/chat/completions"
-
-            request_kwargs = {"headers": headers, "json": test_payload, "timeout": 5}
-            if not self.verify_ssl:
-                request_kwargs["verify"] = False
-
-            response = requests.post(api_url, **request_kwargs)
+            request = build_health_request(self.base_url, self.api_key, self.default_model, self.verify_ssl)
+            response = post_health_request(request)
+            if response.status_code != 200:
+                self.logger.error(
+                    "Custom API health check failed: HTTP %s: %s",
+                    response.status_code,
+                    health_error_detail(response),
+                )
             return response.status_code == 200
         except Exception as e:
             self.logger.error(f"Custom API health check failed: {e}")

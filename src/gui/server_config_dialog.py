@@ -2,6 +2,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 import os
 from ..config import BridgeConfig
+from ..api_health import build_health_request, health_error_detail, post_health_request
 from .ui_thread import run_on_ui
 import threading
 
@@ -255,18 +256,12 @@ class ServerConfigDialog:
 
     def _build_custom_api_test_request(self) -> dict:
         """Build the custom API connectivity test request parameters."""
-        api_key = self.custom_api_key_var.get()
-        return {
-            "url": self.custom_api_url_var.get(),
-            "headers": {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            "json": {
-                "model": self.custom_api_model_var.get(),
-                "messages": [{"role": "user", "content": "test"}],
-                "max_tokens": 4096,
-            },
-            "timeout": 10,
-            "verify": self._custom_api_verify_ssl_enabled(),
-        }
+        return build_health_request(
+            self.custom_api_url_var.get(),
+            self.custom_api_key_var.get(),
+            self.custom_api_model_var.get(),
+            self._custom_api_verify_ssl_enabled(),
+        )
 
     def _build_env_updates(self, ollama_url, ghidra_url, provider: str) -> dict:
         """Build the .env updates for the current dialog state."""
@@ -342,25 +337,13 @@ class ServerConfigDialog:
                             results.append(warning_msg)
 
                         request_kwargs = self._build_custom_api_test_request()
-                        post_kwargs = {
-                            "headers": request_kwargs["headers"],
-                            "json": request_kwargs["json"],
-                            "timeout": request_kwargs["timeout"],
-                        }
-                        if not request_kwargs["verify"]:
-                            post_kwargs["verify"] = False
-                        response = requests.post(request_kwargs["url"], **post_kwargs)
+                        response = post_health_request(request_kwargs)
                         if response.status_code == 200:
                             results.append("Custom API: [OK] Connected")
                             results.append(f"Model ({self.custom_api_model_var.get()}): [OK] Available")
                         else:
                             results.append(f"Custom API: [ERROR] HTTP {response.status_code}")
-                            try:
-                                error_detail = response.json()
-                                results.append(f"Error: {error_detail}")
-                            except Exception as e:
-                                logger.warning(f"Failed to extract the error response body: {e}")
-                                pass
+                            results.append(f"Error: {health_error_detail(response)}")
                 except Exception as e:
                     results.append(f"Custom API: [ERROR] {str(e)}")
             else:
