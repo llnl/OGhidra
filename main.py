@@ -16,6 +16,7 @@ load_dotenv(override=True)
 from src.bridge import Bridge  # noqa: E402
 from src.config import BridgeConfig, get_config  # noqa: E402
 from src.ghidra_client import GhidraMCPClient  # noqa: E402
+from src.workflow_host import get_workflow_host
 
 
 def print_header():
@@ -728,7 +729,12 @@ Tool Output:
                     failed_enumerations = 0
                     processed_functions_data = []
 
-                    for i, full_function_string in enumerate(valid_functions, 1):
+                    def _enumerate_function(work_item, work_context, processed_functions_data=processed_functions_data):
+                        nonlocal successful_enumerations, failed_enumerations
+                        i = work_item.input["index"]
+                        total_functions = work_item.input["total"]
+                        full_function_string = work_item.input["function"]
+                        function_name = work_item.input["name"]
                         try:
                             # Extract function name and address
                             if " at " in full_function_string:
@@ -753,7 +759,10 @@ Tool Output:
                             ):
                                 print(f"  ⚠ Failed to decompile: {function_decompile_result}")
                                 failed_enumerations += 1
-                                continue
+                                return {
+                                    "success": False, "result_type": "failed",
+                                    "error_msg": f"Failed to decompile: {function_decompile_result}",
+                                }
 
                             print(f"  ✓ Decompiled ({len(function_decompile_result)} chars)")
 
@@ -1012,8 +1021,6 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                                     # consistently for both MCP and pyGhidra
                                     # backends.
                                     try:
-                                        from src.bridge import Bridge
-
                                         if hasattr(bridge, "execute_command"):
                                             rename_result = bridge.execute_command(
                                                 "rename_function_by_address",
@@ -1066,15 +1073,36 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                                 current_session_log.append(
                                     f"=== Processed: {function_name} → {final_name} at {address} ===\\n{function_summary}\\n"
                                 )
+                                return {
+                                    "success": True,
+                                    "result_type": "renamed" if final_name != function_name else "enumerated",
+                                    "function_data": processed_functions_data[-1],
+                                }
                             else:
                                 print("  ⚠ AI analysis failed or returned empty")
                                 failed_enumerations += 1
+                                return {
+                                    "success": False, "result_type": "failed",
+                                    "error_msg": "AI analysis failed or returned empty",
+                                }
 
                         except Exception as e:
                             print(f"  ✗ Error processing {function_name}: {e}")
                             bridge.logger.error(f"Error enumerating function {function_name}: {e}", exc_info=True)
                             failed_enumerations += 1
-                            continue
+                            return {"success": False, "result_type": "failed", "error_msg": str(e)}
+
+                    for work_item, work_result in get_workflow_host(bridge).iter_functions(
+                        valid_functions, "full_enumeration", _enumerate_function, max_workers=1
+                    ):
+                        # Handler failures have already updated the CLI counters.
+                        # Count work cancelled/skipped by the runtime, or a failure
+                        # that happened before the existing handler could run.
+                        if work_result.status in {"cancelled", "skipped"} or (
+                            work_result.status == "failed" and not isinstance(work_result.value, dict)
+                        ):
+                            failed_enumerations += 1
+                            print(f"  Function {work_item.input['name']} {work_result.status}: {work_result.error}")
 
                     enumeration_time = time.time() - start_time
                     print(f"\n[Step 2 Complete] Enumerated {successful_enumerations}/{total_functions} functions")
@@ -1360,7 +1388,34 @@ def main():
         help="Disable Cache-Augmented Generation (CAG)",
     )
 
+    parser.add_argument(
+        "--plugin",
+        action="append",
+        metavar="PLUGIN_TOML",
+        help="Load an explicit local plugin.toml manifest; repeat for multiple plugins",
+    )
+    parser.add_argument(
+        "--plugin-settings",
+        metavar="JSON_FILE",
+        help="Read plugin settings from a JSON object keyed by plugin ID",
+    )
+
     args = parser.parse_args()
+
+    if args.plugin is not None:
+        config.plugin_paths = args.plugin
+    if args.plugin_settings:
+        try:
+            with open(args.plugin_settings, encoding="utf-8") as settings_file:
+                plugin_settings = json.load(settings_file)
+        except (OSError, UnicodeError, json.JSONDecodeError) as error:
+            parser.error(f"Cannot read plugin settings: {error}")
+        if not isinstance(plugin_settings, dict) or any(
+            not isinstance(plugin_id, str) or not isinstance(settings, dict)
+            for plugin_id, settings in plugin_settings.items()
+        ):
+            parser.error("Plugin settings must be a JSON object mapping plugin IDs to settings objects")
+        config.plugin_settings = plugin_settings
 
     # ------------------------------------------------------------------
     # Determine default operating mode

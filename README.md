@@ -46,6 +46,19 @@ graph TD
 
 ---
 
+## Workflow plugins
+
+OGhidra supports opt-in Python workflow extensions and bundled skills/documents.
+The default workflow remains available with no plugins configured. Start the
+Strategic Ordering example with:
+
+```sh
+python main.py --ui --plugin examples/plugins/strategic_ordering/plugin.toml
+```
+
+See the [workflow/plugin guide](docs/workflow_plugins.md) for the lifecycle,
+operation contracts, configuration, authoring examples and offline tests.
+
 ## Quick Start
 
 ### Prerequisites
