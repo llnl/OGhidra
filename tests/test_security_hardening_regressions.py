@@ -128,6 +128,39 @@ class SecurityHardeningRegressionTests(unittest.TestCase):
             self.assertIn("HTTP 502", show.call_args.args[1])
             self.assertIn("Gateway unavailable", show.call_args.args[1])
 
+    def test_ollama_dialog_authenticates_tags_and_both_embedding_endpoints(self):
+        dialog = ServerConfigDialog.__new__(ServerConfigDialog)
+        dialog.provider_var = FakeVar("ollama")
+        dialog.ollama_url_var = FakeVar("https://ollama.example.test")
+        dialog.embedding_model_var = FakeVar("embedding-model")
+        dialog.ghidra_url_var = FakeVar("http://localhost:8080")
+        dialog.config = SimpleNamespace(
+            ollama=SimpleNamespace(username="test-user", password="test-password"),
+            ghidra=SimpleNamespace(backend="http"),
+        )
+        expected_auth = ("test-user", "test-password")
+        with (
+            patch("src.gui.server_config_dialog.threading.Thread") as thread,
+            patch("src.gui.server_config_dialog.run_on_ui", side_effect=lambda callback: callback()),
+            patch("src.gui.server_config_dialog.messagebox.showinfo") as show,
+            patch("requests.get", return_value=Mock(status_code=200)) as get,
+            patch("requests.post") as post,
+        ):
+            thread.side_effect = lambda target, **kwargs: SimpleNamespace(start=target)
+            post.side_effect = [Mock(status_code=404), Mock(status_code=200)]
+            dialog._test_connections()
+            get.assert_any_call("https://ollama.example.test/api/tags", timeout=5, auth=expected_auth)
+            self.assertEqual(post.call_count, 2)
+            for call, endpoint in zip(post.call_args_list, ("embed", "embeddings"), strict=True):
+                self.assertEqual(call.args[0], f"https://ollama.example.test/api/{endpoint}")
+                self.assertEqual(call.kwargs["auth"], expected_auth)
+            for call in get.call_args_list:
+                if call.args[0].startswith("http://localhost:8080"):
+                    self.assertNotIn("auth", call.kwargs)
+            self.assertIn("Ollama: [OK] Connected", show.call_args.args[1])
+            self.assertIn("Available (legacy API)", show.call_args.args[1])
+            self.assertNotIn("test-password", show.call_args.args[1])
+
     def test_server_dialog_env_updates_persist_verify_ssl(self):
         dialog = ServerConfigDialog.__new__(ServerConfigDialog)
         dialog.ollama_model_var = FakeVar("gemma3:27b")

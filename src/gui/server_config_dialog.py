@@ -351,7 +351,8 @@ class ServerConfigDialog:
                 try:
                     import requests
 
-                    response = requests.get(f"{self.ollama_url_var.get()}/api/tags", timeout=5)
+                    auth = (self.config.ollama.username, self.config.ollama.password)
+                    response = requests.get(f"{self.ollama_url_var.get()}/api/tags", timeout=5, auth=auth)
                     if response.status_code == 200:
                         results.append("Ollama: [OK] Connected")
 
@@ -365,6 +366,7 @@ class ServerConfigDialog:
                                     f"{self.ollama_url_var.get()}/api/embed",
                                     json={"model": embedding_model, "input": "test"},
                                     timeout=10,
+                                    auth=auth,
                                 )
                                 if embed_response.status_code == 200:
                                     results.append(f"Embedding Model ({embedding_model}): [OK] Available")
@@ -379,6 +381,7 @@ class ServerConfigDialog:
                                         f"{self.ollama_url_var.get()}/api/embeddings",
                                         json={"model": embedding_model, "prompt": "test"},
                                         timeout=10,
+                                        auth=auth,
                                     )
                                     if embed_response.status_code == 200:
                                         results.append(f"Embedding Model ({embedding_model}): [OK] Available (legacy API)")
