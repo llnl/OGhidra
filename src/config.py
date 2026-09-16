@@ -1460,6 +1460,9 @@ class BridgeConfig(BaseSettings):
     )
     ghidra: GhidraMCPConfig = Field(default_factory=GhidraMCPConfig)
     session_history: SessionHistoryConfig = Field(default_factory=SessionHistoryConfig)
+    plugin_paths: list[str] = Field(default_factory=list, description="Explicit plugin.toml paths to load at startup")
+    plugin_settings: dict[str, dict[str, Any]] = Field(default_factory=dict, description="Plugin settings keyed by plugin id")
+    plugin_context_budget: int = Field(default=2000, ge=0, le=50000, description="Additional plugin context, estimated tokens")
 
     log_level: str = Field(default="INFO", description="Logging level")
     log_file: str = Field(default="bridge.log", description="Log file path")

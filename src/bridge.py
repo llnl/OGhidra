@@ -39,6 +39,7 @@ from src.analysis_dump import AnalysisDumper
 from src.coverage_tracker import CoverageTracker
 from src.lead_tracker import LeadTracker
 from datetime import datetime
+from src.workflow_host import get_workflow_host, workflow_operation
 
 
 # Configure logging
@@ -294,8 +295,21 @@ class Bridge:
 
         # Initialize lead tracker
         self.lead_tracker = LeadTracker()
+        self._attach_workflow_model()
 
         self.logger.info("Bridge initialized successfully")
+
+    def _attach_workflow_model(self):
+        """Keep all generation paths on the same final-prompt extension boundary."""
+        host = get_workflow_host(self)
+        self.ollama = host.wrap_model(self.ollama)
+        if hasattr(self, "ghidra_client"):
+            self.ghidra_client.ollama_client = self.ollama
+        if hasattr(self, "context_manager"):
+            self.context_manager.ollama_client = self.ollama
+        if hasattr(self, "session_compactor"):
+            self.session_compactor.llm_client = self.ollama
+        Bridge.set_ollama_client(self.ollama)
 
     def reload_llm_client(self):
         """Re-initializes the LLM client based on current configuration."""
@@ -330,7 +344,7 @@ class Bridge:
             self.context_manager.context_budget = self.llm_config.context_budget
             self.context_manager.execution_fraction = self.llm_config.context_budget_execution
 
-        Bridge.set_ollama_client(self.ollama)
+        self._attach_workflow_model()
         print(f"[Bridge] Client reloaded. Provider: {self.provider}")
 
     def set_task_mode(self, enabled: bool, mode: str = "off") -> None:
@@ -1682,6 +1696,7 @@ You can help analyze binary files by executing commands through GhidraMCP."""
 
         return aggregated
 
+    @workflow_operation("tool.execute", "tool.request")
     def execute_command(self, command_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
         """
         Execute a command with parameters.
@@ -2341,6 +2356,7 @@ You can help analyze binary files by executing commands through GhidraMCP."""
             # Return error message
             return f"Error in query processing: {str(e)}"
 
+    @workflow_operation("agent.query", "agent.default")
     def process_query(self, query: str) -> str:
         """
         Main entry point for query processing.
@@ -2363,6 +2379,7 @@ You can help analyze binary files by executing commands through GhidraMCP."""
             self.logger.info("[INFO] Using single-pass mode (legacy)")
             return self.process_query_single_pass(query)
 
+    @workflow_operation("agent.plan", "agent.phase")
     def _generate_plan(self, query: str) -> str:
         """
         Generate a plan for addressing the query using Ollama.
@@ -2453,6 +2470,7 @@ You can help analyze binary files by executing commands through GhidraMCP."""
             # For non-verbose commands, just show a success message
             print(f"✓ Successfully executed {cmd_name}")
 
+    @workflow_operation("agent.execute_plan", "agent.phase")
     def _execute_plan(self) -> str:
         """
         Execute the generated plan.
@@ -2809,6 +2827,7 @@ You can help analyze binary files by executing commands through GhidraMCP."""
 
         return cleaned.strip()
 
+    @workflow_operation("agent.review", "agent.phase")
     def _generate_analysis(self, query: str, execution_results: str) -> str:
         """
         Analyze the results of tool executions and generate a final response.
@@ -2963,6 +2982,7 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
 
         return "\n".join(review_results)
 
+    @workflow_operation("agent.execute", "agent.phase")
     def _execution_loop(self, plan: str, max_steps: int = 10) -> ExecutionPhaseResults:
         """
         Execute tools in a loop until investigation is complete.
@@ -3589,6 +3609,7 @@ If done: "INVESTIGATION COMPLETE"
 
         return (system_prompt, user_prompt)
 
+    @workflow_operation("agent.analyze", "agent.phase")
     def _analyze_execution_results(self, exec_results: ExecutionPhaseResults) -> str:
         """
         Analysis phase: Review all execution results and provide comprehensive analysis.
@@ -4376,6 +4397,7 @@ IMPORTANT: You must provide a COMPLETE report with a conclusion. Do not truncate
 
         return report, conclusions
 
+    @workflow_operation("agent.evaluate", "agent.phase")
     def _evaluate_goal_achievement(self, goal: str, analysis: str, exec_results: ExecutionPhaseResults) -> Tuple[bool, str]:
         """
         Evaluate if the investigation goal has been achieved.
@@ -5430,6 +5452,7 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
             self.logger.warning(f"Failed to read latest analysis dump: {e}")
             return ""
 
+    @workflow_operation("report.generate", "report.default")
     def generate_software_report(self, report_format: str = "markdown") -> str:
         """
         Generate a comprehensive software analysis report using AI-powered analysis.

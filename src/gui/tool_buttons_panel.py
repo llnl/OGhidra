@@ -1,6 +1,7 @@
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 from ..bridge import Bridge
+from ..workflow_host import get_workflow_host
 from .ai_response_panel import AIResponsePanel
 from .workflow_diagram import WorkflowDiagram
 import threading
@@ -10,7 +11,7 @@ import re
 from typing import Dict, Any
 from .daemon_thread_pool_executor import DaemonThreadPoolExecutor
 from .ui_thread import ui_safe
-from concurrent.futures import as_completed
+from contextlib import closing
 import logging
 
 logger = logging.getLogger(__name__)
@@ -1610,28 +1611,37 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                     enumerated_functions = 0  # Functions analyzed but not renamed (for enumeration)
                     completed_count = 0  # Track completion for progress updates
 
-                    # PARALLEL PROCESSING: Submit all functions to thread pool
-                    with DaemonThreadPoolExecutor(max_workers=max_workers) as executor:
-                        # Submit all functions for processing
-                        future_to_function = {
-                            executor.submit(
-                                self._process_single_function_for_bulk_rename,
-                                i,
-                                full_function_string,
-                                enumeration_mode,
-                                total_functions,
-                            ): (i, full_function_string)
-                            for i, full_function_string in enumerate(valid_functions, 1)
-                        }
+                    # The workflow scheduler preserves plugin dependency barriers
+                    # while using the existing daemon workers and result handling.
+                    def analyze_function(item, context):
+                        return self._process_single_function_for_bulk_rename(
+                            item.input["index"],
+                            item.input["function"],
+                            item.input["enumeration_mode"],
+                            item.input["total"],
+                        )
 
-                        # Process results as they complete
-                        for future in as_completed(future_to_function):
+                    with closing(
+                        get_workflow_host(self.bridge).iter_functions(
+                            valid_functions,
+                            enumeration_mode,
+                            analyze_function,
+                            max_workers=max_workers,
+                            cancelled=lambda: self.should_stop,
+                            executor_factory=DaemonThreadPoolExecutor,
+                        )
+                    ) as workflow_results:
+                        for item, work_result in workflow_results:
                             # Check for stop signal
-                            if self.should_stop:
-                                self.response_panel.add_response("Cancelled", "🛑 Operation cancelled by user")
-                                # Cancel remaining futures
-                                for remaining_future in future_to_function:
-                                    remaining_future.cancel()
+                            if self.should_stop or work_result.status == "cancelled":
+                                cancellation_message = (
+                                    "Operation cancelled by user"
+                                    if self.should_stop
+                                    else work_result.error or "Analysis was cancelled"
+                                )
+                                self.response_panel.add_response("Cancelled", cancellation_message)
+                                # Closing the iterator stops further dispatch and
+                                # commits any operations that are already running.
                                 # Still create RAG vectors for completed functions
                                 if processed_functions_data:
                                     self.response_panel.add_response(
@@ -1645,11 +1655,18 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                                     )
                                 break
 
-                            i, full_function_string = future_to_function[future]
                             completed_count += 1
 
                             try:
-                                result = future.result()
+                                if work_result.status == "completed" or isinstance(work_result.value, dict):
+                                    result = work_result.value
+                                else:
+                                    result = {
+                                        "success": False,
+                                        "result_type": "skipped" if work_result.status == "skipped" else "failed",
+                                        "function_name": item.input.get("name", item.input["function"]),
+                                        "error_msg": work_result.error or f"Analysis {work_result.status}",
+                                    }
 
                                 # Handle result based on type
                                 if result["result_type"] == "skipped":

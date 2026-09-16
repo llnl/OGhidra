@@ -2,6 +2,19 @@
 
 This directory contains test scripts for verifying OGhidra's core functionality, including the Ghidra MCP API, malware pattern detection, and AI agent integration.
 
+## Offline workflow and plugin tests
+
+The workflow/plugin unit and adapter suites use fake backends and temporary
+manifests. They require no Ghidra/model server:
+
+```sh
+python -m unittest tests.test_workflow_runtime tests.test_plugin_loader tests.test_workflow_host tests.test_strategic_ordering_plugin tests.test_cli_workflow_integration tests.test_gui_workflow_integration tests.test_bridge_workflow -v
+```
+
+See [workflow plugin validation](../docs/workflow_plugins.md#offline-validation)
+for branch coverage. The older live API scripts below are separate from these
+unit tests and may modify a connected test binary.
+
 ## Disclaimer
 
 Test files in this directory contain:

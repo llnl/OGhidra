@@ -1,0 +1,5 @@
+id = "oghidra.strategic_ordering"
+version = "1.0.0"
+host_api = ">=1,<2"
+entrypoint = "strategic_ordering:activate"
+contributions = ["workflow.plan", "context.collect"]
