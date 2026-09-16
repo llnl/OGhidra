@@ -18,7 +18,7 @@ def build_health_request(url: str, api_key: str, model: str, verify_ssl: bool) -
             "messages": [{"role": "user", "content": "Reply with OK."}],
             "max_completion_tokens": 4096,
         },
-        "timeout": (10, 60),
+        "timeout": (10, 30),
         "verify": verify_ssl,
     }
 
