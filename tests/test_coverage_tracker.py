@@ -4,7 +4,8 @@ Unit tests for CoverageTracker — Investigation Area Checklist.
 """
 
 import unittest
-from src.coverage_tracker import CoverageTracker, DEFAULT_CHECKLIST
+
+from src.coverage_tracker import DEFAULT_CHECKLIST, CoverageTracker
 
 
 class TestCoverageTrackerInit(unittest.TestCase):

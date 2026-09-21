@@ -3,14 +3,13 @@ Utilities for working with session records, generating embeddings and summaries.
 """
 
 import logging
-import numpy as np
-from typing import Optional
 import time
+
+import numpy as np
 
 # Import your Ollama client or other LLM clients as needed
 # For example, if you have an Ollama client in src/ollama_client.py
 # from .ollama_client import OllamaClient
-
 from .memory_models import SessionRecord
 
 logger = logging.getLogger(__name__)
@@ -165,7 +164,7 @@ Focus on the key insights, findings, or conclusions that would be useful for fut
 """
         return prompt
 
-    def generate_summary(self, session: SessionRecord) -> Optional[str]:
+    def generate_summary(self, session: SessionRecord) -> str | None:
         """
         Generate a summary for a session record.
 
