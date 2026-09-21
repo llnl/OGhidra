@@ -45,11 +45,11 @@ def install(root, interval_ms: int = 30):
                 break
             try:
                 fn()
-            except Exception:  # never let one bad callback kill the pump
+            except Exception:  # never let one bad callback kill the pump  # noqa: BLE001, S110 intentional defensive recovery boundary
                 pass
         try:
             root.after(interval_ms, _pump)
-        except Exception:
+        except Exception:  # noqa: BLE001, S110 intentional defensive recovery boundary
             pass  # root gone (shutdown)
 
     root.after(interval_ms, _pump)

@@ -40,6 +40,8 @@ from src.ollama_client import OllamaClient
 from src.session_compactor import SessionCompactor
 from src.user_question import QuestionHandler
 
+logger = logging.getLogger("ollama-ghidra-bridge")
+
 
 # Configure logging
 def setup_logging(config):
@@ -173,7 +175,7 @@ class Bridge:
 
             max_chars = int(getattr(self.llm_config, "compaction_max_chars", 2000))
             self.result_compactor = ResultCompactor(CompactionConfig(max_chars=max_chars))
-        except Exception:
+        except Exception:  # noqa: BLE001 intentional defensive recovery boundary
             self.result_compactor = None
 
         # Analysis dumper for capturing raw context before truncation
@@ -189,9 +191,6 @@ class Bridge:
                 # Memory manager is part of CAG manager
                 self.memory_manager = self.cag_manager.memory_manager if hasattr(self.cag_manager, "memory_manager") else None
 
-            except ImportError as e:
-                self.logger.warning(f"CAG dependencies not available: {e}. Running without CAG.")
-                self.enable_cag = False
             except ImportError as e:
                 self.logger.warning(f"CAG dependencies not available: {e}. Running without CAG.")
                 self.enable_cag = False
@@ -220,7 +219,7 @@ class Bridge:
 
             self.function_graph = FunctionGraph()
             self.logger.info("[OK] Knowledge Graph initialized for architectural analysis")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             self.logger.warning(f"[WARN] Knowledge Graph initialization failed: {e}. Graph features disabled.")
 
         # Initialize caches and statistics
@@ -263,13 +262,13 @@ class Bridge:
                     self.task_mode_enabled = bool(persisted.get("task_mode_enabled", False))
                     self.task_mode = str(persisted.get("task_mode", "off") or "off")
                     self.grep_layer_enabled = bool(persisted.get("grep_layer_enabled", False))
-                except Exception:
+                except Exception:  # noqa: BLE001, S110 intentional defensive recovery boundary
                     pass
 
                 # Note: focus_function tracking was removed as it caused confusion during
                 # cross-reference analysis. Users should explicitly query "current function"
                 # when needed, which will call get_current_function() from Ghidra.
-        except Exception:
+        except Exception:  # noqa: BLE001, S110 intentional defensive recovery boundary
             pass
 
         # Partial outputs storage
@@ -346,7 +345,7 @@ class Bridge:
                 self.logger.info(f"Task mode enabled: {self.task_mode}")
             else:
                 self.logger.info("Task mode disabled")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             self.logger.warning(f"Could not persist task mode: {e}")
 
     def get_task_mode_state(self) -> dict:
@@ -372,7 +371,7 @@ class Bridge:
                 self.logger.info("Hybrid search (grep layer) enabled - search_function_summaries available")
             else:
                 self.logger.info("Hybrid search (grep layer) disabled - search_function_summaries hidden")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             self.logger.warning(f"Could not persist grep layer state: {e}")
 
     def get_grep_layer_state(self) -> bool:
@@ -404,7 +403,7 @@ class Bridge:
 
             self.session.set_user_preference("active_goal", (query or "").strip())
             self.session.set_user_preference("scope_lock", scope)
-        except Exception:
+        except Exception:  # noqa: BLE001 intentional defensive recovery boundary
             return
 
     def _build_scope_card(self) -> str:
@@ -424,7 +423,7 @@ class Bridge:
             lines.append(f"- scope_lock: {scope_lock}")
             lines.append("- rule: Do not broaden scope unless user explicitly requests")
             return "\n".join(lines)
-        except Exception:
+        except Exception:  # noqa: BLE001 intentional defensive recovery boundary
             return ""
 
     def _maybe_update_custom_workplan(self, user_query: str, final_response: str) -> None:
@@ -441,7 +440,7 @@ class Bridge:
             existing = ""
             try:
                 existing = str(self.session.user_preferences.get("custom_workplan", "")).strip()
-            except Exception:
+            except Exception:  # noqa: BLE001 intentional defensive recovery boundary
                 existing = ""
 
             prompt = (
@@ -472,9 +471,9 @@ class Bridge:
                     from src.user_prefs_store import save_user_prefs
 
                     save_user_prefs(self.session.user_preferences)
-                except Exception:
+                except Exception:  # noqa: BLE001, S110 intentional defensive recovery boundary
                     pass
-        except Exception:
+        except Exception:  # noqa: BLE001 intentional defensive recovery boundary
             return
 
     def _should_analyze_findings(self, tools_executed: int) -> bool:
@@ -590,7 +589,7 @@ Do NOT skip to tool execution. Provide concrete details from the data above.
         # Return None to force usage of Ollama embeddings
 
     @classmethod
-    def get_embeddings(cls, texts: list[str], model: str = None) -> list[list[float]]:
+    def get_embeddings(cls, texts: list[str], model: str | None = None) -> list[list[float]]:
         """Get embeddings using the configured LLM client's embedding service (Ollama or External)."""
         logger = logging.getLogger("ollama-ghidra-bridge")
 
@@ -628,12 +627,12 @@ Do NOT skip to tool execution. Provide concrete details from the data above.
             provider_name = getattr(cls._ollama_client, "provider", "Ollama")
             logger.debug(f"✅ Generated {len(embeddings)} embeddings using {provider_name} {embedding_model}")
             return embeddings
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             logger.error(f"Failed to generate embeddings: {e}")
             return []
 
     @classmethod
-    def get_ollama_embeddings(cls, texts: list[str], model: str = None) -> list[list[float]]:
+    def get_ollama_embeddings(cls, texts: list[str], model: str | None = None) -> list[list[float]]:
         """DEPRECATED: Use get_embeddings instead. Legacy alias for backward compatibility."""
         return cls.get_embeddings(texts, model)
 
@@ -704,7 +703,7 @@ Do NOT skip to tool execution. Provide concrete details from the data above.
                 else:
                     self.logger.warning(f"Capabilities file '{capabilities_file}' not found.")
                     return None
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             self.logger.error(f"Error reading capabilities file '{capabilities_file}': {e!s}")
             return None
 
@@ -791,7 +790,7 @@ Do NOT skip to tool execution. Provide concrete details from the data above.
 
         return prompt_text
 
-    def _build_structured_prompt(self, phase: str = None) -> tuple:
+    def _build_structured_prompt(self, phase: str | None = None) -> tuple:
         """
         Build structured prompts with proper separation between system and user prompts.
 
@@ -969,14 +968,14 @@ You can help analyze binary files by executing commands through GhidraMCP."""
                             self.logger.info(
                                 f"📚 Injecting {len(relevant_funcs)} relevant function(s) as context (Hybrid Search)"
                             )
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                 self.logger.debug(f"Function context injection failed: {e}")
 
         if self.enable_cag and self.cag_manager and (task_mode_enabled or grep_layer_enabled):
             try:
                 if grep_layer_enabled and not task_mode_enabled:
                     self.logger.info("CAG/RAG context injection enabled (trigger: Hybrid Search)")
-            except Exception:
+            except Exception:  # noqa: BLE001, S110 intentional defensive recovery boundary
                 pass
             latest_user_query = None
 
@@ -1053,7 +1052,7 @@ You can help analyze binary files by executing commands through GhidraMCP."""
         try:
             if bool(getattr(self, "task_mode_enabled", False)) and getattr(self, "task_mode", "off") == "custom":
                 prefs_summary = self.session.get_user_preferences_summary()
-        except Exception:
+        except Exception:  # noqa: BLE001 intentional defensive recovery boundary
             prefs_summary = ""
         if prefs_summary:
             user_prompt = prefs_summary + "\n\n" + user_prompt
@@ -1204,7 +1203,7 @@ You can help analyze binary files by executing commands through GhidraMCP."""
 
         # Only return the snake_case version if it exists
         if hasattr(self.ghidra_client, snake_case):
-            logging.info(f"Normalized command name from '{command_name}' to '{snake_case}'")
+            logger.info(f"Normalized command name from '{command_name}' to '{snake_case}'")
             return snake_case
 
         return ""
@@ -1285,7 +1284,7 @@ You can help analyze binary files by executing commands through GhidraMCP."""
             for orig_key, new_key in command_specific_mappings[command_name].items():
                 if orig_key in params:
                     normalized_params[new_key] = params[orig_key]
-                    logging.info(f"Normalized parameter '{orig_key}' to '{new_key}' for command '{command_name}'")
+                    logger.info(f"Normalized parameter '{orig_key}' to '{new_key}' for command '{command_name}'")
 
         # Then apply general normalizations
         for key, value in params.items():
@@ -1295,7 +1294,7 @@ You can help analyze binary files by executing commands through GhidraMCP."""
             # Apply general parameter name mapping
             norm_key = param_mappings.get(key, key)
             if norm_key != key:
-                logging.info(f"Normalized parameter '{key}' to '{norm_key}' for command '{command_name}'")
+                logger.info(f"Normalized parameter '{key}' to '{norm_key}' for command '{command_name}'")
 
             normalized_params[norm_key] = value
 
@@ -1460,9 +1459,9 @@ You can help analyze binary files by executing commands through GhidraMCP."""
                                     "metadata": {"address": values[0], "old_name": values[1], "new_name": values[2]},
                                 }
                                 function_docs.append(doc)
-                        except Exception:
+                        except Exception:  # noqa: BLE001, S112 intentional defensive recovery boundary
                             continue
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             self.logger.debug(f"Could not get functions from UI: {e}")
 
         # Fallback: get from function_summaries dict
@@ -1485,7 +1484,7 @@ You can help analyze binary files by executing commands through GhidraMCP."""
                             "metadata": {"address": addr, "old_name": old_name, "new_name": new_name},
                         }
                         function_docs.append(doc)
-                    except Exception:
+                    except Exception:  # noqa: BLE001, S112 intentional defensive recovery boundary
                         continue
 
             # Last resort: raw summaries only
@@ -1598,7 +1597,7 @@ You can help analyze binary files by executing commands through GhidraMCP."""
                         # Re-sort with graph additions
                         results.sort(key=lambda x: x.get("score", 0), reverse=True)
 
-                except Exception as graph_error:
+                except Exception as graph_error:  # noqa: BLE001 intentional defensive recovery boundary
                     self.logger.debug(f"Graph expansion failed: {graph_error}")
 
             return results[: top_k * 2]  # Return more when graph-enhanced
@@ -1727,7 +1726,7 @@ You can help analyze binary files by executing commands through GhidraMCP."""
             # Normalize command name and parameters for Ghidra client commands
             normalized_command = self._normalize_command_name(command_name)
             if not normalized_command:
-                exists, error_message, similar_commands, all_available_commands = self._check_command_exists(command_name)
+                exists, error_message, similar_commands, _all_available_commands = self._check_command_exists(command_name)
                 if not exists:
                     # Provide concise error with suggestions only
                     if similar_commands:
@@ -1884,7 +1883,7 @@ You can help analyze binary files by executing commands through GhidraMCP."""
                         if match:
                             func_name = match.group(1)
                             return f"{command_name}:current:{func_name}"
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                     self.logger.warning(f"Failed to resolve current function for {command_name}: {e}")
                 return f"{command_name}:current"
 
@@ -2234,7 +2233,7 @@ You can help analyze binary files by executing commands through GhidraMCP."""
 
             return best_response
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             # Log the exception with full traceback
             import traceback
 
@@ -2326,7 +2325,7 @@ You can help analyze binary files by executing commands through GhidraMCP."""
             self._maybe_update_custom_workplan(user_query=query, final_response=response)
 
             return response
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             # Log the exception with full traceback
             import traceback
 
@@ -2376,7 +2375,7 @@ You can help analyze binary files by executing commands through GhidraMCP."""
             # Update session cache with current context
             self.cag_manager.update_session_from_bridge_context(self.context)
 
-        logging.info("Starting planning phase")
+        logger.info("Starting planning phase")
 
         # Build prompts (system and user)
         system_prompt, user_prompt = self._build_structured_prompt(phase="planning")
@@ -2387,16 +2386,16 @@ You can help analyze binary files by executing commands through GhidraMCP."""
 
         # Extract plan
         self.current_plan = response
-        logging.info(f"Received planning response: {response[:100]}...")
+        logger.info(f"Received planning response: {response[:100]}...")
 
         # Parse the planned tools
         self.current_plan_tools = self._parse_plan_tools(response)
-        logging.info(f"Extracted {len(self.current_plan_tools)} planned tools from plan")
+        logger.info(f"Extracted {len(self.current_plan_tools)} planned tools from plan")
 
         # Add plan to context
         self.add_to_context("plan", response)
 
-        logging.info("Planning phase completed")
+        logger.info("Planning phase completed")
         return response
 
     def _display_tool_result(self, cmd_name: str, result: Any) -> None:
@@ -2469,7 +2468,7 @@ You can help analyze binary files by executing commands through GhidraMCP."""
                 cleaned = params
             return tuple(sorted(cleaned.items()))
 
-        logging.info("Starting execution phase")
+        logger.info("Starting execution phase")
 
         all_results = []
         self.goal_steps_taken = 0
@@ -2483,7 +2482,7 @@ You can help analyze binary files by executing commands through GhidraMCP."""
             step_count += 1
             self.goal_steps_taken = step_count
 
-            logging.info(f"Step {step_count}/{self.max_goal_steps}: Sending query to Ollama")
+            logger.info(f"Step {step_count}/{self.max_goal_steps}: Sending query to Ollama")
 
             # Build prompts for tool execution
             system_prompt, user_prompt = self._build_structured_prompt(phase="execution")
@@ -2503,7 +2502,7 @@ You can help analyze binary files by executing commands through GhidraMCP."""
 
             # Generate execution step with properly separated prompts
             response = self.ollama.generate_with_phase(user_prompt, phase="execution", system_prompt=system_prompt)
-            logging.info(f"Received response from Ollama: {response[:100]}...")
+            logger.info(f"Received response from Ollama: {response[:100]}...")
 
             # REMOVED: Text-based ARTIFACT parsing (never used)
             # Artifacts now auto-populated from execution gate triggers
@@ -2551,7 +2550,7 @@ You can help analyze binary files by executing commands through GhidraMCP."""
                             "system",
                             "Hybrid Search is enabled: running search_function_summaries first to retrieve relevant analyzed functions before other tools.",
                         )
-            except Exception:
+            except Exception:  # noqa: BLE001, S110 intentional defensive recovery boundary
                 pass
 
             # Enhanced duplicate detection using CAG memory system
@@ -2602,7 +2601,7 @@ You can help analyze binary files by executing commands through GhidraMCP."""
 
                     # Check for same-name rename (useless operation)
                     if old_name == new_name:
-                        logging.warning(
+                        logger.warning(
                             f"Detected same-name rename: '{old_name}' -> '{new_name}'. This is a useless operation."
                         )
                         same_name_guidance = f"""
@@ -2617,7 +2616,7 @@ You can help analyze binary files by executing commands through GhidraMCP."""
                         continue  # Skip this command and get a new one
 
                     if rename_count >= 2:  # After 2 rename attempts, provide guidance
-                        logging.warning("Multiple rename_function calls detected. Checking for context mismatch.")
+                        logger.warning("Multiple rename_function calls detected. Checking for context mismatch.")
                         if getattr(self.config.ghidra, "backend", "http") == "pyghidra":
                             rename_target_guidance = (
                                 "1. Do NOT call get_current_function(); the pyGhidra backend does not track the live Ghidra GUI selection\n"
@@ -2641,7 +2640,7 @@ You can help analyze binary files by executing commands through GhidraMCP."""
                         self.add_to_context("system", context_guidance)
 
                 if tool_count >= self.tool_repetition_limit:
-                    logging.warning(
+                    logger.warning(
                         f"Tool '{cmd_name}' has been called {tool_count} times. Possible repetitive behavior detected."
                     )
 
@@ -2662,7 +2661,7 @@ You can help analyze binary files by executing commands through GhidraMCP."""
 
             # If no commands but the response indicates goal completion, mark as achieved
             if not commands and ("INVESTIGATION COMPLETE" in response.upper() or "GOAL ACHIEVED" in response.upper()):
-                logging.info("AI indicates the goal has been achieved")
+                logger.info("AI indicates the goal has been achieved")
                 self.goal_achieved = True
                 all_results.append(f"Step {step_count} - Goal achievement indicated: {response}")
                 break
@@ -2677,14 +2676,14 @@ You can help analyze binary files by executing commands through GhidraMCP."""
                     self.add_to_context("tool_call", tool_call)
 
                     # Execute command with parameter normalization
-                    logging.info(f"Executing GhidraMCP command: {cmd_name} with params: {cmd_params}")
+                    logger.info(f"Executing GhidraMCP command: {cmd_name} with params: {cmd_params}")
                     result = self.execute_command(cmd_name, cmd_params)
 
                     # Display the result to the user
                     self._display_tool_result(cmd_name, result)
 
                     # Format the result for context and logging
-                    if isinstance(result, dict) or isinstance(result, list):
+                    if isinstance(result, (dict, list)):
                         execution_result = json.dumps(result, indent=2)
                     else:
                         execution_result = str(result)
@@ -2704,7 +2703,7 @@ You can help analyze binary files by executing commands through GhidraMCP."""
                             context_result = (
                                 f"{first_lines}{truncation_msg}{last_lines}\n\nSummary: {len(lines)} total items returned"
                             )
-                            logging.info(
+                            logger.info(
                                 f"Truncated large result ({len(execution_result)} chars -> {len(context_result)} chars)"
                             )
                         else:
@@ -2732,9 +2731,9 @@ You can help analyze binary files by executing commands through GhidraMCP."""
                     # Add to all results
                     all_results.append(f"Command: {cmd_name}\nResult: {execution_result}\n")
 
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                     error_msg = f"ERROR: {e!s}"
-                    logging.error(f"Error executing {cmd_name}: {error_msg}")
+                    logger.error(f"Error executing {cmd_name}: {error_msg}")
                     execution_result = error_msg
                     self.add_to_context("tool_error", error_msg)
                     all_results.append(f"Command: {cmd_name}\nError: {error_msg}\n")
@@ -2742,14 +2741,14 @@ You can help analyze binary files by executing commands through GhidraMCP."""
 
             # If no commands were found, note this and end loop if it's the second consecutive time
             if not commands:
-                logging.info("No commands found in AI response, ending tool execution loop")
+                logger.info("No commands found in AI response, ending tool execution loop")
                 all_results.append(f"Step {step_count} - No tool calls: {response}")
                 break
 
         if step_count >= self.max_goal_steps:
-            logging.info(f"Reached maximum steps ({self.max_goal_steps}), ending tool execution loop")
+            logger.info(f"Reached maximum steps ({self.max_goal_steps}), ending tool execution loop")
 
-        logging.info("Execution phase completed")
+        logger.info("Execution phase completed")
         return "\n".join(all_results)
 
     def _evaluate_goal_completion(self, query: str, execution_results: str) -> bool:
@@ -2818,7 +2817,7 @@ You can help analyze binary files by executing commands through GhidraMCP."""
         Returns:
             Final analysis response
         """
-        logging.info("Starting review and reasoning phase")
+        logger.info("Starting review and reasoning phase")
 
         # Update workflow stage to review
         self.current_workflow_stage = "review"
@@ -2832,7 +2831,7 @@ You can help analyze binary files by executing commands through GhidraMCP."""
         # Phase to iteratively review and refine our understanding
         while not self.goal_achieved and review_steps < max_review_steps:
             review_steps += 1
-            logging.info(f"Review step {review_steps}/{max_review_steps}: Sending query to Ollama")
+            logger.info(f"Review step {review_steps}/{max_review_steps}: Sending query to Ollama")
 
             # Build prompts for review
             system_prompt, user_prompt = self._build_structured_prompt(phase="review")
@@ -2869,7 +2868,7 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
 
             # Generate review response with properly separated prompts
             review_response = self.ollama.generate_with_phase(user_prompt, phase="analysis", system_prompt=system_prompt)
-            logging.info(f"Received review response: {review_response[:100]}...")
+            logger.info(f"Received review response: {review_response[:100]}...")
 
             # Check for the final response marker
             final_response_match = re.search(r"FINAL RESPONSE:\s*(.*?)(?:\n\s*$|\Z)", review_response, re.DOTALL)
@@ -2889,10 +2888,10 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
                 )
 
                 if contains_instructions:
-                    logging.warning(
+                    logger.warning(
                         "FINAL RESPONSE contains instructions instead of results - AI is describing actions rather than executing them"
                     )
-                    logging.warning(f"Problematic response preview: {final_response[:200]}")
+                    logger.warning(f"Problematic response preview: {final_response[:200]}")
                     # Don't treat this as a valid final response, continue review loop
                     final_response = None
                     review_results.append(
@@ -2902,15 +2901,15 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
 
                 # Validate that the final response is reasonable
                 if final_response and len(final_response) > 100:
-                    logging.info("Found high-quality 'FINAL RESPONSE' marker in review, ending review loop")
+                    logger.info("Found high-quality 'FINAL RESPONSE' marker in review, ending review loop")
                     self.goal_achieved = True
                     break
                 elif final_response:
                     if "unable" in final_response.lower() or "limit" in final_response.lower():
-                        logging.info(f"Final response is too short ({len(final_response)} chars)")
-                        logging.info("Found 'FINAL RESPONSE' marker but response indicates limitations, continuing review")
+                        logger.info(f"Final response is too short ({len(final_response)} chars)")
+                        logger.info("Found 'FINAL RESPONSE' marker but response indicates limitations, continuing review")
                 else:
-                    logging.info("'FINAL RESPONSE' marker found but unable to extract response")
+                    logger.info("'FINAL RESPONSE' marker found but unable to extract response")
 
             # Check for additional tool calls in the review
             commands = self.command_parser.extract_commands(review_response)
@@ -2923,7 +2922,7 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
 
                         # Format result for display
                         formatted_result = self.command_parser.format_command_results(cmd_name, cmd_params, result)
-                        logging.info(f"Review command executed: {cmd_name}")
+                        logger.info(f"Review command executed: {cmd_name}")
 
                         # Add result to context
                         self.add_to_context("tool_result", formatted_result)
@@ -2934,9 +2933,9 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
                         )
                         review_results.append(tool_result_entry)
                         new_execution_results.append(tool_result_entry)
-                    except Exception as e:
+                    except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                         error_msg = f"ERROR: {e!s}"
-                        logging.error(f"Error executing review command {cmd_name}: {error_msg}")
+                        logger.error(f"Error executing review command {cmd_name}: {error_msg}")
                         self.add_to_context("tool_error", error_msg)
                         error_entry = f"Error executing {cmd_name}: {error_msg}"
                         review_results.append(error_entry)
@@ -2945,7 +2944,7 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
                 # Inject new results back into execution_results for next iteration
                 if new_execution_results:
                     execution_results += "\n" + "\n".join(new_execution_results)
-                    logging.info(f"Injected {len(new_execution_results)} new tool results into execution context")
+                    logger.info(f"Injected {len(new_execution_results)} new tool results into execution context")
 
             # If no commands and no final response yet, continue
             if not commands and not final_response:
@@ -3181,7 +3180,7 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
                                             f"[OK] Auto-continuation complete: Now showing all {total_lines} lines"
                                         )
 
-                                except Exception as e:
+                                except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                                     self.logger.warning(f"[WARN] Auto-continuation failed: {e}. Original result kept.")
 
                     # EXECUTION-PHASE RANKING: Filter large results to preserve analysis context
@@ -3240,7 +3239,7 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
                     if self.result_compactor is not None:
                         try:
                             prompt_result_str = self.result_compactor.compact(cmd_name, result)
-                        except Exception:
+                        except Exception:  # noqa: BLE001 intentional defensive recovery boundary
                             prompt_result_str = result_str
 
                     # Store the full result for caching before truncation
@@ -3265,7 +3264,7 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
                     # Dynamic truncation based on context budget from config
                     # This scales with CONTEXT_BUDGET from .env
                     max_result_chars = self._get_max_result_chars()
-                    logging.debug(f"[Context Budget] Allocated for result: {max_result_chars} chars")
+                    logger.debug(f"[Context Budget] Allocated for result: {max_result_chars} chars")
 
                     if len(prompt_result_str) > max_result_chars:
                         was_truncated = True
@@ -3273,10 +3272,10 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
                         original_len = len(prompt_result_str)
                         dropped_chars = original_len - max_result_chars
 
-                        logging.warning(
+                        logger.warning(
                             f"[TRUNCATION] Result too large: {original_len} chars > limit {max_result_chars}. Dropped {dropped_chars} chars."
                         )
-                        logging.warning(f"[TRUNCATION] Full content cached with ID: {loop_step_id}")
+                        logger.warning(f"[TRUNCATION] Full content cached with ID: {loop_step_id}")
 
                         prompt_result_str = prompt_result_str[:max_result_chars] + (
                             f"\n... [Truncated {dropped_chars} chars. "
@@ -3349,7 +3348,7 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
                                     else:
                                         assembly_code = str(asm_result)
                                     self.logger.debug(f"Fetched assembly for pattern detection at {cmd_params['address']}")
-                                except Exception as asm_err:
+                                except Exception as asm_err:  # noqa: BLE001 intentional defensive recovery boundary
                                     self.logger.debug(f"Could not fetch assembly for pattern detection: {asm_err}")
 
                             # Run pattern detection
@@ -3376,7 +3375,7 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
                                         "Pattern Detection",
                                         f"🚨 {high_count} HIGH severity pattern(s) in {cmd_name}: {', '.join(pattern_names)}",
                                     )
-                        except Exception as e:
+                        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                             self.logger.warning(f"Pattern detection failed: {e}")
 
                     # Update analysis state
@@ -3405,7 +3404,7 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
                         self.logger.warning(f"🚧 Post-execution gate: critical artifact found in {cmd_name} result")
                         # Phase 1: Log and continue (Phase 2 will truly block)
 
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                     error_msg = f"ERROR: {e!s}"
                     self.logger.error(f"❌ Error in execution loop step {step}: {error_msg}")
 
@@ -3459,7 +3458,7 @@ Output ONLY JSON (same structure), top {max_items} items."""
                 f"[OK] Kept {len(filtered) if isinstance(filtered, list) else len(filtered.get('items', []))}/{item_count}"
             )
             return filtered
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             self.logger.warning(f"[WARN] Ranking failed: {e}")
             return result
 
@@ -3686,7 +3685,7 @@ If done: "INVESTIGATION COMPLETE"
                     self.analysis_dumper.add_artifact("analysis", "cycle_conclusions", cycle_conclusions.format_for_planning())
                 dump_path = self.analysis_dumper.save()
                 self.logger.info(f"📝 Analysis dump saved to: {dump_path}")
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                 self.logger.warning(f"Failed to save analysis dump: {e}")
 
         return final_response
@@ -3719,7 +3718,7 @@ If done: "INVESTIGATION COMPLETE"
         }
 
         # Extract tool names and build next steps
-        tool_names = list(set([te.tool_name for te in exec_results.tool_executions]))
+        tool_names = list(dict.fromkeys(te.tool_name for te in exec_results.tool_executions))
         if tool_names:
             findings["recommended_next_steps"].append(f"Review results from: {', '.join(tool_names[:5])}")
 
@@ -3901,7 +3900,7 @@ Output ONLY valid JSON. No markdown code blocks. No explanations. Just the JSON 
                 "recommended_next_steps": ["Retry analysis"],
                 "_raw_response": response[:2000] if response else "",
             }
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             self.logger.error(f"Hybrid consolidation failed: {e}")
             # Fail-open: return a minimal structure plus compact previews so the run is usable even
             # under 429/504 conditions.
@@ -3914,7 +3913,7 @@ Output ONLY valid JSON. No markdown code blocks. No explanations. Just the JSON 
                 else:
                     ranked_preview = str(formatted_ranked)[:1500]
                     hints_preview = str(formatted_hints)[:800]
-            except Exception:
+            except Exception:  # noqa: BLE001 intentional defensive recovery boundary
                 ranked_preview = str(formatted_ranked)[:1500]
                 hints_preview = str(formatted_hints)[:800]
 
@@ -4117,7 +4116,7 @@ Output ONLY valid JSON. No markdown code blocks. No explanations. Just the JSON 
                 "key_functions": [],
                 "_raw_response": response[:2000] if response else "",
             }
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             self.logger.error(f"Consolidation failed: {e}")
             return {
                 "binary_purpose": f"Consolidation error: {e!s}",
@@ -4198,12 +4197,12 @@ IMPORTANT: You must provide a COMPLETE report with a conclusion. Do not truncate
 
             return response
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             self.logger.error(f"Synthesis failed: {e}")
             # Fallback: return findings as formatted text
             return self._generate_fallback_report(findings, goal, error=str(e))
 
-    def _generate_fallback_report(self, findings: dict, goal: str, error: str = None) -> str:
+    def _generate_fallback_report(self, findings: dict, goal: str, error: str | None = None) -> str:
         """
         Generate a comprehensive fallback report when LLM synthesis fails or returns empty.
 
@@ -4528,7 +4527,7 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
             if addr:
                 try:
                     self._collect_xref_context(addr)
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                     self.logger.debug(f"Xref context collection failed for {function_identifier}: {e}")
         else:
             self.logger.warning(f"DEBUG: No valid summary extracted for {function_identifier}")
@@ -4551,7 +4550,7 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
                     name = func_data.get("new_name", function_identifier)
                     self.function_graph.add_function(address, name, func_data)
                     self.logger.debug(f"📊 Added {name} to Knowledge Graph")
-                except Exception as graph_error:
+                except Exception as graph_error:  # noqa: BLE001 intentional defensive recovery boundary
                     self.logger.warning(f"Failed to add to graph: {graph_error}")
 
             # Check if CAG manager is available and RAG is enabled
@@ -4580,7 +4579,7 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
                     # Build single comprehensive document
                     rag_documents = [builder.build_primary_document(func_data)]
 
-            except Exception as build_error:
+            except Exception as build_error:  # noqa: BLE001 intentional defensive recovery boundary
                 self.logger.error(f"Enhanced RAG document building failed: {build_error}")
                 # Fallback to legacy format
                 new_name = func_data.get("new_name", function_identifier)
@@ -4653,18 +4652,13 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
                     try:
                         if hasattr(self, "_ui_memory_panel_refresh"):
                             self._ui_memory_panel_refresh()
-                    except Exception as e:
+                    except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                         self.logger.debug(f"Could not refresh memory panel: {e}")
 
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                     self.logger.error(f"Error adding function to RAG: {e}")
-                except Exception as e:
-                    self.logger.error(f"Failed to add function to RAG vectors: {e}")
-                    import traceback
 
-                    self.logger.error(f"Full traceback: {traceback.format_exc()}")
-
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             self.logger.warning(f"Failed to add function to RAG vectors: {e}")
 
     def _get_current_timestamp(self) -> str:
@@ -4808,7 +4802,7 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
                         if match:
                             address = match.group(1)
                             self.logger.info(f"DEBUG: Extracted address from current_function: {address}")
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                     self.logger.warning(f"DEBUG: Failed to get current function: {e}")
 
             # Method 3: If still no address, try to get it from decompiling the function by name
@@ -4820,7 +4814,7 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
                         if addr_match:
                             address = addr_match.group(1)
                             self.logger.info(f"DEBUG: Extracted address from decompile_function: {address}")
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                     self.logger.warning(f"DEBUG: Failed to decompile function {old_name}: {e}")
 
             # Store the function rename information
@@ -4916,10 +4910,9 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
         if "EXECUTE:" not in response and "?" in response:
             last_paragraph = response.split("\n\n")[-1].strip()
             # If the last paragraph ends with a question mark, it's likely a clarification request
-            if last_paragraph.endswith("?"):
+            if last_paragraph.endswith("?") and not ("`" in last_paragraph or "```" in last_paragraph):
                 # Additional check: make sure it's not just showing code examples with question marks
-                if not ("`" in last_paragraph or "```" in last_paragraph):
-                    return True
+                return True
         return False
 
     def _extract_suggestions(self, response: str) -> tuple[str, list[str]]:
@@ -5021,9 +5014,8 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
                         findings_section = True
                     elif findings_section and not line.strip():
                         findings_section = False
-                    if findings_section or line.strip().startswith("- ") or line.strip().startswith("* "):
-                        if line.strip():
-                            report_sections["findings"].append(line.strip())
+                    if (findings_section or line.strip().startswith("- ") or line.strip().startswith("* ")) and line.strip():
+                        report_sections["findings"].append(line.strip())
 
                 # Extract conclusions
                 if any(
@@ -5048,9 +5040,8 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
                 for category in ["findings", "insights", "conclusions"]:
                     for item in report_sections[category]:
                         analysis_content = analysis_content.replace(item, "")
-                if analysis_content.strip():
-                    # Only add if it contains relevant technical terms
-                    if any(
+                # Only add if it contains relevant technical terms
+                if analysis_content.strip() and any(
                         term in analysis_content.lower()
                         for term in [
                             "function",
@@ -5065,8 +5056,8 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
                             "pointer",
                             "struct",
                         ]
-                    ):
-                        report_sections["analysis"].append(analysis_content.strip())
+                ):
+                    report_sections["analysis"].append(analysis_content.strip())
 
         # --- Process Raw Responses for Additional Detail (before EXECUTE) ---
         for raw_response in raw_responses:
@@ -5099,33 +5090,31 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
 
             # Extract bulleted findings from raw text
             for line in pre_execute_text.split("\n"):
-                if line.strip().startswith("- ") or line.strip().startswith("* "):
-                    if line.strip():
-                        report_sections["findings"].append(line.strip())
+                if (line.strip().startswith("- ") or line.strip().startswith("* ")) and line.strip():
+                    report_sections["findings"].append(line.strip())
 
             # Extract general analysis from raw text (exclude already captured parts)
             analysis_content_raw = pre_execute_text
             for category in ["findings", "insights"]:
                 for item in report_sections[category]:
                     analysis_content_raw = analysis_content_raw.replace(item, "")
-            if analysis_content_raw.strip():
-                if any(
-                    term in analysis_content_raw.lower()
-                    for term in [
-                        "function",
-                        "address",
-                        "import",
-                        "export",
-                        "binary",
-                        "assembly",
-                        "code",
-                        "decompile",
-                        "call",
-                        "pointer",
-                        "struct",
-                    ]
-                ):
-                    report_sections["analysis"].append(analysis_content_raw.strip())
+            if analysis_content_raw.strip() and any(
+                term in analysis_content_raw.lower()
+                for term in [
+                    "function",
+                    "address",
+                    "import",
+                    "export",
+                    "binary",
+                    "assembly",
+                    "code",
+                    "decompile",
+                    "call",
+                    "pointer",
+                    "struct",
+                ]
+            ):
+                report_sections["analysis"].append(analysis_content_raw.strip())
 
         # --- Process Tool Results & Errors ---
         tool_results = []
@@ -5151,13 +5140,13 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
         report_sections["tools"] = tool_results
 
         # --- Deduplicate Sections ---
-        for section in report_sections:
-            if isinstance(report_sections[section], list):
+        for section, section_entries in report_sections.items():
+            if isinstance(section_entries, list):
                 seen = set()
                 # Keep order, filter duplicates (case-insensitive for strings)
                 report_sections[section] = [
                     x
-                    for x in report_sections[section]
+                    for x in section_entries
                     if not (
                         (x.lower() if isinstance(x, str) else x) in seen or seen.add(x.lower() if isinstance(x, str) else x)
                     )
@@ -5245,7 +5234,7 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
 
                 tools.append({"tool": command_name, "params": params})
 
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                 self.logger.error(f"Error parsing tool line '{line}': {e}")
 
         self.logger.info(f"Extracted {len(tools)} planned tools from plan")
@@ -5422,7 +5411,7 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
 
             return ""
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             self.logger.warning(f"Failed to read latest analysis dump: {e}")
             return ""
 
@@ -5468,7 +5457,7 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
             self.logger.info("Software report generation completed successfully")
             return final_report
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             self.logger.error(f"Error generating software report: {e}")
             self.current_workflow_stage = None
             return f"Error generating software report: {e}"
@@ -5579,10 +5568,10 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
                     data["strings"] = strings_result  # JSON format likely includes addresses
                 elif isinstance(strings_result, str) and not strings_result.startswith("ERROR:"):
                     data["strings"] = [s.strip() for s in strings_result.split("\n") if s.strip()]
-            except Exception as string_err:
+            except Exception as string_err:  # noqa: BLE001 intentional defensive recovery boundary
                 self.logger.debug(f"Error collecting strings: {string_err}")
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             self.logger.warning(f"Error collecting some binary data: {e}")
 
         # Collect previous agent analysis for correlation
@@ -5594,7 +5583,7 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
             data["metadata"]["binary_name"] = program_info.get("name", "Unknown Binary")
             data["metadata"]["project_name"] = program_info.get("project", "Unknown Project")
             self.logger.info(f"Collected binary info: {data['metadata']['binary_name']}")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             self.logger.warning(f"Failed to collect binary info: {e}")
             data["metadata"]["binary_name"] = "Unknown Binary"
 
@@ -5642,7 +5631,7 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
             risk_response = self.ollama.generate(prompt=risk_prompt)
             analysis["risk_assessment"] = self._parse_risk_response(risk_response)
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             self.logger.error(f"Error during AI analysis: {e}")
             # Return partial analysis with error noted
             analysis["error"] = str(e)
@@ -6031,7 +6020,7 @@ Provide final risk assessment in this EXACT format:
 
                 return "\n".join(all_context)
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             self.logger.warning(f"Error in comprehensive RAG retrieval: {e}")
 
         return None
@@ -6158,7 +6147,7 @@ Provide final risk assessment in this EXACT format:
 
                 return "\n".join(all_context)
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             self.logger.warning(f"Error in comprehensive security RAG retrieval: {e}")
 
         return None
@@ -6394,7 +6383,7 @@ Provide final risk assessment in this EXACT format:
 
                 return "\n".join(all_context)
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             self.logger.warning(f"Error in comprehensive behavioral RAG retrieval: {e}")
 
         return None
@@ -6607,7 +6596,7 @@ Provide final risk assessment in this EXACT format:
 
                 return "\n".join(all_context)
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             self.logger.warning(f"Error in comprehensive architecture RAG retrieval: {e}")
 
         return None
@@ -6741,7 +6730,7 @@ Provide final risk assessment in this EXACT format:
 
             # Extract addresses from the evidence section
             parsed["addresses"] = self._extract_addresses_from_analysis(response)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             self.logger.warning(f"Error parsing classification response: {e}")
             parsed["raw_response"] = response
 
@@ -6782,7 +6771,7 @@ Provide final risk assessment in this EXACT format:
                 iocs_match = response.split("**IOCS:**")[1].split("**")[0] if "**IOCS:**" in response else ""
                 parsed["iocs"] = iocs_match.strip()
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             self.logger.warning(f"Error parsing security response: {e}")
             parsed["raw_response"] = response
 
@@ -6810,7 +6799,7 @@ Provide final risk assessment in this EXACT format:
                 )
                 parsed["insights"] = insights_match.strip()
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             self.logger.warning(f"Error parsing function response: {e}")
             parsed["raw_response"] = response
 
@@ -6830,7 +6819,7 @@ Provide final risk assessment in this EXACT format:
             # Extract addresses from behavioral analysis
             parsed["addresses"] = self._extract_addresses_from_analysis(response)
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             self.logger.warning(f"Error parsing behavioral response: {e}")
             parsed["raw_response"] = response
 
@@ -6846,7 +6835,7 @@ Provide final risk assessment in this EXACT format:
                     parsed["pattern"] = line.split("**ARCHITECTURAL_PATTERN:**")[1].strip()
                 elif "**ARCHITECTURE_QUALITY:**" in line:
                     parsed["quality"] = line.split("**ARCHITECTURE_QUALITY:**")[1].strip()
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             self.logger.warning(f"Error parsing architecture response: {e}")
             parsed["raw_response"] = response
 
@@ -6882,7 +6871,7 @@ Provide final risk assessment in this EXACT format:
             # Extract addresses from risk assessment
             parsed["addresses"] = self._extract_addresses_from_analysis(response)
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             self.logger.warning(f"Error parsing risk response: {e}")
             parsed["raw_response"] = response
 
@@ -7123,7 +7112,7 @@ Now generate the JSON report based on this data.
             # Generate the final HTML
             return generate_html_report(sections, metadata)
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             self.logger.error(f"Error generating HTML report: {e}")
             # Fallback to a basic HTML report
             return self._generate_fallback_html_report(data, analysis)
@@ -7173,7 +7162,7 @@ Now generate the JSON report based on this data.
             else:
                 self.logger.warning("No LLM client available for HTML report generation")
                 return "{}"
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             self.logger.error(f"Error calling LLM for HTML report: {e}")
             return "{}"
 
@@ -7187,7 +7176,13 @@ Now generate the JSON report based on this data.
         import json
         import re
 
-        from src.report_template import ReportSection, build_attack_vectors, build_stats_grid, build_table, build_timeline
+        from src.report_template import (
+            ReportSection,
+            build_attack_vectors,
+            build_stats_grid,
+            build_table,
+            build_timeline,
+        )
 
         sections = []
         metadata = {"severity": "MEDIUM", "subtitle": "Binary Analysis Report"}
@@ -7226,7 +7221,7 @@ Now generate the JSON report based on this data.
                     if isinstance(content, str):
                         try:
                             content = json.loads(content)
-                        except Exception as e:
+                        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                             self.logger.warning(f"Failed to load JSON for 'stats': {e}")
                     if isinstance(content, list):
                         content = build_stats_grid(content)
@@ -7235,7 +7230,7 @@ Now generate the JSON report based on this data.
                     if isinstance(content, str):
                         try:
                             content = json.loads(content)
-                        except Exception as e:
+                        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                             self.logger.warning(f"Failed to load JSON for 'attack_vectors': {e}")
                     if isinstance(content, list):
                         content = build_attack_vectors(content)
@@ -7244,7 +7239,7 @@ Now generate the JSON report based on this data.
                     if isinstance(content, str):
                         try:
                             content = json.loads(content)
-                        except Exception as e:
+                        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                             self.logger.warning(f"Failed to load JSON for 'timeline': {e}")
                     if isinstance(content, list):
                         content = build_timeline(content)
@@ -7253,7 +7248,7 @@ Now generate the JSON report based on this data.
                     if isinstance(content, str):
                         try:
                             content = json.loads(content)
-                        except Exception as e:
+                        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                             self.logger.warning(f"Failed to load JSON for 'table': {e}")
                     if isinstance(content, dict):
                         headers = content.get("headers", [])
@@ -7267,7 +7262,7 @@ Now generate the JSON report based on this data.
                     if isinstance(content, str):
                         try:
                             content = json.loads(content)
-                        except Exception as e:
+                        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                             self.logger.warning(f"Failed to load JSON for 'discovery': {e}")
                     if isinstance(content, list):
                         content = build_vulnerability_discovery(content)
@@ -7278,7 +7273,7 @@ Now generate the JSON report based on this data.
                     if isinstance(content, str):
                         try:
                             content = json.loads(content)
-                        except Exception as e:
+                        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                             self.logger.warning(f"Failed to load JSON for 'key_findings': {e}")
                     if isinstance(content, list):
                         content = build_key_findings(content)
@@ -7289,7 +7284,7 @@ Now generate the JSON report based on this data.
                     if isinstance(content, str):
                         try:
                             content = json.loads(content)
-                        except Exception as e:
+                        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                             self.logger.warning(f"Failed to load JSON for 'security_imports': {e}")
                     if isinstance(content, list):
                         content = build_security_imports(content)
@@ -7302,7 +7297,7 @@ Now generate the JSON report based on this data.
             if not sections:
                 raise ValueError("No sections found in parsed response")
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             self.logger.warning(f"Error parsing HTML report response: {e}")
             # Create a fallback section with the raw response
             if response and response.strip() and response != "{}":
@@ -7323,7 +7318,11 @@ Now generate the JSON report based on this data.
 
     def _generate_fallback_html_report(self, data: dict[str, Any], analysis: dict[str, Any]) -> str:
         """Generate a basic HTML report without AI, as fallback."""
-        from src.report_template import ReportMetadata, ReportSection, generate_html_report
+        from src.report_template import (
+            ReportMetadata,
+            ReportSection,
+            generate_html_report,
+        )
 
         binary_name = data.get("metadata", {}).get("binary_name", "Unknown Binary")
 
@@ -7633,7 +7632,7 @@ Now generate the JSON report based on this data.
         xrefs = []
         try:
             xrefs = self.ghidra.get_xrefs_to(address, limit=max_funcs)  # type: ignore
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             self.logger.debug(f"get_xrefs_to failed for {address}: {e}")
             return
 
@@ -7661,7 +7660,7 @@ Now generate the JSON report based on this data.
                         if not hasattr(self, "function_summaries"):
                             self.function_summaries = {}
                         self.function_summaries[caller] = caller_summary
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                 self.logger.debug(f"Failed to decompile caller {caller}: {e}")
 
     # ------------------------------------------------------------------
@@ -7827,7 +7826,7 @@ def main():
                 print("\nExiting...")
                 break
 
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                 print(f"Error: {e!s}")
 
         return 0

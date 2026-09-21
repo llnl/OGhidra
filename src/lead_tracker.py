@@ -41,7 +41,7 @@ class LeadTracker:
         self.leads = []
         self.seen_leads = set()
 
-    def add_lead(self, description: str, priority: str = "MEDIUM", address: str = None) -> bool:
+    def add_lead(self, description: str, priority: str = "MEDIUM", address: str | None = None) -> bool:
         """
         Add a new lead if it hasn't been seen before.
         Returns True if added, False if duplicate.
@@ -89,7 +89,7 @@ class LeadTracker:
                 if self.add_lead(desc, prio, addr):
                     count += 1
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             logger.error(f"Error parsing leads from dump: {e}")
 
         return count

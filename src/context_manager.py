@@ -15,7 +15,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any
+from typing import Any, ClassVar
 
 logger = logging.getLogger("ollama-ghidra-bridge.context")
 
@@ -483,7 +483,7 @@ Summary:"""
 
             return summary.strip() if summary else self._smart_truncate(result, 800, tool_name)
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             logger.warning(f"Summarization failed: {e}, using truncation")
             return self._smart_truncate(result, 800, tool_name)
 
@@ -611,7 +611,7 @@ Summary:"""
         self.current_loop = loop_number
         logger.debug(f"ContextManager: Current loop set to {loop_number}")
 
-    def get_tiered_display_content(self, result: str, result_loop: int, tool_name: str, step_id: str = None) -> str:
+    def get_tiered_display_content(self, result: str, result_loop: int, tool_name: str, step_id: str | None = None) -> str:
         """
         Get appropriately summarized content based on loop age.
 
@@ -780,7 +780,7 @@ class RelevanceRanker:
     """
 
     # Map tool names to categories for grouping
-    CATEGORY_MAP = {
+    CATEGORY_MAP: ClassVar[dict[str, str]] = {
         "decompile_function": "decompilation",
         "decompile_function_by_address": "decompilation",
         "disassemble_function": "disassembly",
@@ -802,7 +802,7 @@ class RelevanceRanker:
     }
 
     # Priority scores by category (higher = more important)
-    CATEGORY_PRIORITY = {
+    CATEGORY_PRIORITY: ClassVar[dict[str, int]] = {
         "decompilation": 10,
         "analysis": 9,
         "xrefs": 7,

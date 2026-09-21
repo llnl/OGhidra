@@ -66,7 +66,7 @@ class ToolCapabilityTester:
             ]
 
             print(f"Successfully initialized GhidraMCPClient with {len(self.available_tools)} available tools")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             print(f"Failed to initialize GhidraMCPClient: {e!s}")
             traceback.print_exc()
             sys.exit(1)
@@ -86,7 +86,7 @@ class ToolCapabilityTester:
                             address = method.split("_")[1]
                             if all(c in "0123456789abcdefABCDEF" for c in address):
                                 self.available_addresses.append(address)
-                        except Exception as e:
+                        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                             logger.warning(
                                 f"An error occured in attempting to extract addresses from function names {method}: {e}"
                             )
@@ -104,7 +104,7 @@ class ToolCapabilityTester:
                 print(f"Sample address: {self.test_data['function_address']}")
             else:
                 print("No functions found. Testing will be limited.")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             print(f"Error gathering function data: {e!s}")
             traceback.print_exc()
 
@@ -122,7 +122,7 @@ class ToolCapabilityTester:
                     "required": param.default is inspect.Parameter.empty,
                     "annotation": str(param.annotation) if param.annotation is not inspect.Parameter.empty else "Any",
                 }
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             logger.warning(f"Error getting parameters for function: {e!s}")
 
         return params
@@ -171,9 +171,8 @@ class ToolCapabilityTester:
         if tool_name == "rename_function":
             if "new_name" in test_params:
                 test_params["new_name"] = f"{self.test_data['function_name']}_renamed_test"
-        elif tool_name == "rename_function_by_address":
-            if "new_name" in test_params:
-                test_params["new_name"] = f"func_{self.test_data['function_address']}_renamed_test"
+        elif tool_name == "rename_function_by_address" and "new_name" in test_params:
+            test_params["new_name"] = f"func_{self.test_data['function_address']}_renamed_test"
 
         return test_params
 
@@ -210,7 +209,7 @@ class ToolCapabilityTester:
                 "signature": str(inspect.signature(func)),
                 "docstring": inspect.getdoc(func),
             }
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             return {
                 "success": False,
                 "parameters": test_params,
@@ -339,7 +338,7 @@ class ToolCapabilityTester:
 
                 result = self.test_results[tool_name]
                 docstring = result.get("docstring", "No description available").split("\n")[0]
-                params = ", ".join([f"{name}" for name in result.get("parameters_info", {}).keys()])
+                params = ", ".join([f"{name}" for name in result.get("parameters_info", {})])
                 return_type = (
                     result.get("signature", "").split("->")[1].strip() if "->" in result.get("signature", "") else "Unknown"
                 )

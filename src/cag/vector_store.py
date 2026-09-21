@@ -388,6 +388,6 @@ def create_vector_store_from_docs(documents: list[dict[str, Any]]) -> SimpleVect
         except ImportError:
             logger.warning("Bridge not available for embeddings")
             return None
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
         logger.error(f"Error creating vector store: {e!s}")
         return None

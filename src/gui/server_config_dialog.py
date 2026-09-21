@@ -315,7 +315,7 @@ class ServerConfigDialog:
                                 results.append(f"Model ({target_model}): [WARN] Not found in list (might still work)")
                         else:
                             results.append(f"External API: [ERROR] HTTP {response.status_code}")
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                     results.append(f"External API: [ERROR] {e!s}")
             elif provider == "custom_api":
                 # Test Custom API
@@ -371,7 +371,7 @@ class ServerConfigDialog:
                                 if embed_response.status_code == 200:
                                     results.append(f"Embedding Model ({embedding_model}): [OK] Available")
                                     embed_success = True
-                            except Exception:
+                            except Exception:  # noqa: BLE001, S110 intentional defensive recovery boundary
                                 pass
 
                             # Fallback to legacy API (/api/embeddings) if new API failed
@@ -386,14 +386,14 @@ class ServerConfigDialog:
                                     if embed_response.status_code == 200:
                                         results.append(f"Embedding Model ({embedding_model}): [OK] Available (legacy API)")
                                         embed_success = True
-                                except Exception:
+                                except Exception:  # noqa: BLE001, S110 intentional defensive recovery boundary
                                     pass
 
                             if not embed_success:
                                 results.append(f"Embedding Model ({embedding_model}): [ERROR] Not available")
                     else:
                         results.append(f"Ollama: [ERROR] HTTP {response.status_code}")
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                     results.append(f"Ollama: [ERROR] {e!s}")
 
             backend = getattr(self.config.ghidra, "backend", "http")
@@ -410,7 +410,7 @@ class ServerConfigDialog:
                             results.append("pyGhidra: [ERROR] Health check failed")
                     finally:
                         client.close()
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                     results.append(f"pyGhidra: [ERROR] {e!s}")
             else:
                 try:
@@ -425,7 +425,7 @@ class ServerConfigDialog:
                         results.append("GhidraMCP: [OK] Connected")
                     else:
                         results.append(f"GhidraMCP: [ERROR] HTTP {response.status_code}")
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                     results.append(f"GhidraMCP: [ERROR] {e!s}")
 
             # Test GhidraMCP
@@ -437,7 +437,7 @@ class ServerConfigDialog:
                     results.append("GhidraMCP: [OK] Connected")
                 else:
                     results.append(f"GhidraMCP: [ERROR] HTTP {response.status_code}")
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                 results.append(f"GhidraMCP: [ERROR] {e!s}")
 
             # Show results (marshal the modal onto the Tk main thread)
@@ -502,7 +502,7 @@ class ServerConfigDialog:
             self.result = True
             self.dialog.destroy()
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             messagebox.showerror("Invalid Configuration", f"Error in configuration:\n{e!s}")
 
     def _update_env_file(self, updates: dict):
@@ -535,7 +535,7 @@ class ServerConfigDialog:
             # Write back
             with open(env_path, "w", encoding="utf-8") as f:
                 f.writelines(new_lines)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             logger.error(f"Failed to update .env file: {e}")
 
     def _cancel(self):

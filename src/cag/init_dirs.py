@@ -37,7 +37,7 @@ def ensure_cag_directories():
             try:
                 shutil.copy2(source_path, dest_path)
                 logger.info(f"Copied default knowledge file: {filename}")
-            except Exception as e:
+            except OSError as e:
                 logger.error(f"Error copying {filename}: {e!s}")
 
 

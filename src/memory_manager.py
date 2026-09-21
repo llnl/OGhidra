@@ -109,7 +109,7 @@ class MemoryManager:
         """
         return self.active_session_manager.update_tool_call_status(index=index, status=status, result_preview=result_preview)
 
-    def end_session(self, outcome: str, reason: str | None = None, generate_summary: bool = None) -> str | None:
+    def end_session(self, outcome: str, reason: str | None = None, generate_summary: bool | None = None) -> str | None:
         """
         End the current session and optionally generate a summary.
 
@@ -193,7 +193,7 @@ class MemoryManager:
         sorted_sessions = sorted(self.sessions, key=lambda s: s.start_time, reverse=True)
         return sorted_sessions[:limit]
 
-    def get_successful_sessions(self, limit: int = None) -> list[SessionRecord]:
+    def get_successful_sessions(self, limit: int | None = None) -> list[SessionRecord]:
         """
         Get sessions with 'success' outcome.
 
@@ -259,6 +259,6 @@ class MemoryManager:
 
             logger.warning("Cleared all session data")
             return True
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             logger.error(f"Error clearing session data: {e}")
             return False

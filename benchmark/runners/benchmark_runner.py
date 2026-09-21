@@ -178,7 +178,7 @@ class BenchmarkRunner:
             try:
                 result = self._evaluate_function(func)
                 function_results.append(result)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                 logger.warning(f"Failed to evaluate {func.function_name}: {e}")
                 failed_count += 1
 
@@ -233,9 +233,8 @@ class BenchmarkRunner:
                     continue
 
             # Tag filter
-            if self.config.required_tags:
-                if not any(tag in func.tags for tag in self.config.required_tags):
-                    continue
+            if self.config.required_tags and not any(tag in func.tags for tag in self.config.required_tags):
+                continue
 
             filtered.append(func)
 

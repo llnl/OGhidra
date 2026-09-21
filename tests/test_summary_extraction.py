@@ -182,7 +182,7 @@ if __name__ == "__main__":
     except AssertionError as e:
         print(f"\nTEST FAILED: {e}")
         sys.exit(1)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
         print(f"\nERROR: {e}")
         import traceback
 

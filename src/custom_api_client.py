@@ -180,7 +180,7 @@ class CustomAPIClient:
             return
         try:
             cb(event_type, payload)
-        except Exception:
+        except Exception:  # noqa: BLE001, S110 intentional defensive recovery boundary
             pass
 
     def _warn_if_tls_verification_disabled(self, operation: str) -> None:
@@ -296,7 +296,7 @@ class CustomAPIClient:
             if delta <= 0:
                 return 0.0
             return min(delta, float(self.retry_after_max_seconds))
-        except Exception:
+        except Exception:  # noqa: BLE001 intentional defensive recovery boundary
             return 0.0
 
     def _make_before_sleep(self, interaction_type: str, request_id: str, model: str, phase: str | None):
@@ -307,7 +307,7 @@ class CustomAPIClient:
             try:
                 if retry_state and retry_state.outcome:
                     exc = retry_state.outcome.exception()
-            except Exception:
+            except Exception:  # noqa: BLE001 intentional defensive recovery boundary
                 exc = None
 
             status_code = None
@@ -316,7 +316,7 @@ class CustomAPIClient:
                 try:
                     status_code = exc.response.status_code
                     retry_after_s = self._parse_retry_after_seconds(exc.response)
-                except Exception:
+                except Exception:  # noqa: BLE001 intentional defensive recovery boundary
                     status_code = None
                     retry_after_s = 0.0
 
@@ -333,7 +333,7 @@ class CustomAPIClient:
                             sleep_s = max(sleep_s, float(self._adaptive_interval))
 
                     retry_state.next_action.sleep = sleep_s
-            except Exception:
+            except Exception:  # noqa: BLE001, S110 intentional defensive recovery boundary
                 pass
 
             if status_code in (429, 503):
@@ -341,7 +341,7 @@ class CustomAPIClient:
 
             try:
                 sleep_s = float(retry_state.next_action.sleep) if retry_state.next_action is not None else None
-            except Exception:
+            except Exception:  # noqa: BLE001 intentional defensive recovery boundary
                 sleep_s = None
 
             adaptive_interval = None
@@ -578,7 +578,7 @@ class CustomAPIClient:
                     error_body = http_resp.text
                     self.logger.error(f"Response Status: {http_resp.status_code}")
                     self.logger.error(f"Response Body: {error_body[:1000]}")
-                except Exception:
+                except Exception:  # noqa: BLE001, S110 intentional defensive recovery boundary
                     pass
 
             # Log request sizes for debugging
@@ -609,7 +609,7 @@ class CustomAPIClient:
             # Ensure we always release semaphore
             try:
                 self._request_semaphore.release()
-            except Exception:
+            except Exception:  # noqa: BLE001, S110 intentional defensive recovery boundary
                 pass
 
     def generate_with_phase(self, prompt: str, phase: str | None = None, system_prompt: str | None = None) -> str:
@@ -742,7 +742,7 @@ class CustomAPIClient:
         finally:
             try:
                 self._request_semaphore.release()
-            except Exception:
+            except Exception:  # noqa: BLE001, S110 intentional defensive recovery boundary
                 pass
 
     def check_health(self) -> bool:
@@ -758,6 +758,6 @@ class CustomAPIClient:
                     health_error_detail(response),
                 )
             return response.status_code == 200
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             self.logger.error(f"Custom API health check failed: {e}")
             return False

@@ -47,7 +47,7 @@ def cmd_extract(args):
             config = get_config()
             ollama_client = OllamaClient(config.ollama)
             logger.info("Ollama client initialized for summary generation")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             logger.warning(f"Could not initialize Ollama: {e}")
             logger.warning("Proceeding without LLM summary generation")
 
@@ -100,7 +100,7 @@ def cmd_run(args):
             enable_cag=False,  # Disable CAG for clean benchmark
         )
         logger.info("OGhidra bridge initialized")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
         logger.error(f"Failed to initialize OGhidra: {e}")
         logger.error("Make sure Ghidra is running with GhidraMCP and Ollama is available")
         return 1
@@ -182,7 +182,10 @@ def cmd_report(args):
         data = json.load(f)
 
     # Reconstruct results object (simplified)
-    from benchmark.runners.benchmark_runner import BenchmarkConfig, FunctionBenchmarkResult
+    from benchmark.runners.benchmark_runner import (
+        BenchmarkConfig,
+        FunctionBenchmarkResult,
+    )
 
     config = BenchmarkConfig(**data["config"])
     function_results = [FunctionBenchmarkResult(**r) for r in data["function_results"]]

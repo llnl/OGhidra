@@ -40,7 +40,7 @@ class SessionHistoryStore:
                         records.append(SessionRecord.model_validate(data))
                     except json.JSONDecodeError as e:
                         print(f"Warning: Skipping malformed JSON line {line_number} in '{self.storage_path}': {e}")
-                    except Exception as e:
+                    except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                         print(f"Warning: Skipping record on line {line_number} due to data conversion error: {e}")
         return records
 

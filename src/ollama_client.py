@@ -435,7 +435,7 @@ class OllamaClient:
             self.logger.error(f"Error listing Ollama models: {e!s}")
             raise
 
-    def embed(self, text: str, model: str = None) -> list[float]:
+    def embed(self, text: str, model: str | None = None) -> list[float]:
         """
         Generate embeddings using Ollama embedding model.
 
@@ -493,7 +493,7 @@ class OllamaClient:
                     chunk_embeddings.append(emb)
                 else:
                     self.logger.warning(f"Chunk {i + 1} returned empty embedding")
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                 self.logger.error(f"Failed to embed chunk {i + 1}: {e}")
                 # Continue with other chunks rather than failing completely
 
@@ -553,7 +553,7 @@ class OllamaClient:
                         return result
                     except Exception as fallback_error:
                         self.logger.error(f"Both embedding APIs failed. New API: {e}, Legacy API: {fallback_error}")
-                        raise fallback_error
+                        raise
                 else:
                     # Other error (500, connection error, etc.) - don't fallback, just raise
                     raise
@@ -593,7 +593,7 @@ class OllamaClient:
                 try:
                     error_detail = response.json()
                     self.logger.error(f"Ollama embed 400 error: {error_detail}")
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                     error_message = f"Ollama embed 400 error: {response.text[:500]}\n{e}"
                     self.logger.error(error_message)
             response.raise_for_status()
@@ -646,7 +646,7 @@ class OllamaClient:
                 try:
                     error_detail = response.json()
                     self.logger.error(f"Ollama embeddings 400 error: {error_detail}")
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                     self.logger.error(f"Ollama embeddings 400 error: {response.text[:500]}\n{e}")
             response.raise_for_status()
             data = response.json()
@@ -694,6 +694,6 @@ class OllamaClient:
         try:
             response = requests.get(f"{self.base_url}/api/tags", timeout=5, auth=self.auth)
             return response.status_code == 200
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             self.logger.error(f"Ollama health check failed: {e}")
             return False

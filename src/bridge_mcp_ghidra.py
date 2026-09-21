@@ -23,7 +23,7 @@ mcp = FastMCP("ghidra-mcp")
 ghidra_server_url = DEFAULT_GHIDRA_SERVER
 
 
-def safe_get(endpoint: str, params: dict = None) -> list:
+def safe_get(endpoint: str, params: dict | None = None) -> list:
     """
     Perform a GET request with optional query parameters.
     """
@@ -39,7 +39,7 @@ def safe_get(endpoint: str, params: dict = None) -> list:
             return response.text.splitlines()
         else:
             return [f"Error {response.status_code}: {response.text.strip()}"]
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
         return [f"Request failed: {e!s}"]
 
 
@@ -55,7 +55,7 @@ def safe_post(endpoint: str, data: dict | str) -> str:
             return response.text.strip()
         else:
             return f"Error {response.status_code}: {response.text.strip()}"
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
         return f"Request failed: {e!s}"
 
 
@@ -300,7 +300,7 @@ def get_function_xrefs(name: str, offset: int = 0, limit: int = 100) -> list:
 
 
 @mcp.tool()
-def list_strings(offset: int = 0, limit: int = 2000, filter: str = None) -> list:
+def list_strings(offset: int = 0, limit: int = 2000, filter: str | None = None) -> list:
     """
     List all defined strings in the program with their addresses.
 

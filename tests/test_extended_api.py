@@ -45,7 +45,7 @@ class GhidraMCPTester:
                         address = method.split("_")[1]
                         if all(c in "0123456789abcdefABCDEF" for c in address):
                             self.available_addresses.append(address)
-                    except Exception as e:
+                    except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                         logger.warning(f"An error occured in attempting to extract addresses from function names {method}: {e}")
 
             return {
@@ -54,10 +54,10 @@ class GhidraMCPTester:
                 "type": "string[]",
                 "description": "Returns list of all function names in the program",
             }
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             return {"success": False, "error": str(e)}
 
-    def test_direct_tool_call(self, tool_name: str, params: dict[str, Any] = None) -> dict[str, Any]:
+    def test_direct_tool_call(self, tool_name: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         """
         Test calling a tool directly, simulating how the Bridge class would call it.
 
@@ -113,7 +113,7 @@ class GhidraMCPTester:
                 "description": f"Direct call to {tool_name} with params {params}",
                 "signature": str(sig),
             }
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             return {"success": False, "error": str(e), "traceback": traceback.format_exc()}
 
     def run_tests(self, specific_tools=None):

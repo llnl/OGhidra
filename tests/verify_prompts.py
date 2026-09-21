@@ -25,7 +25,7 @@ class TestPromptConstruction(unittest.TestCase):
 
     def test_batching_instructions_in_system_prompt(self):
         """Verify that batching instructions appear in the system prompt."""
-        system_prompt, user_prompt = self.bridge._build_structured_prompt(phase="execution")
+        system_prompt, _user_prompt = self.bridge._build_structured_prompt(phase="execution")
 
         print("\n--- System Prompt Batching Check ---")
         if "EXECUTE MULTIPLE TOOLS IN ONE RESPONSE" in system_prompt:
@@ -58,7 +58,7 @@ class TestPromptConstruction(unittest.TestCase):
             )
             self.bridge.session.tool_executions.append(exec_record)
 
-        system_prompt, user_prompt = self.bridge._build_structured_prompt(phase="execution")
+        _system_prompt, user_prompt = self.bridge._build_structured_prompt(phase="execution")
 
         print("\n--- User Prompt Injection Check ---")
         if "COMPLETED STEPS (DO NOT REPEAT)" in user_prompt:
@@ -79,7 +79,7 @@ class TestPromptConstruction(unittest.TestCase):
         # Add a knowledge artifact
         self.bridge.session.add_knowledge("C2_Server", "10.0.0.5", "network")
 
-        system_prompt, user_prompt = self.bridge._build_structured_prompt(phase="execution")
+        _system_prompt, user_prompt = self.bridge._build_structured_prompt(phase="execution")
 
         if "[network] C2_Server: 10.0.0.5" in user_prompt:
             print("✅ network artifact found in prompt")

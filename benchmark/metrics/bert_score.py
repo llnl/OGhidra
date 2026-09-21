@@ -77,7 +77,7 @@ class BERTScoreMetric(BaseMetric):
         """
         self._lazy_init()
 
-        P, R, F1 = self._scorer.score(
+        _P, _R, F1 = self._scorer.score(
             cands=[candidate],
             refs=[reference],
             model_type=self.model_type,
@@ -101,7 +101,7 @@ class BERTScoreMetric(BaseMetric):
         """
         self._lazy_init()
 
-        P, R, F1 = self._scorer.score(
+        _P, _R, F1 = self._scorer.score(
             cands=candidates,
             refs=references,
             model_type=self.model_type,

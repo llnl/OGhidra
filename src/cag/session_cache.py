@@ -60,7 +60,7 @@ class ContextItem:
 class SessionCache:
     """Cache that persists relevant information across a session."""
 
-    def __init__(self, session_id: str = None, cache_dir: str = "ghidra_session_cache"):
+    def __init__(self, session_id: str | None = None, cache_dir: str = "ghidra_session_cache"):
         """
         Initialize the session cache.
 
@@ -211,7 +211,7 @@ class SessionCache:
         Returns:
             DecompiledFunction object or None
         """
-        for address, func in self.decompiled_functions.items():
+        for func in self.decompiled_functions.values():
             if func.name == function_name:
                 return func
 
@@ -291,18 +291,16 @@ class SessionCache:
         # Add recently decompiled functions mentioned in the query
         for address, func in sorted(self.decompiled_functions.items(), key=lambda x: x[1].timestamp, reverse=True):
             # Check if function name is mentioned in query
-            if func.name.lower() in query.lower():
-                # Prioritize mentioned functions
-                if total_tokens + func.token_count <= token_limit:
-                    pruned_cache["decompiled_functions"][address] = func
-                    total_tokens += func.token_count
+            # Prioritize mentioned functions when space remains.
+            if func.name.lower() in query.lower() and total_tokens + func.token_count <= token_limit:
+                pruned_cache["decompiled_functions"][address] = func
+                total_tokens += func.token_count
 
         # Add additional decompiled functions if space allows
         for address, func in sorted(self.decompiled_functions.items(), key=lambda x: x[1].timestamp, reverse=True):
-            if address not in pruned_cache["decompiled_functions"]:
-                if total_tokens + func.token_count <= token_limit:
-                    pruned_cache["decompiled_functions"][address] = func
-                    total_tokens += func.token_count
+            if address not in pruned_cache["decompiled_functions"] and total_tokens + func.token_count <= token_limit:
+                pruned_cache["decompiled_functions"][address] = func
+                total_tokens += func.token_count
 
         # Add renamed entities (these are small, so include all if possible)
         for old_name, entity in self.renamed_entities.items():
@@ -354,7 +352,7 @@ class SessionCache:
         # Format decompiled functions
         if pruned_cache["decompiled_functions"]:
             functions_section = "## Previously Decompiled Functions:\n\n"
-            for address, func in pruned_cache["decompiled_functions"].items():
+            for func in pruned_cache["decompiled_functions"].values():
                 functions_section += f"### Function: {func.name} (address: {func.address})\n\n"
                 functions_section += "```c\n"
                 # Trim long decompilations to avoid bloating the context
@@ -474,7 +472,7 @@ class SessionCache:
                 )
 
             self.logger.info(f"Session cache saved to {self.cache_dir}")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             self.logger.error(f"Error saving session cache to disk: {e!s}")
 
     def load_from_disk(self, session_id: str) -> bool:
@@ -507,7 +505,7 @@ class SessionCache:
                 with open(functions_path, "r", encoding="utf-8") as f:
                     self.decompiled_functions = {addr: DecompiledFunction(**func) for addr, func in json.load(f).items()}
                     self.seen_addresses = set(self.decompiled_functions.keys())
-                    self.seen_names = set(func.name for func in self.decompiled_functions.values())
+                    self.seen_names = {func.name for func in self.decompiled_functions.values()}
 
             # Load renamed entities
             entities_path = os.path.join(self.cache_dir, "renamed_entities.json")
@@ -531,7 +529,7 @@ class SessionCache:
                 f"{len(self.analysis_results)} analysis results"
             )
             return True
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             self.logger.error(f"Error loading session cache: {e!s}")
             return False
 

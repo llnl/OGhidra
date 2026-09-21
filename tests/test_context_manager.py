@@ -198,7 +198,7 @@ def main():
         print("All tests passed! [SUCCESS]")
         print("=" * 60)
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
         print(f"\n[FAIL] Test failed with error: {e}")
         import traceback
 

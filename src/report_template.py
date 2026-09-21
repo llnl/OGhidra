@@ -1318,7 +1318,7 @@ def build_security_imports(imports: list[dict[str, Any]]) -> str:
     """
 
 
-def build_table(headers: list[str], rows: list[list[str]], address_columns: list[int] = None) -> str:
+def build_table(headers: list[str], rows: list[list[str]], address_columns: list[int] | None = None) -> str:
     """
     Build an HTML table.
 

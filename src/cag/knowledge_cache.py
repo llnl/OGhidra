@@ -72,7 +72,7 @@ class GhidraKnowledgeCache:
         # Initialize logger
         self.logger = logging.getLogger("ollama-ghidra-bridge.cag.knowledge")
 
-    def preload(self, knowledge_files: list[str] = None) -> None:
+    def preload(self, knowledge_files: list[str] | None = None) -> None:
         """
         Preload domain knowledge from files.
 
@@ -141,7 +141,7 @@ class GhidraKnowledgeCache:
 
                 loaded_files += 1
                 self.logger.info(f"Loaded knowledge from {file_path}")
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                 self.logger.error(f"Error loading knowledge file {file_path}: {e!s}")
 
         if loaded_files > 0:
@@ -324,7 +324,7 @@ class GhidraKnowledgeCache:
                     potential_functions.append(word)
                 # Check partial matches
                 else:
-                    for func_name in self.function_signatures.keys():
+                    for func_name in self.function_signatures:
                         if word.lower() in func_name.lower():
                             potential_functions.append(func_name)
 
@@ -405,6 +405,6 @@ class GhidraKnowledgeCache:
             self.knowledge_initialized = True
             self.logger.info(f"Knowledge cache loaded from {self.cache_dir}")
             return True
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             self.logger.error(f"Error loading knowledge cache: {e!s}")
             return False

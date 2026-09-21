@@ -132,7 +132,7 @@ class OllamaEmbedder:
             emb = self._embed_new(text, model)
             self._api_mode_by_model[model] = "new"
             return emb
-        except Exception:
+        except Exception:  # noqa: BLE001 intentional defensive recovery boundary
             emb = self._embed_old(text, model)
             self._api_mode_by_model[model] = "old"
             return emb
@@ -177,10 +177,7 @@ def looks_like_embedding_model(model_info: dict[str, Any]) -> bool:
         return True
     if "bert" in family_l or "bert" in families_l:
         return True
-    if "nomic-bert" in family_l or "nomic-bert" in families_l:
-        return True
-
-    return False
+    return bool("nomic-bert" in family_l or "nomic-bert" in families_l)
 
 
 def normalize_model_name(name: str) -> str:
@@ -194,7 +191,7 @@ def load_session_functions(session_path: Path) -> dict[str, dict[str, Any]]:
     data = json.loads(session_path.read_text(encoding="utf-8"))
     funcs = data.get("analyzed_functions", {})
     if not isinstance(funcs, dict):
-        raise ValueError("session.json missing analyzed_functions dict")
+        raise TypeError("session.json missing analyzed_functions dict")
     return funcs
 
 
@@ -437,7 +434,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         t0 = time.time()
         try:
             target_emb = embedder.embed(target_text, model=model)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             print(f"WARN: embed failed for model={model}: {e}", file=sys.stderr)
             continue
 
@@ -450,7 +447,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             for addr, txt in zip(corpus_addrs, corpus_texts):
                 try:
                     e = embedder.embed(txt, model=model)
-                except Exception:
+                except Exception:  # noqa: BLE001, S112 intentional defensive recovery boundary
                     continue
                 embs.append(e)
                 kept_addrs.append(addr)
@@ -480,7 +477,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             try:
                 q_emb = embedder.embed(prompt, model=model)
                 score = cosine_similarity(q_emb, target_emb)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                 print(f"WARN: query embed failed for model={model}: {e}", file=sys.stderr)
                 continue
 
@@ -491,7 +488,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     r, total = compute_rank(q_emb, mat, addrs, args.target_addr)
                     row.target_rank = r
                     row.total_ranked = total
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                     print(f"WARN: rank compute failed for model={model}: {e}", file=sys.stderr)
             rows.append(row)
 

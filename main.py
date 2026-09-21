@@ -159,7 +159,7 @@ def run_interactive_mode(bridge: Bridge, config: BridgeConfig):
                                                 print(f"  {i + 1}. {sid}")
                                             if len(session_ids) > 5:
                                                 print(f"  ... and {len(session_ids) - 5} more")
-                    except Exception as e:
+                    except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                         print(f"Error displaying vector store info: {e}")
 
                     print("===============================\n")
@@ -200,7 +200,7 @@ def run_interactive_mode(bridge: Bridge, config: BridgeConfig):
                                         print(f"\nStored Session IDs ({len(session_ids)}):")
                                         for i, sid in enumerate(session_ids):
                                             print(f"  {i + 1}. {sid}")
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                     print(f"Error displaying vector store info: {e}")
 
                 print("===============================\n")
@@ -262,7 +262,7 @@ def run_interactive_mode(bridge: Bridge, config: BridgeConfig):
                         print(f"  {tool_name}({', '.join(params_desc)})")
                         print(f"    {doc}")
                         print()
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                     print(f"Error loading tools: {e!s}")
                 print("===========================\n")
                 continue
@@ -429,7 +429,7 @@ def run_interactive_mode(bridge: Bridge, config: BridgeConfig):
 
                             if not is_error:
                                 formatted_tool_data = ""
-                                if isinstance(raw_tool_result, dict) or isinstance(raw_tool_result, list):
+                                if isinstance(raw_tool_result, (dict, list)):
                                     try:
                                         formatted_tool_data = json.dumps(raw_tool_result, indent=2)
                                     except TypeError:  # Handle non-serializable data
@@ -546,7 +546,7 @@ Tool Output:
 
                                     except Exception as e:
                                         print(f"Error during AI analysis: {e}")
-                                        bridge.logger.error(f"Error during AI analysis for {tool_name}: {e}", exc_info=True)
+                                        bridge.logger.exception(f"Error during AI analysis for {tool_name}")
                                         current_session_log.append(
                                             f"=== Error during AI analysis of {tool_name}({params_for_log}): {e} ===\\n"
                                         )
@@ -571,7 +571,7 @@ Tool Output:
 
                 except Exception as e:
                     print(f"Error executing tool: {e}")
-                    bridge.logger.error(f"Error executing tool '{tool_str}': {e}", exc_info=True)
+                    bridge.logger.exception(f"Error executing tool '{tool_str}'")
                     current_session_log.append(f"=== Error executing tool command '{tool_str}': {e} ===\\n")
 
             elif user_input.lower().startswith("analyze-function"):  # Restored analyze-function shortcut
@@ -620,7 +620,7 @@ Tool Output:
                         isinstance(raw_tool_result, str) and raw_tool_result.lower().startswith("error:")
                     ):
                         formatted_tool_data = ""
-                        if isinstance(raw_tool_result, dict) or isinstance(raw_tool_result, list):
+                        if isinstance(raw_tool_result, (dict, list)):
                             try:
                                 formatted_tool_data = json.dumps(raw_tool_result, indent=2)
                             except TypeError:
@@ -669,7 +669,7 @@ Tool Output:
 
                         except Exception as e:
                             print(f"Error during AI analysis: {e}")
-                            bridge.logger.error(f"Error during AI analysis for analyze-function shortcut: {e}", exc_info=True)
+                            bridge.logger.exception("Error during AI analysis for analyze-function shortcut")
                             current_session_log.append(
                                 f"=== Error during AI analysis of analyze-function({params_for_log}): {e} ===\\n"
                             )
@@ -678,7 +678,7 @@ Tool Output:
 
                 except Exception as e:
                     print(f"Error analyzing function: {e!s}")
-                    bridge.logger.error(f"Error in 'analyze-function' shortcut: {e}", exc_info=True)
+                    bridge.logger.exception("Error in 'analyze-function' shortcut")
                     current_session_log.append(f"=== Error in analyze-function shortcut: {e} ===\\n")
                 continue  # Keep continue for now, as this block is self-contained for analysis
 
@@ -795,11 +795,11 @@ Tool Output:
                                                     context["callers_code"].append(
                                                         {"address": caller_addr, "code": caller_code}
                                                     )
-                                            except Exception as e:
+                                            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                                                 bridge.logger.warning(
                                                     f"Failed to decompile function at address {caller_addr}: {e}"
                                                 )
-                                except Exception as e:
+                                except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                                     bridge.logger.warning(f"Failed to get callers to {address}: {e}")
 
                                 # Get callees (what does this function call?)
@@ -835,11 +835,11 @@ Tool Output:
                                                     context["callees_code"].append(
                                                         {"address": callee_addr, "code": callee_code}
                                                     )
-                                            except Exception as e:
+                                            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                                                 bridge.logger.warning(
                                                     f"Failed to decompile the callee function at {callee_addr}: {e}"
                                                 )
-                                except Exception as e:
+                                except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                                     bridge.logger.warning(f"Failed to get callees to {address}: {e}")
 
                                 # Calculate context size
@@ -854,7 +854,7 @@ Tool Output:
                                     )
                                 else:
                                     print("  ℹ️  No caller/callee context found")
-                            except Exception as e:
+                            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                                 print(f"  ⚠ Context gathering failed: {e}")
 
                             # Format context for prompt
@@ -1035,7 +1035,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                                         else:
                                             print(f"  ✅ Renamed: {function_name} → {suggested_name}")
                                             final_name = suggested_name
-                                    except Exception as e:
+                                    except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                                         print(f"  ⚠ Rename exception: {e}")
                                         print(f"  ℹ️  Keeping original name: {function_name}")
                                         bridge.logger.warning(f"Failed to rename {function_name}: {e}")
@@ -1072,7 +1072,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
 
                         except Exception as e:
                             print(f"  ✗ Error processing {function_name}: {e}")
-                            bridge.logger.error(f"Error enumerating function {function_name}: {e}", exc_info=True)
+                            bridge.logger.exception(f"Error enumerating function {function_name}")
                             failed_enumerations += 1
                             continue
 
@@ -1170,7 +1170,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                                                             )
 
                                                     vectors_loaded += 1
-                                            except Exception as e:
+                                            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                                                 bridge.logger.warning(
                                                     f"Failed to add {func_data['new_name']} to vector store: {e}"
                                                 )
@@ -1182,7 +1182,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
 
                             except Exception as e:
                                 print(f"  ✗ Error loading vectors: {e}")
-                                bridge.logger.error(f"Error loading vectors: {e}", exc_info=True)
+                                bridge.logger.exception("Error loading vectors")
 
                     # Final summary
                     total_time = time.time() - start_time
@@ -1205,7 +1205,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
 
                 except Exception as e:
                     print(f"\n✗ Error during binary enumeration: {e}")
-                    bridge.logger.error(f"Error in enumerate-binary: {e}", exc_info=True)
+                    bridge.logger.exception("Error in enumerate-binary")
                     current_session_log.append(f"=== Error in enumerate-binary: {e} ===\\n")
 
                 continue
@@ -1258,7 +1258,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                         print("\nAI review returned an empty or whitespace-only response.")
                 except Exception as e:
                     print(f"Error during AI session review: {e}")
-                    bridge.logger.error(f"Error during AI session review: {e}", exc_info=True)
+                    bridge.logger.exception("Error during AI session review")
 
             elif user_input.lower() == "clear_log":
                 current_session_log.clear()
@@ -1280,7 +1280,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                         current_session_log.append(f"=== Attempted general query (not processed): '{user_input}' ===\\n")
 
                 except Exception as e:
-                    bridge.logger.error(f"Error processing query: {e}", exc_info=True)
+                    bridge.logger.exception("Error processing query")
                     print(f"\nError processing query: {type(e).__name__} - {e}\n")
                     current_session_log.append(f"=== Error processing query '{user_input}': {e} ===\\n")
 
@@ -1289,7 +1289,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
             break
         except Exception as e:  # Catch-all for other unexpected errors in the loop
             print(f"An unexpected error occurred in the interactive loop: {e}")
-            bridge.logger.error(f"Unexpected error in interactive loop: {e}", exc_info=True)
+            bridge.logger.exception("Unexpected error in interactive loop")
             # Optionally, decide if you want to break or continue
             # break
 

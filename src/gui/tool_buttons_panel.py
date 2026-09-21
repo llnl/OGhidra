@@ -108,7 +108,7 @@ class ToolButtonsPanel:
                 # Final stage update
                 self.workflow_diagram.set_current_stage(None)
 
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                 error_msg = f"Error running worker for '_run_ai_agent_query()': {e}"
                 logger.error(error_msg)
                 self.response_panel.add_response("Error", error_msg)
@@ -120,7 +120,7 @@ class ToolButtonsPanel:
                     # Trigger a final refresh to show all completed functions
                     try:
                         self.renamed_functions_panel._update_function_list()
-                    except Exception as refresh_error:
+                    except Exception as refresh_error:  # noqa: BLE001 intentional defensive recovery boundary
                         logger.warning(f"Error refreshing function list after batch operation: {refresh_error}")
 
                 self._set_tool_running(False)
@@ -142,7 +142,7 @@ class ToolButtonsPanel:
                     break
 
                 time.sleep(0.1)  # Check every 100ms
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                 logger.error(f"Error monitoring workflow stage: {e}")
                 break
 
@@ -232,7 +232,7 @@ class ToolButtonsPanel:
                                 # Get incoming xrefs (who references this string)
                                 try:
                                     xrefs = self.bridge.ghidra.get_xrefs_to(addr)
-                                except Exception as e:
+                                except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                                     xrefs = [f"Error getting xrefs_to({addr}): {e}"]
 
                                 # Normalise format to list of lines
@@ -260,7 +260,7 @@ class ToolButtonsPanel:
                                     try:
                                         code = self.bridge.ghidra.decompile_function_by_address(faddr)
                                         code_snippet = "\n".join(code.splitlines()[:60])  # cap lines
-                                    except Exception as e:
+                                    except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                                         code_snippet = f"Error decompiling {faddr}: {e}"
                                     extra_context += f"\n--- Decompiled caller {faddr} ---\n{code_snippet}\n"
 
@@ -276,7 +276,7 @@ class ToolButtonsPanel:
                             else:
                                 self.response_panel.add_response("Warning", "AI analysis returned empty response.")
 
-                        except Exception as e:
+                        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                             error_msg = f"Error during AI analysis: {e}"
                             logger.error(error_msg)
                             self.response_panel.add_response("Error", error_msg)
@@ -291,7 +291,7 @@ class ToolButtonsPanel:
                 # Final stage update
                 self.workflow_diagram.set_current_stage(None)
 
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                 error_msg = f"Error running {display_name}: {e}"
                 logger.error(error_msg)
                 self.response_panel.add_response("Error", error_msg)
@@ -340,7 +340,7 @@ class ToolButtonsPanel:
                         )
                         return
 
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                     self.response_panel.add_response("Error", f"Error getting current function: {e}")
                     return
 
@@ -540,7 +540,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                                         f"[WARN] No function summary extracted from AI response. Summary found: {function_summary is not None}",
                                     )
 
-                            except Exception as e:
+                            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                                 rename_result = f"Error: {e!s}"
 
                             if isinstance(rename_result, str) and rename_result.lower().startswith("error:"):
@@ -573,7 +573,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                                             new_name=suggested_name,
                                             summary=function_summary,
                                         )
-                                    except Exception as e:
+                                    except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                                         self.response_panel.add_response(
                                             "UI Warning", f"Could not update renamed functions panel: {e}"
                                         )
@@ -589,14 +589,14 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                     else:
                         self.response_panel.add_response("Error", "AI agent returned empty response for analysis")
 
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                     self.response_panel.add_response("Error", f"Error during AI analysis step: {e}")
                     return
 
                 # Final stage update
                 self.workflow_diagram.set_current_stage(None)
 
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                 error_msg = f"Error running {display_name}: {e}"
                 logger.error(error_msg)
                 self.response_panel.add_response("Error", error_msg)
@@ -713,9 +713,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
 
                 # FILTER 2: Skip import/export wrappers
                 if (
-                    function_name.startswith("__imp_")
-                    or function_name.startswith("__exp_")
-                    or function_name.startswith("_imp_")
+                    function_name.startswith(("__imp_", "__exp_", "_imp_"))
                 ):
                     result["result_type"] = "skipped"
                     result["success"] = True
@@ -781,7 +779,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                         result["success"] = True
                         return result
 
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                 result["error_msg"] = f"Error decompiling: {e}"
                 result["result_type"] = "failed"
                 return result
@@ -789,7 +787,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
             # STEP 1.5: Gather context
             try:
                 context = self._gather_function_context(function_name, address, max_chars=8000)
-            except Exception:
+            except Exception:  # noqa: BLE001 intentional defensive recovery boundary
                 context = {"callers_code": [], "callees_code": [], "truncated": False}
 
             # STEP 2: AI Analysis (with retry logic for LLM failures)
@@ -925,7 +923,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                                     result["result_type"] = "failed"
                                     return result
                                 result["result_type"] = "renamed"
-                            except Exception as e:
+                            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                                 result["error_msg"] = f"Exception during rename: {e}"
                                 result["result_type"] = "failed"
                                 return result
@@ -946,7 +944,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                                     result["result_type"] = "failed"
                                     return result
                                 result["result_type"] = "renamed"
-                            except Exception as e:
+                            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                                 result["error_msg"] = f"Exception during rename: {e}"
                                 result["result_type"] = "failed"
                                 return result
@@ -960,7 +958,9 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                     # ============ ENHANCED METADATA EXTRACTION ============
                     # Extract structured metadata from decompiled code
                     try:
-                        from src.function_metadata_extractor import FunctionMetadataExtractor
+                        from src.function_metadata_extractor import (
+                            FunctionMetadataExtractor,
+                        )
 
                         metadata_extractor = FunctionMetadataExtractor()
 
@@ -972,7 +972,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                         # Parse AI response into structured sections
                         structured_summary = self._parse_ai_response_sections(ai_response)
 
-                    except Exception as meta_error:
+                    except Exception as meta_error:  # noqa: BLE001 intentional defensive recovery boundary
                         logger.warning(f"Metadata extraction failed: {meta_error}")
                         # Fallback to minimal metadata
                         metadata = {
@@ -1045,7 +1045,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
             result["result_type"] = "failed"
             return result
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             result["error_msg"] = f"Exception processing function: {e}"
             result["result_type"] = "failed"
             return result
@@ -1094,7 +1094,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
 
                     time.sleep(0.01)  # 10ms delay for visual feedback
 
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                     logger.warning(f"Could not add function {func_data['old_name']} to RAG: {e}")
 
             # Check for stop signal during RAG processing
@@ -1118,7 +1118,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                 # Trigger memory panel refresh to show updated vector count
                 if hasattr(self.renamed_functions_panel.bridge, "_ui_memory_panel_refresh"):
                     self.renamed_functions_panel.bridge._ui_memory_panel_refresh()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                 logger.debug(f"Could not refresh memory panel: {e}")
 
         return rag_success_count
@@ -1160,7 +1160,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                 self._decompilation_cache[normalized_addr] = code
 
             return code
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             return f"Error: {e}"
 
     def _get_cache_stats(self) -> dict:
@@ -1231,10 +1231,10 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                                 if len(caller_code) > 1000:
                                     caller_code = caller_code[:1000] + "...[truncated]"
                                 context["callers_code"].append({"address": caller_addr, "code": caller_code})
-                        except Exception as e:
+                        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                             logger.warning(f"Failed to decompile the caller {caller_addr}: {e}")
                             # Skip if can't decompile caller
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                 logger.warning(f"Failed to get the callers to function {function_name} at {address}: {e}")
                 # Skip if can't get callers
 
@@ -1271,10 +1271,10 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                                 if len(callee_code) > 1000:
                                     callee_code = callee_code[:1000] + "...[truncated]"
                                 context["callees_code"].append({"address": callee_addr, "code": callee_code})
-                        except Exception as e:
+                        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                             logger.warning(f"Failed to decompile the callee {callee_addr}: {e}")
                             # Skip if can't decompile callee
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                 logger.warning(f"Failed to get the callee to function {function_name} at {address}: {e}")
                 # Skip if can't get callees
 
@@ -1297,7 +1297,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                 total_chars += sum(len(c["code"]) for c in context["callees_code"])
                 context["total_chars"] = total_chars
 
-        except Exception:
+        except Exception:  # noqa: BLE001, S110 intentional defensive recovery boundary
             # If any error, return empty context
             pass
 
@@ -1384,18 +1384,17 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                 elif current_section:
                     # Add to current section
                     # Extract bullet points for key operations
-                    if current_section == "function_analysis":
-                        if line_stripped.startswith(("- ", "* ", "• ", "1.", "2.", "3.")):
-                            clean_line = line_stripped.lstrip("-*•0123456789. ")
-                            if clean_line:
-                                sections["key_operations"].append(clean_line)
+                    if current_section == "function_analysis" and line_stripped.startswith(("- ", "* ", "• ", "1.", "2.", "3.")):
+                        clean_line = line_stripped.lstrip("-*•0123456789. ")
+                        if clean_line:
+                            sections["key_operations"].append(clean_line)
                     current_content.append(line)
 
             # Save final section
             if current_section and current_content:
                 sections[current_section] = "\n".join(current_content).strip()
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             logger.warning(f"Error parsing AI response sections: {e}")
 
         return sections
@@ -1644,7 +1643,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                                     )
                                 break
 
-                            i, full_function_string = future_to_function[future]
+                            _i, _full_function_string = future_to_function[future]
                             completed_count += 1
 
                             try:
@@ -1683,7 +1682,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                                                 new_name=result["suggested_name"],
                                                 summary=result["summary"],
                                             )
-                                        except Exception as e:
+                                        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                                             logger.warning(f"Could not update UI panel: {e}")
 
                                 elif result["result_type"] == "enumerated":
@@ -1703,7 +1702,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                                                 new_name=result["suggested_name"],
                                                 summary=result["summary"],
                                             )
-                                        except Exception as e:
+                                        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                                             logger.warning(f"Could not update UI panel: {e}")
 
                                 # Periodic progress updates (every 10 functions)
@@ -1723,7 +1722,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                                         + f"[ETA] {remaining} left, ETA {eta_str}",
                                     )
 
-                            except Exception as e:
+                            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                                 failed_renames += 1
                                 self.response_panel.add_response("Process Error", f"Exception processing function: {e}")
 
@@ -1773,7 +1772,9 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
 
                         # Initialize session manager if not exists
                         if not hasattr(self, "session_manager"):
-                            from src.enhanced_session_manager import EnhancedSessionManager
+                            from src.enhanced_session_manager import (
+                                EnhancedSessionManager,
+                            )
 
                             self.session_manager = EnhancedSessionManager()
 
@@ -1791,10 +1792,14 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
 
                         # Collect RAG vectors
                         rag_vectors = []
-                        if hasattr(self.bridge, "cag_manager") and self.bridge.cag_manager:
-                            if hasattr(self.bridge.cag_manager, "vector_store") and self.bridge.cag_manager.vector_store:
-                                if hasattr(self.bridge.cag_manager.vector_store, "documents"):
-                                    rag_vectors = self.bridge.cag_manager.vector_store.documents or []
+                        if (
+                            hasattr(self.bridge, "cag_manager")
+                            and self.bridge.cag_manager
+                            and hasattr(self.bridge.cag_manager, "vector_store")
+                            and self.bridge.cag_manager.vector_store
+                            and hasattr(self.bridge.cag_manager.vector_store, "documents")
+                        ):
+                            rag_vectors = self.bridge.cag_manager.vector_store.documents or []
 
                         # Save session with auto-generated name
                         auto_session_name = f"BulkRename_{enumeration_mode}_{int(time.time())}"
@@ -1837,7 +1842,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                                 "Auto-Save Warning", "Session save attempted but may have failed. Check logs for details."
                             )
 
-                    except Exception as save_error:
+                    except Exception as save_error:  # noqa: BLE001 intentional defensive recovery boundary
                         self.response_panel.add_response(
                             "Auto-Save Error",
                             f"Could not automatically save session: {save_error}\n"
@@ -1885,7 +1890,7 @@ Check the tab to see detailed analysis results and manage function information.
                     # Clear cache after operation completes
                     self._clear_decompilation_cache()
 
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                     error_msg = f"Error during bulk rename: {e}"
                     self.response_panel.add_response("Error", error_msg)
                     import traceback
@@ -1895,7 +1900,7 @@ Check the tab to see detailed analysis results and manage function information.
                 # Final stage update
                 self.workflow_diagram.set_current_stage(None)
 
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                 error_msg = f"Error running {display_name}: {e}"
                 logger.error(error_msg)
                 self.response_panel.add_response("Error", error_msg)
@@ -1951,7 +1956,7 @@ Check the tab to see detailed analysis results and manage function information.
                         )
                         return
 
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                     self.response_panel.add_response("Error", f"Error getting current function: {e}")
                     return
 
@@ -1969,7 +1974,7 @@ Check the tab to see detailed analysis results and manage function information.
                         f"Successfully decompiled {function_name} (length: {len(decompile_result)} chars)",
                     )
 
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                     self.response_panel.add_response("Error", f"Error decompiling function {function_name}: {e}")
                     return
 
@@ -2006,7 +2011,7 @@ Check the tab to see detailed analysis results and manage function information.
                             xrefs_from = xrefs_from if isinstance(xrefs_from, list) else [str(xrefs_from)]
                             xref_to_text = "\n".join(map(str, xrefs_to)) or "(none)"
                             xref_from_text = "\n".join(map(str, xrefs_from)) or "(none)"
-                    except Exception as _xe:
+                    except Exception as _xe:  # noqa: BLE001 intentional defensive recovery boundary
                         logger.debug(f"Could not fetch xrefs for {function_name}: {_xe}")
 
                     # Append cross-reference context (callers/callees)
@@ -2051,7 +2056,7 @@ Check the tab to see detailed analysis results and manage function information.
                     else:
                         self.response_panel.add_response("Warning", "AI analysis returned empty response.")
 
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                     error_msg = f"Error during AI analysis: {e}"
                     logger.error(error_msg)
                     self.response_panel.add_response("Error", error_msg)
@@ -2059,7 +2064,7 @@ Check the tab to see detailed analysis results and manage function information.
                 # Final stage update
                 self.workflow_diagram.set_current_stage(None)
 
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                 error_msg = f"Error running {display_name}: {e}"
                 logger.error(error_msg)
                 self.response_panel.add_response("Error", error_msg)
@@ -2341,14 +2346,14 @@ Do you want to proceed with generating the vulnerability report?"""
                                 with open(filename, "w", encoding="utf-8") as f:
                                     f.write(report_content)
                                 self.response_panel.add_response("File Saved", f"✅ Report saved to: {filename}")
-                            except Exception as e:
+                            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                                 self.response_panel.add_response("Save Error", f"❌ Error saving file: {e}")
 
                     # Only show full report in response panel for non-HTML formats
                     if report_format != "html":
                         self.response_panel.add_response("Full Report", report_content)
 
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                     error_msg = f"Error generating software report: {e}"
                     self.response_panel.add_response("Error", error_msg)
                     import traceback
@@ -2358,7 +2363,7 @@ Do you want to proceed with generating the vulnerability report?"""
                 # Final stage update
                 self.workflow_diagram.set_current_stage(None)
 
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                 error_msg = f"Error running {display_name}: {e}"
                 logger.error(error_msg)
                 self.response_panel.add_response("Error", error_msg)
@@ -2540,7 +2545,7 @@ Please provide:
                     try:
                         segments = self.bridge.ghidra.list_segments()
                         seg_info = "\n".join(f"  {s}" for s in segments[:8])
-                    except Exception as e:
+                    except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                         error_message = "  (Could not retrieve segment info)"
                         logger.warning(f"{error_message}: {e}")
                         seg_info = error_message
@@ -2561,7 +2566,7 @@ Please provide:
 
                 self.workflow_diagram.set_current_stage("complete")
 
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                 import traceback
 
                 self.response_panel.add_response("Error", f"Scan failed: {e!s}\n\n{traceback.format_exc()}")
