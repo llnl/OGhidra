@@ -712,9 +712,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                     return result
 
                 # FILTER 2: Skip import/export wrappers
-                if (
-                    function_name.startswith(("__imp_", "__exp_", "_imp_"))
-                ):
+                if function_name.startswith(("__imp_", "__exp_", "_imp_")):
                     result["result_type"] = "skipped"
                     result["success"] = True
                     return result
@@ -1384,7 +1382,9 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                 elif current_section:
                     # Add to current section
                     # Extract bullet points for key operations
-                    if current_section == "function_analysis" and line_stripped.startswith(("- ", "* ", "• ", "1.", "2.", "3.")):
+                    if current_section == "function_analysis" and line_stripped.startswith(
+                        ("- ", "* ", "• ", "1.", "2.", "3.")
+                    ):
                         clean_line = line_stripped.lstrip("-*•0123456789. ")
                         if clean_line:
                             sections["key_operations"].append(clean_line)

@@ -97,10 +97,14 @@ class MemoryInfoPanel:
             # Check for actual vector store data (only if not session loading)
             if hasattr(self.bridge, "memory_manager") and self.bridge.memory_manager:
                 mm = self.bridge.memory_manager
-                if hasattr(mm, "vector_store") and mm.vector_store and (
-                    hasattr(mm.vector_store, "vectors")
-                    and mm.vector_store.vectors is not None
-                    and hasattr(mm.vector_store.vectors, "shape")
+                if (
+                    hasattr(mm, "vector_store")
+                    and mm.vector_store
+                    and (
+                        hasattr(mm.vector_store, "vectors")
+                        and mm.vector_store.vectors is not None
+                        and hasattr(mm.vector_store.vectors, "shape")
+                    )
                 ):
                     vector_count = mm.vector_store.vectors.shape[0]
 

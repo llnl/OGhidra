@@ -484,7 +484,9 @@ class SessionMemory(BaseModel):
         """Add a message to the conversation history."""
         self.messages.append(ConversationMessage(role=role, content=content, metadata=metadata or {}))
 
-    def add_tool_execution(self, tool_name: str, parameters: dict[str, Any], result: str, success: bool, reasoning: str | None = None):
+    def add_tool_execution(
+        self, tool_name: str, parameters: dict[str, Any], result: str, success: bool, reasoning: str | None = None
+    ):
         """Record a tool execution."""
         self.tool_executions.append(
             ToolExecution(tool_name=tool_name, parameters=parameters, result=result, success=success, reasoning=reasoning)

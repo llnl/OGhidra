@@ -679,7 +679,9 @@ class CAGManager:
 
         return None
 
-    def enhance_prompt_with_memory_context(self, query: str, command_name: str | None = None, params: dict[str, Any] | None = None) -> str:
+    def enhance_prompt_with_memory_context(
+        self, query: str, command_name: str | None = None, params: dict[str, Any] | None = None
+    ) -> str:
         """
         Enhance a prompt with relevant memory context to prevent redundant operations.
 

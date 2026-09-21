@@ -342,7 +342,11 @@ class ExternalClient:
         model = self.model_map.get(phase) if phase else None
 
         # Defensive Check: Validate model against provider
-        if self.provider == "google" and model and not (model.lower().startswith("gemini") or model.lower().startswith("learnlm")):
+        if (
+            self.provider == "google"
+            and model
+            and not (model.lower().startswith("gemini") or model.lower().startswith("learnlm"))
+        ):
             self.logger.warning(f"Ignoring invalid model '{model}' for Google provider. Using default.")
             model = None
 

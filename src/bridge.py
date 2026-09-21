@@ -2601,9 +2601,7 @@ You can help analyze binary files by executing commands through GhidraMCP."""
 
                     # Check for same-name rename (useless operation)
                     if old_name == new_name:
-                        logger.warning(
-                            f"Detected same-name rename: '{old_name}' -> '{new_name}'. This is a useless operation."
-                        )
+                        logger.warning(f"Detected same-name rename: '{old_name}' -> '{new_name}'. This is a useless operation.")
                         same_name_guidance = f"""
                         ATTENTION: You're trying to rename '{old_name}' to '{new_name}' - this is the SAME NAME!
 
@@ -5042,20 +5040,20 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
                         analysis_content = analysis_content.replace(item, "")
                 # Only add if it contains relevant technical terms
                 if analysis_content.strip() and any(
-                        term in analysis_content.lower()
-                        for term in [
-                            "function",
-                            "address",
-                            "import",
-                            "export",
-                            "binary",
-                            "assembly",
-                            "code",
-                            "decompile",
-                            "call",
-                            "pointer",
-                            "struct",
-                        ]
+                    term in analysis_content.lower()
+                    for term in [
+                        "function",
+                        "address",
+                        "import",
+                        "export",
+                        "binary",
+                        "assembly",
+                        "code",
+                        "decompile",
+                        "call",
+                        "pointer",
+                        "struct",
+                    ]
                 ):
                     report_sections["analysis"].append(analysis_content.strip())
 

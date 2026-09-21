@@ -306,9 +306,7 @@ class EnhancedSessionManager:
                                 # Handle both timestamp and ISO format
                                 try:
                                     if isinstance(created_at, str):
-                                        created_timestamp = datetime.fromisoformat(
-                                            created_at
-                                        ).timestamp()
+                                        created_timestamp = datetime.fromisoformat(created_at).timestamp()
                                     else:
                                         created_timestamp = created_at or 0
                                 except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
@@ -317,9 +315,7 @@ class EnhancedSessionManager:
 
                                 try:
                                     if isinstance(last_modified, str):
-                                        modified_timestamp = datetime.fromisoformat(
-                                            last_modified
-                                        ).timestamp()
+                                        modified_timestamp = datetime.fromisoformat(last_modified).timestamp()
                                     else:
                                         modified_timestamp = last_modified or 0
                                 except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary

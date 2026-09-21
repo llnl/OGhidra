@@ -338,13 +338,13 @@ class OGhidraUI:
                 ):
                     embeddings = self.bridge.cag_manager.vector_store.embeddings
                     if embeddings is not None:
-                                # Handle numpy arrays properly
-                                try:
-                                    rag_count = len(embeddings)
-                                except (TypeError, ValueError):
-                                    # Handle case where embeddings might be a numpy array
-                                    if hasattr(embeddings, "shape"):
-                                        rag_count = embeddings.shape[0] if len(embeddings.shape) > 0 else 0
+                        # Handle numpy arrays properly
+                        try:
+                            rag_count = len(embeddings)
+                        except (TypeError, ValueError):
+                            # Handle case where embeddings might be a numpy array
+                            if hasattr(embeddings, "shape"):
+                                rag_count = embeddings.shape[0] if len(embeddings.shape) > 0 else 0
                 else:
                     rag_count = 0
             except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
@@ -392,8 +392,10 @@ class OGhidraUI:
                                 }
 
                         # Also try to get data from the renamed functions panel
-                        if hasattr(self, "renamed_functions_panel") and self.renamed_functions_panel and hasattr(
-                            self.renamed_functions_panel, "function_summaries"
+                        if (
+                            hasattr(self, "renamed_functions_panel")
+                            and self.renamed_functions_panel
+                            and hasattr(self.renamed_functions_panel, "function_summaries")
                         ):
                             for key, summary in self.renamed_functions_panel.function_summaries.items():
                                 if key not in analyzed_functions:

@@ -68,7 +68,10 @@ class FunctionMetadataExtractor:
         r"\b(bounds|range|limit|max|min)\b",
     ]
 
-    REGISTRY_PATTERNS: ClassVar[list[str]] = [r"\b(Reg(OpenKey|QueryValue|SetValue|CreateKey|DeleteKey|CloseKey))\b", r"\b(HKEY_|registry)\b"]
+    REGISTRY_PATTERNS: ClassVar[list[str]] = [
+        r"\b(Reg(OpenKey|QueryValue|SetValue|CreateKey|DeleteKey|CloseKey))\b",
+        r"\b(HKEY_|registry)\b",
+    ]
 
     PROCESS_PATTERNS: ClassVar[list[str]] = [
         r"\b(CreateProcess|OpenProcess|TerminateProcess|process)\b",
