@@ -5,11 +5,12 @@ This module provides a client interface for the GhidraMCP API.
 It implements the functions defined in the function_signatures.json file.
 """
 
-import requests
+import json
 import logging
 import os
-import json
-from typing import Dict, List, Optional, Any, Union
+from typing import Any
+
+import requests
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -33,7 +34,7 @@ class GhidraMCPClient:
         self.config = config
         self.function_signatures = self._load_function_signatures()
 
-    def _load_function_signatures(self) -> Dict[str, Any]:
+    def _load_function_signatures(self) -> dict[str, Any]:
         """
         Load function signatures from JSON file.
 
@@ -48,7 +49,7 @@ class GhidraMCPClient:
             logger.error(f"Error loading function signatures: {e}")
             return {}
 
-    def _get_request(self, endpoint: str, params: Optional[Dict[str, Any]] = None) -> requests.Response:
+    def _get_request(self, endpoint: str, params: dict[str, Any] | None = None) -> requests.Response:
         """
         Make a GET request to the API.
 
@@ -64,7 +65,7 @@ class GhidraMCPClient:
         response.raise_for_status()
         return response
 
-    def _post_request(self, endpoint: str, data: Dict[str, Any]) -> requests.Response:
+    def _post_request(self, endpoint: str, data: dict[str, Any]) -> requests.Response:
         """
         Make a POST request to the API.
 
@@ -106,7 +107,7 @@ class GhidraMCPClient:
 
         return identifier
 
-    def list_functions(self) -> List[str]:
+    def list_functions(self) -> list[str]:
         """
         Lists all functions in the currently loaded program.
 
@@ -203,7 +204,7 @@ class GhidraMCPClient:
             logger.error(f"Error renaming function at address {function_address} to {new_name}: {e}")
             return f"Error: {e}"
 
-    def list_imports(self, offset: int = 0, limit: int = 100) -> List[str]:
+    def list_imports(self, offset: int = 0, limit: int = 100) -> list[str]:
         """
         Lists imported symbols in the program with pagination.
 
@@ -227,7 +228,7 @@ class GhidraMCPClient:
             logger.error(f"Error listing imports: {e}")
             return []
 
-    def list_exports(self, offset: int = 0, limit: int = 100) -> List[str]:
+    def list_exports(self, offset: int = 0, limit: int = 100) -> list[str]:
         """
         Lists exported functions/symbols in the program with pagination.
 
@@ -252,7 +253,7 @@ class GhidraMCPClient:
     # Xref & String-search support (new GhidraMCP endpoints)
     # ------------------------------------------------------------------
 
-    def get_xrefs_to(self, address: str, offset: int = 0, limit: int = 100) -> Union[List[Any], str]:
+    def get_xrefs_to(self, address: str, offset: int = 0, limit: int = 100) -> list[Any] | str:
         """Get all cross-references *to* the specified address.
 
         Args:
@@ -274,7 +275,7 @@ class GhidraMCPClient:
             logger.error(f"Error getting xrefs_to for {address}: {e}")
             return []
 
-    def get_xrefs_from(self, address: str, offset: int = 0, limit: int = 100) -> Union[List[Any], str]:
+    def get_xrefs_from(self, address: str, offset: int = 0, limit: int = 100) -> list[Any] | str:
         """Get all cross-references *from* the specified address."""
         try:
             norm_addr = self._normalize_addr(address)
@@ -287,7 +288,7 @@ class GhidraMCPClient:
             logger.error(f"Error getting xrefs_from for {address}: {e}")
             return []
 
-    def get_function_xrefs(self, name: str, offset: int = 0, limit: int = 100) -> Union[List[Any], str]:
+    def get_function_xrefs(self, name: str, offset: int = 0, limit: int = 100) -> list[Any] | str:
         """Get cross-references to a function by name."""
         try:
             # If the caller accidentally passed an address, normalise it and
@@ -305,7 +306,7 @@ class GhidraMCPClient:
             logger.error(f"Error getting function_xrefs for {name}: {e}")
             return []
 
-    def list_strings(self, offset: int = 0, limit: int = 2000, filter: Optional[str] = None) -> Union[List[Any], str]:
+    def list_strings(self, offset: int = 0, limit: int = 2000, filter: str | None = None) -> list[Any] | str:
         """List program strings (with optional filter text).
 
         Args:
@@ -326,7 +327,7 @@ class GhidraMCPClient:
             logger.error(f"Error listing strings: {e}")
             return []
 
-    def list_segments(self, offset: int = 0, limit: int = 100) -> List[str]:
+    def list_segments(self, offset: int = 0, limit: int = 100) -> list[str]:
         """
         Lists all memory segments in the program with pagination.
 
@@ -351,7 +352,7 @@ class GhidraMCPClient:
             logger.error(f"Error listing segments: {e}")
             return []
 
-    def search_functions_by_name(self, query: str, offset: int = 0, limit: int = 100) -> List[str]:
+    def search_functions_by_name(self, query: str, offset: int = 0, limit: int = 100) -> list[str]:
         """
         Searches for functions by name substring.
 
@@ -437,7 +438,7 @@ class GhidraMCPClient:
             logger.error(f"Error getting bytes at address {address}: {e}")
             return f"Error: {e}"
 
-    def get_labels(self) -> List[str]:
+    def get_labels(self) -> list[str]:
         """
         Gets all labels in the program.
 

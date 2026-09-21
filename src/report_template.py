@@ -5,10 +5,10 @@ This module provides the CSS styles and HTML template structure for generating
 styled vulnerability analysis reports. Based on the WiseDiskCleaner report template.
 """
 
-from dataclasses import dataclass, field
-from typing import List, Dict, Any
-from datetime import datetime
 import html
+from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Any
 
 # ============================================================================
 # DATA STRUCTURES
@@ -1047,7 +1047,7 @@ def _get_severity_icon(severity: str) -> str:
     return icons.get(severity.upper(), "[INFO]")
 
 
-def generate_html_report(sections: List[ReportSection], metadata: ReportMetadata) -> str:
+def generate_html_report(sections: list[ReportSection], metadata: ReportMetadata) -> str:
     """
     Generate a complete HTML report from sections and metadata.
 
@@ -1147,7 +1147,7 @@ def _render_section(section: ReportSection) -> str:
 # ============================================================================
 
 
-def build_stats_grid(stats: List[Dict[str, Any]]) -> str:
+def build_stats_grid(stats: list[dict[str, Any]]) -> str:
     """
     Build a statistics grid from a list of stat items.
 
@@ -1169,7 +1169,7 @@ def build_stats_grid(stats: List[Dict[str, Any]]) -> str:
     return f'<div class="stats-grid">{cards}</div>'
 
 
-def build_attack_vectors(vectors: List[Dict[str, Any]]) -> str:
+def build_attack_vectors(vectors: list[dict[str, Any]]) -> str:
     """
     Build attack vector cards.
 
@@ -1196,7 +1196,7 @@ def build_attack_vectors(vectors: List[Dict[str, Any]]) -> str:
     return f'<div class="attack-vectors">{cards}</div>'
 
 
-def build_timeline(items: List[Dict[str, Any]]) -> str:
+def build_timeline(items: list[dict[str, Any]]) -> str:
     """
     Build a timeline of investigation steps.
 
@@ -1223,7 +1223,7 @@ def build_timeline(items: List[Dict[str, Any]]) -> str:
     return f'<div class="timeline">{timeline_html}</div>'
 
 
-def build_key_findings(findings: List[Dict[str, Any]]) -> str:
+def build_key_findings(findings: list[dict[str, Any]]) -> str:
     """
     Build key findings cards with severity indicators.
 
@@ -1279,7 +1279,7 @@ def build_risk_meter(score: float, label: str = "Risk Score") -> str:
     """
 
 
-def build_security_imports(imports: List[Dict[str, Any]]) -> str:
+def build_security_imports(imports: list[dict[str, Any]]) -> str:
     """
     Build a styled security imports table.
 
@@ -1318,7 +1318,7 @@ def build_security_imports(imports: List[Dict[str, Any]]) -> str:
     """
 
 
-def build_table(headers: List[str], rows: List[List[str]], address_columns: List[int] = None) -> str:
+def build_table(headers: list[str], rows: list[list[str]], address_columns: list[int] = None) -> str:
     """
     Build an HTML table.
 
@@ -1352,7 +1352,7 @@ def build_table(headers: List[str], rows: List[List[str]], address_columns: List
     """
 
 
-def build_flow_diagram(nodes: List[Dict[str, Any]], layout: str = "linear") -> str:
+def build_flow_diagram(nodes: list[dict[str, Any]], layout: str = "linear") -> str:
     """
     Build a CSS flow diagram.
 
@@ -1382,7 +1382,7 @@ def build_flow_diagram(nodes: List[Dict[str, Any]], layout: str = "linear") -> s
         )
 
 
-def build_vulnerability_discovery(discoveries: List[Dict[str, Any]]) -> str:
+def build_vulnerability_discovery(discoveries: list[dict[str, Any]]) -> str:
     """
     Build vulnerability discovery accordion cards.
 

@@ -11,8 +11,8 @@ Date: 2026-02-19
 """
 
 import logging
-from typing import Dict, List, Set, Optional, Any, Tuple
 from collections import defaultdict, deque
+from typing import Any
 
 logger = logging.getLogger("ollama-ghidra-bridge.function_graph")
 
@@ -20,19 +20,19 @@ logger = logging.getLogger("ollama-ghidra-bridge.function_graph")
 class FunctionNode:
     """Represents a function node in the call graph."""
 
-    def __init__(self, address: str, name: str, metadata: Dict[str, Any]):
+    def __init__(self, address: str, name: str, metadata: dict[str, Any]):
         self.address = address
         self.name = name
         self.metadata = metadata
 
         # Graph properties
-        self.callers: Set[str] = set()  # Addresses of functions that call this
-        self.callees: Set[str] = set()  # Addresses of functions this calls
+        self.callers: set[str] = set()  # Addresses of functions that call this
+        self.callees: set[str] = set()  # Addresses of functions this calls
 
         # Computed properties (cached)
-        self._centrality: Optional[float] = None
-        self._depth: Optional[int] = None
-        self._cluster: Optional[str] = None
+        self._centrality: float | None = None
+        self._depth: int | None = None
+        self._cluster: str | None = None
 
     @property
     def domain(self) -> str:
@@ -47,7 +47,7 @@ class FunctionNode:
         return security.get("criticality", "low")
 
     @property
-    def operations(self) -> List[str]:
+    def operations(self) -> list[str]:
         """Get list of operations this function performs."""
         categories = self.metadata.get("categories", {})
         return categories.get("operations", [])
@@ -69,13 +69,13 @@ class FunctionGraph:
     """
 
     def __init__(self):
-        self.nodes: Dict[str, FunctionNode] = {}  # address -> node
-        self.clusters: Dict[str, List[str]] = defaultdict(list)  # domain -> [addresses]
-        self._centrality_cache: Dict[str, float] = {}
+        self.nodes: dict[str, FunctionNode] = {}  # address -> node
+        self.clusters: dict[str, list[str]] = defaultdict(list)  # domain -> [addresses]
+        self._centrality_cache: dict[str, float] = {}
 
         self.logger = logger
 
-    def add_function(self, address: str, name: str, metadata: Dict[str, Any]) -> None:
+    def add_function(self, address: str, name: str, metadata: dict[str, Any]) -> None:
         """
         Add a function to the graph.
 
@@ -127,13 +127,13 @@ class FunctionGraph:
         # Invalidate centrality cache
         self._centrality_cache.clear()
 
-    def get_node(self, address: str) -> Optional[FunctionNode]:
+    def get_node(self, address: str) -> FunctionNode | None:
         """Get a function node by address."""
         return self.nodes.get(address)
 
     def get_related_functions(
         self, address: str, depth: int = 1, include_callers: bool = True, include_callees: bool = True
-    ) -> List[str]:
+    ) -> list[str]:
         """
         Get functions related to the given function.
 
@@ -181,7 +181,7 @@ class FunctionGraph:
 
         return list(related)
 
-    def get_domain_functions(self, domain: str, limit: int = 20) -> List[str]:
+    def get_domain_functions(self, domain: str, limit: int = 20) -> list[str]:
         """
         Get functions in a specific domain.
 
@@ -194,7 +194,7 @@ class FunctionGraph:
         """
         return self.clusters.get(domain, [])[:limit]
 
-    def get_all_domains(self) -> List[Tuple[str, int]]:
+    def get_all_domains(self) -> list[tuple[str, int]]:
         """
         Get all domains with their function counts.
 
@@ -240,7 +240,7 @@ class FunctionGraph:
         self._centrality_cache[address] = centrality
         return centrality
 
-    def get_high_centrality_functions(self, top_k: int = 10) -> List[Tuple[str, float]]:
+    def get_high_centrality_functions(self, top_k: int = 10) -> list[tuple[str, float]]:
         """
         Get functions with highest centrality (most important/connected).
 
@@ -254,7 +254,7 @@ class FunctionGraph:
         centralities.sort(key=lambda x: x[1], reverse=True)
         return centralities[:top_k]
 
-    def expand_context_for_rag(self, primary_results: List[str], expansion_depth: int = 1, max_expanded: int = 10) -> List[str]:
+    def expand_context_for_rag(self, primary_results: list[str], expansion_depth: int = 1, max_expanded: int = 10) -> list[str]:
         """
         Expand RAG search results with graph neighbors for better context.
 
@@ -292,7 +292,7 @@ class FunctionGraph:
 
     def find_execution_paths(
         self, from_address: str, to_address: str, max_depth: int = 5, max_paths: int = 5
-    ) -> List[List[str]]:
+    ) -> list[list[str]]:
         """
         Find execution paths between two functions.
 
@@ -307,7 +307,7 @@ class FunctionGraph:
         """
         paths = []
 
-        def dfs(current: str, target: str, path: List[str], depth: int):
+        def dfs(current: str, target: str, path: list[str], depth: int):
             if len(paths) >= max_paths or depth > max_depth:
                 return
 
@@ -331,7 +331,7 @@ class FunctionGraph:
 
         return paths
 
-    def get_entry_points(self, top_k: int = 10) -> List[str]:
+    def get_entry_points(self, top_k: int = 10) -> list[str]:
         """
         Find likely entry point functions (high out-degree, low in-degree).
 
@@ -355,7 +355,7 @@ class FunctionGraph:
         entry_points.sort(key=lambda x: x[1], reverse=True)
         return [addr for addr, _ in entry_points[:top_k]]
 
-    def get_leaf_functions(self, top_k: int = 10) -> List[str]:
+    def get_leaf_functions(self, top_k: int = 10) -> list[str]:
         """
         Find leaf functions (called by many, call few/none).
 
@@ -379,7 +379,7 @@ class FunctionGraph:
         leaves.sort(key=lambda x: x[1], reverse=True)
         return [addr for addr, _ in leaves[:top_k]]
 
-    def get_statistics(self) -> Dict[str, Any]:
+    def get_statistics(self) -> dict[str, Any]:
         """Get graph statistics."""
         total_nodes = len(self.nodes)
         total_edges = sum(len(node.callees) for node in self.nodes.values())
