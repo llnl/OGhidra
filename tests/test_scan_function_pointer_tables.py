@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Test script for the scan_function_pointer_tables smart tool.
 

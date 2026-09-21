@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 GhidraMCP API Client
 This module provides a client interface for the GhidraMCP API.

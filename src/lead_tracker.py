@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Lead Tracker — Prioritized Investigation Queue
 -----------------------------------------------

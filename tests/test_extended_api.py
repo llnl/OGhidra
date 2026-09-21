@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Test script for the GhidraMCP API to verify the communication endpoints
 used by our AI agent. This script is focused on understanding which endpoints

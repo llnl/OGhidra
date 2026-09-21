@@ -344,7 +344,7 @@ class ServerConfigDialog:
                         else:
                             results.append(f"Custom API: [ERROR] HTTP {response.status_code}")
                             results.append(f"Error: {health_error_detail(response)}")
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                     results.append(f"Custom API: [ERROR] {e!s}")
             else:
                 # Test Ollama

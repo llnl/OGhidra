@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Embedding similarity sweep for a saved analysis session.
 
 This is a lightweight, throwaway-friendly utility placed under tests/.

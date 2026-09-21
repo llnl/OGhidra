@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Debug script to investigate why no function pointer tables are found."""
 
 import base64

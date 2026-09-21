@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Comprehensive test script for verifying all GhidraMCP tool call capabilities.
 This script directly tests the methods available in GhidraMCPClient that our AI agent uses to interact with Ghidra.
