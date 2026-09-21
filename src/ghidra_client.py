@@ -1768,9 +1768,7 @@ class PyGhidraClient(AbstractGhidraClient):
             self._program.getFunctionManager()
             self._ensure_decompiler()
             return True
-        except (
-            Exception
-        ) as exc:  # pragma: no cover - environment-specific  # noqa: BLE001 intentional defensive recovery boundary
+        except Exception as exc:  # noqa: BLE001 - environment-specific pyGhidra health-check boundary
             logger.error("pyGhidra health_check failed: %s", exc)
             return False
 

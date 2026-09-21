@@ -45,9 +45,7 @@ def install(root, interval_ms: int = 30):
                 break
             try:
                 fn()
-            except (
-                Exception
-            ):  # never let one bad callback kill the pump  # noqa: BLE001, S110 intentional defensive recovery boundary
+            except Exception:  # noqa: BLE001, S110 - never let one bad callback kill the UI pump
                 pass
         try:
             root.after(interval_ms, _pump)
