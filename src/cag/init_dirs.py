@@ -39,6 +39,8 @@ def ensure_cag_directories():
                 logger.info(f"Copied default knowledge file: {filename}")
             except OSError as e:
                 logger.error(f"Error copying {filename}: {e!s}")
+            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
+                logger.warning(f"Error copying: {e}")
 
 
 if __name__ == "__main__":
