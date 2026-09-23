@@ -25,6 +25,8 @@ OGhidra enhances Ghidra with AI capabilities, allowing you to:
 - **Malware Detection** - Automatic pattern matching for 12+ evasion and injection techniques
 - **Smart Enumeration** - Build queryable knowledge graphs from binary analysis
 - **Multi-Instance Analysis** - Run multiple Ghidra instances for parallel analysis
+- **DSPy Agent Programs** - Typed, optimizable planning, tool-selection, analysis, and evaluation modules
+- **Analysis Plugins** - Extend phase lifecycles, function ordering, and whole-program RAG indexing
 
 ### How It Works
 
@@ -34,7 +36,7 @@ graph TD
     B --> C{Execution Phase}
     C -- Tool Calls --> D[Ghidra/LLM]
     D --> C
-    C --> E[Review Phase]
+    C --> E[Goal Evaluation]
     E -- Agentic Loop --> B
     E --> F[Final Response]
 
@@ -42,7 +44,7 @@ graph TD
     style B fill:#bbf,stroke:#333,stroke-width:2px
 ```
 
-**Agentic Loop**: OGhidra uses an adaptive planning system. After each execution cycle, results are reviewed and the AI can choose to gather more information or refine its analysis before providing the final response.
+**Agentic Loop**: OGhidra's DSPy program composes typed planning, execution-decision, evidence-analysis, and goal-evaluation signatures. After each execution cycle, results are reviewed and the agent can gather more information or refine its analysis before providing the final response.
 
 ---
 
@@ -441,6 +443,8 @@ Benefits:
 - Find similar functions semantically
 - Reduce redundant LLM calls
 
+Bulk function analysis runs a built-in `FunctionRAGPlugin` after all function workers finish. Additional plugins can change function traversal order or insert phases throughout the query lifecycle. See [DSPy agent and plugin development](docs/dspy-agent-and-plugins.md).
+
 
 ### Context Optimization
 
@@ -520,9 +524,10 @@ COMPACTION_THRESHOLD=0.75
                          │
                          ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                   Bridge (src/bridge.py)                    │
+│              DSPy Agent + Bridge (src/agent, bridge.py)     │
 │  ┌────────────────────────────────────────────────────────┐ │
-│  │ • Agentic Loop: Plan → Execute → Review → Replan       │ │
+│  │ • DSPy Modules: Plan → Execute → Analyze → Evaluate    │ │
+│  │ • Plugin Hooks: query, phase, and function lifecycles  │ │
 │  │ • Tool Router: Ghidra client, LLM client, CAG manager  │ │
 │  │ • Context Manager: Budget allocation, compression      │ │
 │  └────────────────────────────────────────────────────────┘ │
@@ -559,6 +564,7 @@ We welcome contributions! Areas of interest:
 - **LLM provider integrations**
 - **UI/UX improvements**
 - **Performance optimizations**
+- **Analysis plugins and DSPy optimizers**
 - **Documentation** and examples
 
 See [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for community guidelines.

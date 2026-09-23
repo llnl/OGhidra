@@ -11,11 +11,10 @@ import json
 import logging
 import sys
 import os
-import re  # Added for pattern matching in enhanced error feedback
-from typing import Dict, Any, List, Optional, Tuple
-import threading
+import re
+from typing import Dict, Any, Iterable, List, Mapping, Optional, Sequence, Tuple
 
-from src.config import BridgeConfig
+from src.config import DEFAULT_SYSTEM_PROMPT, BridgeConfig
 from src.ollama_client import OllamaClient
 from src.external_client import ExternalClient
 from src.custom_api_client import CustomAPIClient
@@ -32,12 +31,14 @@ from src.models.memory import (
     ExecutionGate,
 )
 from src.execution_gate import ExecutionGatekeeper
-from src.user_question import QuestionHandler
+from src.user_question import UserQuestion
 from src.session_compactor import SessionCompactor
 from src.context_manager import ContextManager
 from src.analysis_dump import AnalysisDumper
 from src.coverage_tracker import CoverageTracker
 from src.lead_tracker import LeadTracker
+from src.agent.plugins import AnalysisPlugin, FunctionRAGPlugin, PluginContext, PluginHook, PluginManager
+from src.agent.program import DSPyCompletionClient, OGhidraAgent, OGhidraDSPyProgram
 from datetime import datetime
 
 
@@ -80,21 +81,18 @@ def select_ghidra_client_class(
 class Bridge:
     """Main bridge class that connects Ollama with GhidraMCP."""
 
-    # Class-level singleton for SentenceTransformer model
-    _sentence_transformer_model = None
-    _model_load_lock = None
     _ollama_client = None
 
     def __init__(
-        self, config: BridgeConfig, include_capabilities: bool = False, max_agent_steps: int = 5, enable_cag: bool = True
+        self,
+        config: BridgeConfig,
+        include_capabilities: bool = False,
+        enable_cag: bool = True,
+        plugins: Optional[Iterable[AnalysisPlugin]] = None,
     ):
         """Initialize the bridge with configuration."""
         self.config = config
         self.logger = logging.getLogger("ollama-ghidra-bridge")
-
-        # Initialize threading lock for model loading
-        if Bridge._model_load_lock is None:
-            Bridge._model_load_lock = threading.Lock()
 
         # Select LLM Provider and Config
         self.provider = getattr(config, "llm_provider", "ollama")
@@ -116,8 +114,20 @@ class Bridge:
             self.ollama = OllamaClient(config=self.llm_config)
             self.logger.info("Using Ollama as LLM provider")
 
-        # Initialize clients
-        # Note: self.ollama is used as the generic LLM client name to avoid massive refactoring
+        # DSPy owns all language-model reasoning. The provider client is kept
+        # underneath the adapter for embeddings, health checks, and existing
+        # authentication/retry behavior.
+        self.raw_llm_client = self.ollama
+        self.dspy_program = OGhidraDSPyProgram(self.raw_llm_client)
+        self.ollama = DSPyCompletionClient(self.raw_llm_client, self.dspy_program)
+
+        # Extension lifecycle. Installed packages may contribute plugins via
+        # the ``oghidra.plugins`` entry-point group.
+        self.plugin_manager = PluginManager(plugins=plugins, logger=self.logger)
+        if not any(plugin.name == FunctionRAGPlugin.name for plugin in self.plugin_manager.plugins):
+            self.plugin_manager.register(FunctionRAGPlugin())
+        self.plugin_manager.discover()
+        self._active_plugin_context = None
 
         # Select Ghidra backend class based on configuration. Default is HTTP
         # GhidraMCP server; "pyghidra" uses an in-process pyGhidra client.
@@ -135,9 +145,6 @@ class Bridge:
         # Session memory (Pydantic-based structured storage)
         session_id = f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         self.session = SessionMemory(session_id=session_id)
-
-        # Legacy context support (for backward compatibility during transition)
-        self.context = []  # Will be deprecated in favor of self.session
 
         # Tool capabilities
         self.include_capabilities = include_capabilities
@@ -196,9 +203,8 @@ class Bridge:
                 self.logger.warning(f"CAG dependencies not available: {e}. Running without CAG.")
                 self.enable_cag = False
 
-        # Analysis state tracking (legacy dict - now points to session's Pydantic model)
-        # The actual state is stored in self.session.analysis_state (AnalysisState model)
-        # This dict is maintained for backward compatibility
+        # Mutable compatibility view used by the existing GUI panels. Values
+        # point at the structured session's collections.
         self.analysis_state = {
             "functions_decompiled": self.session.analysis_state.functions_decompiled,
             "functions_renamed": self.session.analysis_state.functions_renamed,
@@ -226,16 +232,12 @@ class Bridge:
         # Initialize caches and statistics
         self._init_caches()
 
-        # Agentic workflow settings
-        self.max_goal_steps = max_agent_steps
-        self.goal_steps_taken = 0
+        # Agent workflow state
         self.current_goal = None
         self.goal_achieved = False
         self.current_plan = ""
-        self.current_plan_tools = []
         self.executed_tools = set()  # Track (cmd_name:params_signature) to avoid duplicates
         self.step_result_map = {}  # Map cmd_signature -> (loop_step_id, result_excerpt)
-        self.tool_repetition_limit = 999  # TEMPORARILY DISABLED - was causing cache misses (original: 2)
         self.current_loop_number = 1  # Track current agentic loop/cycle number
 
         # Workflow stage tracking for UI integration
@@ -272,9 +274,6 @@ class Bridge:
         except Exception:
             pass
 
-        # Partial outputs storage
-        self.partial_outputs = []
-
         # UI callback for chain of thought updates (set by UI if present)
         self._ui_cot_callback = None
 
@@ -282,9 +281,7 @@ class Bridge:
         self.execution_gate = ExecutionGatekeeper(self.llm_config)
         self._ui_gate_callback = None  # Set by UI for gate events
 
-        # Question Tool - AI asks user mid-investigation (OpenCode-inspired)
-        self.question_handler = QuestionHandler()
-        self._ui_question_callback = None  # Set by UI for question display
+        self._ui_question_callback = None  # Set by UI for typed DSPy questions
 
         # Session Compactor - Smart context pruning (OpenCode-inspired)
         self.session_compactor = SessionCompactor(self.llm_config, self.ollama)
@@ -296,6 +293,10 @@ class Bridge:
         self.lead_tracker = LeadTracker()
 
         self.logger.info("Bridge initialized successfully")
+
+        # The public query entry point is a DSPy module; bounded Python control
+        # flow remains explicit and inspectable inside the module.
+        self.agent = OGhidraAgent(self, self.plugin_manager)
 
     def reload_llm_client(self):
         """Re-initializes the LLM client based on current configuration."""
@@ -320,6 +321,10 @@ class Bridge:
             self.llm_config = self.config.ollama
             self.ollama = OllamaClient(config=self.llm_config)
 
+        self.raw_llm_client = self.ollama
+        self.dspy_program = OGhidraDSPyProgram(self.raw_llm_client)
+        self.ollama = DSPyCompletionClient(self.raw_llm_client, self.dspy_program)
+
         # Update dependencies
         if hasattr(self, "ghidra_client"):
             self.ghidra_client.ollama_client = self.ollama
@@ -332,6 +337,46 @@ class Bridge:
 
         Bridge.set_ollama_client(self.ollama)
         print(f"[Bridge] Client reloaded. Provider: {self.provider}")
+
+    def register_plugin(self, plugin: AnalysisPlugin) -> AnalysisPlugin:
+        """Register a plugin for this Bridge instance."""
+        return self.plugin_manager.register(plugin)
+
+    def _run_plugin_hook(self, hook: PluginHook, **updates: Any) -> PluginContext:
+        context = self._active_plugin_context or PluginContext(bridge=self, query=self.current_goal or "")
+        for key, value in updates.items():
+            if hasattr(context, key):
+                setattr(context, key, value)
+            else:
+                context.data[key] = value
+        return self.plugin_manager.run(hook, context)
+
+    def prepare_functions_for_analysis(
+        self, functions: Sequence[Any], metadata: Optional[Mapping[str, Any]] = None
+    ) -> list[Any]:
+        """Run pre-analysis phases and plugin-defined function ordering."""
+        context = PluginContext(
+            bridge=self,
+            query=self.current_goal or "bulk function analysis",
+            functions=list(functions),
+            data=dict(metadata or {}),
+        )
+        self.plugin_manager.run(PluginHook.BEFORE_FUNCTION_ANALYSIS, context)
+        return self.plugin_manager.order_functions(context.functions, context)
+
+    def finalize_function_analysis(
+        self,
+        function_results: Sequence[Mapping[str, Any]],
+        metadata: Optional[Mapping[str, Any]] = None,
+    ) -> PluginContext:
+        """Run post-analysis phases such as whole-program RAG construction."""
+        context = PluginContext(
+            bridge=self,
+            query=self.current_goal or "bulk function analysis",
+            function_results=list(function_results),
+            data=dict(metadata or {}),
+        )
+        return self.plugin_manager.run(PluginHook.AFTER_FUNCTION_ANALYSIS, context)
 
     def set_task_mode(self, enabled: bool, mode: str = "off") -> None:
         """Set task mode and persist it."""
@@ -477,77 +522,7 @@ class Bridge:
         except Exception:
             return
 
-    def _should_analyze_findings(self, tools_executed: int) -> bool:
-        """
-        Check if we should pause for analysis checkpoint.
 
-        Forces analysis after every 3 tool executions to prevent the AI from
-        drowning in data without reflection. This implements a key lesson from
-        the ninja trojan investigation failure.
-
-        Args:
-            tools_executed: Number of tools executed in current loop
-
-        Returns:
-            True if analysis checkpoint is needed
-        """
-        # After every 3 tool executions, force analysis
-        return tools_executed > 0 and tools_executed % 3 == 0
-
-    def _create_analysis_checkpoint(self, execution_results: List) -> str:
-        """
-        Create analysis checkpoint prompt that forces reflection.
-
-        This is inspired by OpenCode's iterative feedback loops where the
-        agent must explain its findings before continuing. It prevents the
-        "execution without thought" pattern that caused investigation failures.
-
-        Args:
-            execution_results: List of recent tool executions
-
-        Returns:
-            Formatted checkpoint prompt
-        """
-        # Get last 3 tool names
-        recent_tools = []
-        for ex in execution_results[-3:]:
-            if hasattr(ex, "cmd_name"):
-                recent_tools.append(ex.cmd_name)
-            elif isinstance(ex, dict):
-                recent_tools.append(ex.get("cmd_name", "unknown"))
-
-        checkpoint_prompt = f"""
-[ANALYSIS CHECKPOINT]
-=================================================================
-
-You have executed: {", ".join(recent_tools)}
-
-MANDATORY REFLECTION: Before executing more tools, analyze your findings:
-
-1. **Data Summary**: What data was returned from the tools above?
-   - List the key findings (addresses, function names, strings, etc.)
-
-2. **Pattern Detection**: Are there suspicious patterns?
-   - Security APIs (privilege escalation, crypto, etc.)
-   - Network indicators (URLs, IPs, suspicious domains)
-   - Malicious behaviors (obfuscation, hidden files, etc.)
-
-3. **Verification Required**: Do you need to decompile any functions?
-   - For each suspicious finding, identify the function to decompile
-   - State the address and why it's suspicious
-
-4. **Next Action**: Based on these findings, what's your next step?
-   - Decompile a function? (provide address)
-   - Search for related strings? (provide filter)
-   - Trace cross-references? (provide address)
-   - Declare investigation complete? (provide evidence)
-
-[CRITICAL] You must complete this analysis before executing more tools.
-Do NOT skip to tool execution. Provide concrete details from the data above.
-
-=================================================================
-"""
-        return checkpoint_prompt
 
     def _get_max_result_chars(self) -> int:
         """
@@ -577,18 +552,6 @@ Do NOT skip to tool execution. Provide concrete details from the data above.
         else:
             # Fallback when context_manager not available
             return 10000
-
-    @classmethod
-    def get_sentence_transformer(cls):
-        """DEPRECATED: Use get_ollama_embeddings instead for local embedding generation."""
-        import logging
-
-        logger = logging.getLogger("ollama-ghidra-bridge")
-        logger.warning("get_sentence_transformer is DEPRECATED. Use get_ollama_embeddings for local embeddings.")
-        logger.warning("To ensure no HuggingFace API calls, this method now returns None.")
-
-        # Return None to force usage of Ollama embeddings
-        return None
 
     @classmethod
     def get_embeddings(cls, texts: List[str], model: str = None) -> List[List[float]]:
@@ -634,11 +597,6 @@ Do NOT skip to tool execution. Provide concrete details from the data above.
             return []
 
     @classmethod
-    def get_ollama_embeddings(cls, texts: List[str], model: str = None) -> List[List[float]]:
-        """DEPRECATED: Use get_embeddings instead. Legacy alias for backward compatibility."""
-        return cls.get_embeddings(texts, model)
-
-    @classmethod
     def set_ollama_client(cls, ollama_client):
         """Set the Ollama client for embeddings."""
         cls._ollama_client = ollama_client
@@ -676,12 +634,6 @@ Do NOT skip to tool execution. Provide concrete details from the data above.
         self._emit_cot("Gate", f"\u26a0\ufe0f EXECUTION PAUSED: {gate.reason} [trigger={gate.trigger}]")
         if self._ui_gate_callback:
             self._ui_gate_callback(gate)
-
-    # REMOVED: _parse_and_save_artifacts - text-based ARTIFACT format was never used
-    # Artifacts now auto-populated from execution gate triggers
-    # def _parse_and_save_artifacts(self, response: str):
-    #     """Parse text-based artifacts from LLM response."""
-    #     pass
 
     def _load_capabilities_text(self) -> Optional[str]:
         """Load the capabilities text from the file if the flag is set."""
@@ -735,78 +687,9 @@ Do NOT skip to tool execution. Provide concrete details from the data above.
 
         return capabilities_content
 
-    def _remove_search_function_summaries_refs(self, prompt_text: str) -> str:
-        """
-        Remove references to search_function_summaries from prompt text when hybrid search is disabled.
-        This includes removing entire sections that discuss the tool.
-        """
-        if not prompt_text:
-            return prompt_text
 
-        # Remove sections that start with markers about hybrid search or search_function_summaries
-        import re
-
-        # Pattern 1: Remove entire sections bordered by emoji dividers that mention hybrid search
-        # This matches sections like: 🔥 HYBRID SEARCH STRATEGY ... ━━━━━
-        pattern1 = r"🔥\s*HYBRID SEARCH[^━]*?━{20,}.*?━{20,}"
-        prompt_text = re.sub(pattern1, "", prompt_text, flags=re.DOTALL | re.IGNORECASE)
-
-        # Pattern 2: Remove standalone sections about function summary search
-        # This matches sections like: 🔍 FUNCTION SUMMARY SEARCH ... ━━━━━
-        pattern2 = r"🔍\s*FUNCTION SUMMARY SEARCH[^━]*?━{20,}.*?━{20,}"
-        prompt_text = re.sub(pattern2, "", prompt_text, flags=re.DOTALL | re.IGNORECASE)
-
-        # Pattern 3: Remove individual lines that mention search_function_summaries
-        lines = prompt_text.split("\n")
-        filtered_lines = []
-        skip_until_blank = False
-
-        for line in lines:
-            # If we're in a section to skip, check if we've reached a blank line or new section
-            if skip_until_blank:
-                if line.strip() == "" or line.strip().startswith("##") or line.strip().startswith("**"):
-                    skip_until_blank = False
-                else:
-                    continue
-
-            # Check if line mentions search_function_summaries
-            if "search_function_summaries" in line.lower():
-                # If it's an EXECUTE line or part of a usage example, skip it
-                if "EXECUTE:" in line or "search_function_summaries(" in line:
-                    continue
-                # If it's part of a description, skip until we hit a blank line
-                skip_until_blank = True
-                continue
-
-            # Check if line mentions "Hybrid Search" or "hybrid search" in instructional context
-            if re.search(r"(when|use|enable|available).*hybrid\s+search", line, re.IGNORECASE):
-                skip_until_blank = True
-                continue
-
-            filtered_lines.append(line)
-
-        prompt_text = "\n".join(filtered_lines)
-
-        # Clean up excessive blank lines
-        prompt_text = re.sub(r"\n{3,}", "\n\n", prompt_text)
-
-        return prompt_text
-
-    def _build_structured_prompt(self, phase: str = None) -> tuple:
-        """
-        Build structured prompts with proper separation between system and user prompts.
-
-        SYSTEM PROMPT contains:
-        - Role definition
-        - Available tools and their syntax
-        - Formatting rules and best practices
-        - Phase-specific instructions (planning/execution/analysis)
-
-        USER PROMPT contains:
-        - User's goal and query
-        - Current execution state
-        - Tool execution results and history
-        - Dynamic context from CAG
+    def _build_phase_context(self, phase: str = None) -> tuple:
+        """Build the static guidance and dynamic evidence passed to DSPy.
 
         Args:
             phase: Optional phase name to customize the prompt
@@ -818,28 +701,14 @@ Do NOT skip to tool execution. Provide concrete details from the data above.
         system_sections = []
 
         # 1. Role and expertise definition
-        role_definition = """You are an AI assistant specialized in reverse engineering with Ghidra.
-You can help analyze binary files by executing commands through GhidraMCP."""
-        system_sections.append(role_definition)
+        system_sections.append(DEFAULT_SYSTEM_PROMPT)
 
         # 2. Available tools section (static)
         if self.include_capabilities and self.capabilities_text:
             tools_section = (
                 f"## Available Tools\n"
                 f"You have access to the following Ghidra interaction tools.\n\n"
-                f"{self.capabilities_text}\n\n"
-                f"## Tool Execution Format\n"
-                f"To call a tool, use this EXACT format:\n"
-                f'EXECUTE: tool_name(param1="value1", param2="value2")\n\n'
-                f"Rules:\n"
-                f"- Output ONLY the EXECUTE line, no extra text\n"
-                f"- String values MUST be in double quotes\n"
-                f"- Numerical values should NOT be quoted\n"
-                f"- Use exact tool and parameter names from the list above\n\n"
-                f"Examples:\n"
-                f'EXECUTE: decompile_function(name="main")\n'
-                f'EXECUTE: rename_function(old_name="FUN_140011a8", new_name="process_data")\n'
-                f"EXECUTE: list_imports(offset=0, limit=50)\n"
+                f"{self.capabilities_text}\n"
             )
             system_sections.append(tools_section)
 
@@ -857,9 +726,6 @@ You can help analyze binary files by executing commands through GhidraMCP."""
             phase_instructions = planning_template.replace(
                 "{user_task_description}", "[User's goal will be provided in the user message]"
             )
-            # Remove search_function_summaries references if hybrid search is disabled
-            if not getattr(self, "grep_layer_enabled", False):
-                phase_instructions = self._remove_search_function_summaries_refs(phase_instructions)
             system_sections.append(phase_instructions)
         elif phase == "execution":
             # Choose execution system prompt based on task mode
@@ -878,65 +744,12 @@ You can help analyze binary files by executing commands through GhidraMCP."""
                 user_task_description="[User's goal will be provided in the user message]",
                 FUNCTION_CALL_BEST_PRACTICES=self.llm_config.FUNCTION_CALL_BEST_PRACTICES,
             )
-            # Remove search_function_summaries references if hybrid search is disabled
-            if not getattr(self, "grep_layer_enabled", False):
-                phase_instructions = self._remove_search_function_summaries_refs(phase_instructions)
+            if getattr(self, "grep_layer_enabled", False):
+                phase_instructions += (
+                    "\nHybrid search is enabled. Use search_function_summaries for behavioral discovery "
+                    "and decompile promising matches before drawing conclusions."
+                )
             system_sections.append(phase_instructions)
-        elif phase == "evaluation":
-            phase_instructions = self.llm_config.evaluation_system_prompt.replace(
-                "{user_task_description}", "[User's goal will be provided in the user message]"
-            )
-            system_sections.append(phase_instructions)
-        elif phase == "analysis":
-            phase_instructions = self.llm_config.analysis_system_prompt.replace(
-                "{user_task_description}", "[User's goal will be provided in the user message]"
-            )
-            system_sections.append(phase_instructions)
-        elif phase == "review":
-            # Review phase: Concise, focused on quality assessment and guidance
-            thoroughness = getattr(self.llm_config, "review_thoroughness", "standard")
-
-            # Define thoroughness-specific criteria
-            if thoroughness == "basic":
-                criteria_detail = """
-    - Basic: Quick sanity check - did we accomplish the user's goal at all?
-    - Focus: PASS/FAIL assessment only
-    - Depth: Minimal - just check if the main objective was addressed"""
-            elif thoroughness == "thorough":
-                criteria_detail = """
-    - Thorough: Comprehensive deep review
-    - Focus: Detailed verification of all aspects, edge cases, and potential issues
-    - Depth: Full - scrutinize methodology, verify all claims, check for missing analysis"""
-            else:  # standard
-                criteria_detail = """
-    - Standard: Balanced review of completeness and quality
-    - Focus: Core objectives met, major gaps identified
-    - Depth: Moderate - verify key points and identify obvious issues"""
-
-            review_instructions = f"""
-    You are a Quality Review Assistant for reverse engineering analysis.
-
-    YOUR REVIEW TASK (Thoroughness: {thoroughness}):
-    1. Evaluate the completeness and accuracy of the analysis performed
-    2. Identify any gaps, errors, or areas that need improvement
-    3. Assess whether the stated goal has been fully achieved
-    4. Suggest specific next steps or phases if the analysis is incomplete
-    {criteria_detail}
-
-    OUTPUT FORMAT:
-    Provide a structured review with:
-    1. **Status**: APPROVED or NEEDS_IMPROVEMENT
-    2. **Summary**: Brief assessment of what was accomplished
-    3. **Gaps/Issues**: List any problems or missing elements (skip if APPROVED)
-    4. **Next Steps**: Specific recommendations for improvement (if applicable)
-       - Suggest which phase to revisit (Planning/Execution/Analysis)
-       - Recommend specific tools or approaches to use
-       - Prioritize the most critical actions
-
-    Be constructive and specific in your feedback.
-            """
-            system_sections.append(review_instructions)
-
         # Combine all system sections
         system_prompt = "\n\n".join(system_sections)
 
@@ -951,7 +764,7 @@ You can help analyze binary files by executing commands through GhidraMCP."""
         task_mode_enabled = bool(getattr(self, "task_mode_enabled", False))
         grep_layer_enabled = bool(getattr(self, "grep_layer_enabled", False))
 
-        # ENHANCED: Direct function context injection when Hybrid Search is enabled
+        # Direct function context injection when Hybrid Search is enabled
         function_context_section = None
         if grep_layer_enabled and phase == "execution":
             try:
@@ -987,9 +800,6 @@ You can help analyze binary files by executing commands through GhidraMCP."""
                 latest_user_query = recent_user_msgs[0].content
 
             if latest_user_query:
-                self.cag_manager.update_session_from_bridge_context(
-                    self.context if isinstance(self.context, list) else self.context.get("history", [])
-                )
                 cag_text = self.cag_manager.enhance_prompt(latest_user_query, phase)
                 if cag_text:
                     # Create CAGContext object
@@ -997,25 +807,15 @@ You can help analyze binary files by executing commands through GhidraMCP."""
 
         # Build phase-specific instructions
         phase_instructions = None
-        latest_user_role = None
-        if isinstance(self.context, list) and self.context:
-            latest_user_role = self.context[-1].get("role")
-        elif isinstance(self.context, dict) and self.context.get("history", []):
-            latest_user_role = self.context["history"][-1].get("role")
+        latest_user_role = self.session.messages[-1].role.value if self.session.messages else None
 
         if latest_user_role == "user":
-            if phase == "planning" or not self.current_plan:
+            if phase == "planning":
                 phase_instructions = (
                     "## Current Task\nCreate a plan to address the goal above. Do not execute any commands yet."
                 )
-            elif phase == "execution":
-                phase_instructions = "## Current Task\nExecute the necessary tools to gather information for the goal above."
-            elif phase == "analysis":
-                phase_instructions = (
-                    "## Current Task\nAnalyze the gathered information and provide a comprehensive answer to the goal above."
-                )
             else:
-                phase_instructions = "## Current Task\nAddress the goal above using the available tools."
+                phase_instructions = "## Current Task\nExecute the necessary tools to gather information for the goal above."
 
         # Build structured prompt using Pydantic model
         structured_prompt = StructuredPrompt(
@@ -1092,99 +892,6 @@ You can help analyze binary files by executing commands through GhidraMCP."""
 
         return (system_prompt, user_prompt)
 
-    def _check_final_response_quality(self, response: str) -> bool:
-        """
-        Check if the final response is of good quality and doesn't indicate tool limitations.
-        Also verifies that all critical planned tools have been executed.
-
-        Args:
-            response: The potential final response text
-
-        Returns:
-            True if the response is complete and satisfactory, False if it indicates incomplete analysis
-        """
-        # Look for phrases that indicate the model couldn't complete the task
-        limitation_phrases = [
-            "i cannot",
-            "cannot directly",
-            "i'm unable to",
-            "unable to",
-            "doesn't include",
-            "not available",
-            "no way to",
-            "would need",
-            "don't have access",
-            "no access to",
-            "not possible with",
-            "not able to",
-            "couldn't find",
-            "missing",
-            "not found",
-            "not supported",
-            "no tool",
-            "no command",
-            "doesn't exist",
-            "the current toolset doesn't",
-        ]
-
-        # Check if the response contains any of these limitation phrases
-        response_lower = response.lower()
-        for phrase in limitation_phrases:
-            if phrase in response_lower:
-                self.logger.info(f"Final response indicates limitation: '{phrase}'")
-                return False
-
-        # Check if response is too short
-        if len(response.strip()) < 150:
-            self.logger.info(f"Final response is too short ({len(response.strip())} chars)")
-            return False
-
-        # Check if final response has error messages
-        if "ERROR:" in response or "Failed" in response:
-            self.logger.info("Final response contains error messages")
-            return False
-
-        # Check if all critical planned tools have been executed
-        # Update the pending_critical list based on current execution status
-        pending_critical = [
-            tool
-            for tool in self.planned_tools_tracker["planned"]
-            if tool["is_critical"] and tool["execution_status"] == "pending"
-        ]
-
-        if pending_critical:
-            tool_names = ", ".join([tool["tool"] for tool in pending_critical])
-            self.logger.info(f"Critical planned tools not executed: {tool_names}")
-
-            # Check if the response falsely claims actions that weren't performed
-            for tool in pending_critical:
-                tool_name = tool["tool"]
-                # Check for phrases that indicate the tool was used when it actually wasn't
-                false_claim_patterns = [
-                    "renamed to",
-                    "renamed the function",
-                    "function is now named",
-                    "have renamed",
-                    "renamed",
-                    "new name",
-                    "changed the name",
-                    "added comment",
-                    "commented",
-                    "set a comment",
-                    "decompiled",
-                ]
-
-                for pattern in false_claim_patterns:
-                    if pattern in response_lower and any(rename_tool in tool_name for rename_tool in ["rename", "comment"]):
-                        self.logger.warning(
-                            f"Response falsely claims an action was performed: '{pattern}' but {tool_name} was not executed"
-                        )
-                        return False
-
-            # If the response doesn't falsely claim completion but critical tools are missing, still return False
-            return False
-
-        return True
 
     def _normalize_command_name(self, command_name: str) -> str:
         """
@@ -1252,55 +959,6 @@ You can help analyze binary files by executing commands through GhidraMCP."""
         error_message = f"Unknown command: {command_name}{suggestion_msg}"
         return False, error_message, similar_commands, available_commands
 
-    def _normalize_command_params(self, command_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Normalize command parameters based on command requirements.
-
-        Args:
-            command_name: The normalized command name
-            params: The original parameters
-
-        Returns:
-            Normalized parameters
-        """
-        normalized_params = {}
-
-        # Common parameter name mappings
-        param_mappings = {
-            "functionAddress": "address",
-            "function_address": "address",
-            "functionName": "name",
-            "function_name": "name",
-            "oldName": "old_name",
-            "newName": "new_name",
-        }
-
-        # Special case normalizations for specific commands
-        command_specific_mappings = {
-            "rename_function_by_address": {"address": "function_address"},
-            "decompile_function_by_address": {"function_address": "address"},
-        }
-
-        # Apply command-specific normalizations first
-        if command_name in command_specific_mappings:
-            for orig_key, new_key in command_specific_mappings[command_name].items():
-                if orig_key in params:
-                    normalized_params[new_key] = params[orig_key]
-                    logging.info(f"Normalized parameter '{orig_key}' to '{new_key}' for command '{command_name}'")
-
-        # Then apply general normalizations
-        for key, value in params.items():
-            if key in normalized_params:
-                continue  # Skip if already processed by command-specific normalization
-
-            # Apply general parameter name mapping
-            norm_key = param_mappings.get(key, key)
-            if norm_key != key:
-                logging.info(f"Normalized parameter '{key}' to '{norm_key}' for command '{command_name}'")
-
-            normalized_params[norm_key] = value
-
-        return normalized_params
 
     def get_cached_result(self, result_id: str) -> str:
         """
@@ -1710,7 +1368,7 @@ You can help analyze binary files by executing commands through GhidraMCP."""
                         "source": "function_search",
                     }
 
-                # NEW: Search through analyzed function summaries
+                # Search through analyzed function summaries
                 query = params.get("query", "")
                 search_type = params.get("search_type", "hybrid")  # hybrid, keyword, semantic, name
                 top_k = params.get("top_k", 5)
@@ -1740,6 +1398,7 @@ You can help analyze binary files by executing commands through GhidraMCP."""
                     raise ValueError(enhanced_unknown_command_error)
 
             # Check for required parameters
+            params = self.command_parser.normalize_parameters(normalized_command, params)
             is_valid, error_message = self.command_parser.validate_command_parameters(normalized_command, params)
             if not is_valid:
                 enhanced_error = self.command_parser.get_enhanced_error_message(command_name, params, error_message)
@@ -2026,7 +1685,6 @@ You can help analyze binary files by executing commands through GhidraMCP."""
             self.current_goal = query
             self._update_scope_from_query(query)
             self.goal_achieved = False
-            self.goal_steps_taken = 0
             self.executed_tools = set()  # Reset tool tracking for new query
             self.step_result_map = {}  # Reset step result map for new query
 
@@ -2051,18 +1709,13 @@ You can help analyze binary files by executing commands through GhidraMCP."""
             # Check if task mode is enabled - only apply depth instructions if it is
             task_mode_enabled = bool(getattr(self, "task_mode_enabled", False))
 
-            # Ensure context is initialized
-            if not isinstance(self.context, list):
-                if isinstance(self.context, dict) and "history" in self.context:
-                    self.context = self.context["history"]
-                else:
-                    self.context = []
-
             # Add user query to context
             self.add_to_context("user", query)
 
             # Get configuration
-            max_cycles = self.llm_config.max_agentic_cycles
+            # Disabling the multi-cycle mode now means one pass through the same
+            # DSPy workflow instead of switching to the retired legacy agent.
+            max_cycles = self.llm_config.max_agentic_cycles if self.llm_config.agentic_loop_enabled else 1
             max_exec_steps = self.llm_config.max_execution_steps
 
             best_response = ""
@@ -2249,105 +1902,13 @@ You can help analyze binary files by executing commands through GhidraMCP."""
             # Return error message
             return f"Error in query processing: {str(e)}"
 
-    def process_query_single_pass(self, query: str) -> str:
-        """
-        Process a natural language query with a single Planning→Execution→Analysis pass.
-
-        This is the original behavior - one cycle only, no goal evaluation or re-planning.
-
-        Args:
-            query: Natural language query from the user
-
-        Returns:
-            Result of processing the query
-        """
-        try:
-            self.logger.info(f"🚀 Starting query processing: '{query}'")
-
-            # Store the query as our current goal
-            self.current_goal = query
-            self._update_scope_from_query(query)
-            self.goal_achieved = False
-            self.goal_steps_taken = 0
-            self.executed_tools = set()  # Reset tool tracking for new query
-            self.step_result_map = {}  # Reset step result map for new query
-
-            # Ensure context is initialized as a list if it's not already
-            if not isinstance(self.context, list):
-                if isinstance(self.context, dict) and "history" in self.context:
-                    self.context = self.context["history"]
-                else:
-                    self.context = []
-
-            # Add user query to context
-            self.add_to_context("user", query)
-
-            # PHASE 1: Planning - determine what tools need to be called
-            self.logger.info("📋 Phase 1: Starting planning phase")
-            self.current_workflow_stage = "planning"
-            plan_response = self._generate_plan(query)
-            self.logger.info(f"✅ Planning completed: {len(plan_response)} chars")
-
-            # Check if execution loop is enabled
-            use_execution_loop = self.llm_config.execution_loop_enabled
-
-            if use_execution_loop:
-                # NEW: Multi-tool execution loop
-                self.logger.info("🔄 Phase 2: Starting execution loop (multi-tool mode)")
-                self.current_workflow_stage = "execution"
-                max_steps = self.llm_config.max_execution_steps
-                exec_results = self._execution_loop(plan_response, max_steps=max_steps)
-                self.logger.info(f"✅ Execution loop completed: {exec_results.total_steps} steps")
-
-                # PHASE 3: Analysis - analyze accumulated results
-                self.logger.info("🧠 Phase 3: Starting analysis phase with accumulated results")
-                self.current_workflow_stage = "analysis"
-                response = self._analyze_execution_results(exec_results)
-                self.logger.info(f"✅ Analysis completed: {len(response)} chars")
-            else:
-                # LEGACY: Single-shot execution (original behavior)
-                self.logger.info("🔧 Phase 2: Starting execution phase (legacy single-shot mode)")
-                self.current_workflow_stage = "execution"
-                result = self._execute_plan()
-                self.logger.info(f"✅ Execution completed: {len(result)} chars")
-
-                # PHASE 3: Analysis - analyze results and generate final response
-                self.logger.info("🧠 Phase 3: Starting analysis phase")
-                self.current_workflow_stage = "analysis"
-                response = self._generate_analysis(query, result)
-                self.logger.info(f"✅ Analysis completed: {len(response)} chars")
-
-            # Add assistant response to context
-            self.add_to_context("assistant", response)
-
-            # Workflow complete
-            self.current_workflow_stage = None
-            self.logger.info("🎯 Query processing completed successfully")
-
-            # Custom mode: update notepad/workplan after query
-            self._maybe_update_custom_workplan(user_query=query, final_response=response)
-
-            return response
-        except Exception as e:
-            # Log the exception with full traceback
-            import traceback
-
-            self.logger.error(f"❌ Error in query processing: {str(e)}")
-            self.logger.error(f"Full traceback: {traceback.format_exc()}")
-
-            # Reset workflow stage on error
-            self.current_workflow_stage = None
-
-            # Return error message
-            return f"Error in query processing: {str(e)}"
 
     def process_query(self, query: str) -> str:
         """
         Main entry point for query processing.
 
-        Routes to appropriate processing method based on configuration:
-        - Agentic loop: Multiple Planning→Execution→Analysis cycles with goal evaluation
-        - Single-pass: One Planning→Execution→Analysis cycle (original behavior)
+        Runs the DSPy-owned workflow. Disabling multi-cycle mode limits that
+        same workflow to one Planning→Execution→Analysis cycle.
 
         Args:
             query: Natural language query from the user
@@ -2355,13 +1916,8 @@ You can help analyze binary files by executing commands through GhidraMCP."""
         Returns:
             Result of processing the query
         """
-        # Check if agentic loop is enabled
-        if self.llm_config.agentic_loop_enabled:
-            self.logger.info("[INFO] Using multi-cycle agentic loop mode")
-            return self.process_query_with_agentic_loop(query)
-        else:
-            self.logger.info("[INFO] Using single-pass mode (legacy)")
-            return self.process_query_single_pass(query)
+        self.logger.info("[INFO] Processing query with DSPy agent module")
+        return self.agent(query=query).answer
 
     def _generate_plan(self, query: str) -> str:
         """
@@ -2373,29 +1929,26 @@ You can help analyze binary files by executing commands through GhidraMCP."""
         Returns:
             Plan response
         """
-        # Use CAG manager to enhance context with knowledge and session data
-        if self.enable_cag and self.cag_manager:
-            # Update session cache with current context
-            self.cag_manager.update_session_from_bridge_context(self.context)
-
         logging.info("Starting planning phase")
+        plugin_context = self._run_plugin_hook(PluginHook.BEFORE_PLANNING, query=query, cycle=self.current_loop_number)
+        query = plugin_context.query
 
         # Build prompts (system and user)
-        system_prompt, user_prompt = self._build_structured_prompt(phase="planning")
+        system_prompt, user_prompt = self._build_phase_context(phase="planning")
         user_prompt += f"\n\nUser Query: {query}"
 
         # Generate planning response with properly separated prompts
-        response = self.ollama.generate_with_phase(user_prompt, phase="planning", system_prompt=system_prompt)
+        response = self.dspy_program.plan(system_prompt, user_prompt)
 
         # Extract plan
         self.current_plan = response
         logging.info(f"Received planning response: {response[:100]}...")
 
-        # Parse the planned tools
-        self.current_plan_tools = self._parse_plan_tools(response)
-        logging.info(f"Extracted {len(self.current_plan_tools)} planned tools from plan")
+        plugin_context.plan = response
+        self.plugin_manager.run(PluginHook.AFTER_PLANNING, plugin_context)
+        response = plugin_context.plan
+        self.current_plan = response
 
-        # Add plan to context
         self.add_to_context("plan", response)
 
         logging.info("Planning phase completed")
@@ -2453,334 +2006,11 @@ You can help analyze binary files by executing commands through GhidraMCP."""
             # For non-verbose commands, just show a success message
             print(f"✓ Successfully executed {cmd_name}")
 
-    def _execute_plan(self) -> str:
-        """
-        Execute the generated plan.
-        Returns:
-            A string representing all tool results or errors.
-        """
-        # --- Duplicate-detection helpers ---
-        READ_ONLY_PAGINATED = {"list_strings", "list_imports", "list_exports", "list_segments"}
 
-        def _canonical_params(cmd, params):
-            """Strip default offset/limit values for read-only tools so signatures match."""
-            defaults = {"offset": 0, "limit": 500}
-            if cmd in READ_ONLY_PAGINATED:
-                cleaned = {k: v for k, v in params.items() if defaults.get(k) != v}
-            else:
-                cleaned = params
-            return tuple(sorted(cleaned.items()))
-
-        logging.info("Starting execution phase")
-
-        all_results = []
-        self.goal_steps_taken = 0
-        step_count = 0
-        goal_statement = f"Goal: {self.current_goal}"
-
-        executed_commands = {}  # cmd_name+params -> count
-
-        # Loop until we hit max steps or goal is achieved
-        while step_count < self.max_goal_steps and not self.goal_achieved:
-            step_count += 1
-            self.goal_steps_taken = step_count
-
-            logging.info(f"Step {step_count}/{self.max_goal_steps}: Sending query to Ollama")
-
-            # Build prompts for tool execution
-            system_prompt, user_prompt = self._build_structured_prompt(phase="execution")
-            user_prompt += (
-                f"\n\n{goal_statement}\n\nStep {step_count}: Determine the next tool to call or mark the goal as completed."
-            )
-
-            # Use CAG to enhance context with knowledge and session data
-            if self.enable_cag and self.cag_manager:
-                # Update session cache with current context
-                self.cag_manager.update_session_from_bridge_context(self.context)
-
-                # Get memory-enhanced prompt context to prevent redundant operations
-                memory_context = self.cag_manager.enhance_prompt_with_memory_context(self.current_goal or "analysis")
-                if memory_context:
-                    user_prompt = f"{memory_context}\n\n{user_prompt}"
-
-            # Generate execution step with properly separated prompts
-            response = self.ollama.generate_with_phase(user_prompt, phase="execution", system_prompt=system_prompt)
-            logging.info(f"Received response from Ollama: {response[:100]}...")
-
-            # REMOVED: Text-based ARTIFACT parsing (never used)
-            # Artifacts now auto-populated from execution gate triggers
-            # self._parse_and_save_artifacts(response)
-
-            # Extract commands to execute
-            commands = self.command_parser.extract_commands(response)
-
-            # Check for format violations and provide feedback to LLM
-            format_feedback = self.command_parser.generate_format_feedback(response, commands)
-            if format_feedback:
-                self.logger.warning("Format violations detected in LLM response")
-                # Add feedback as a system message so LLM can learn from it
-                self.add_to_context("system", format_feedback)
-                # If no commands were extracted despite violations, ask LLM to retry
-                if not commands:
-                    self.add_to_context("system", "No valid commands could be extracted. Please retry with correct format.")
-                    return response  # Return response as-is, feedback will guide next attempt
-
-            # ENFORCE HYBRID SEARCH (GREP LAYER) ON FIRST STEP
-            # If Hybrid Search is enabled, always run a function-summary search first so the
-            # agent has relevant candidates before expensive decompilation.
-            try:
-                if step_count == 1 and bool(getattr(self, "grep_layer_enabled", False)):
-                    already_searching = bool(commands) and commands[0][0] == "search_function_summaries"
-                    # Skip enforcement if the user query is clearly about a specific function/address.
-                    q_text = self.current_goal or ""
-                    if not q_text:
-                        recent_user_msgs = self.session.get_recent_messages(limit=1, role_filter=[MessageRole.USER])
-                        if recent_user_msgs:
-                            q_text = str(recent_user_msgs[0].content or "")
-                    looks_specific = False
-                    if q_text:
-                        import re
-
-                        looks_specific = bool(
-                            re.search(r"\b0x[0-9a-fA-F]{6,}\b|\b[0-9a-fA-F]{8,}\b|\bFUN_[0-9A-Fa-f]{6,}\b", q_text)
-                        )
-
-                    if not already_searching and not looks_specific:
-                        commands = [
-                            ("search_function_summaries", {"query": q_text or "analysis", "search_type": "hybrid", "top_k": 5})
-                        ]
-                        self.add_to_context(
-                            "system",
-                            "Hybrid Search is enabled: running search_function_summaries first to retrieve relevant analyzed functions before other tools.",
-                        )
-            except Exception:
-                pass
-
-            # Enhanced duplicate detection using CAG memory system
-            if commands:
-                cmd_name, cmd_params = commands[0]  # Get first command
-
-                # Create signature for this exact command
-                cmd_signature = f"{cmd_name}({_canonical_params(cmd_name, cmd_params)})"
-
-                # First check CAG memory for intelligent duplicate detection
-                skip_due_to_memory = False
-                if self.enable_cag and self.cag_manager:
-                    should_skip, skip_reason = self.cag_manager.should_skip_command(cmd_name, cmd_params)
-                    if should_skip:
-                        self.logger.warning(f"🧠 CAG Memory: {skip_reason}")
-
-                        # Get memory-enhanced guidance
-                        memory_guidance = self.cag_manager.enhance_prompt_with_memory_context(
-                            self.current_goal or "analysis", cmd_name, cmd_params
-                        )
-
-                        guidance_msg = f"CAG Memory Guidance: {skip_reason}\n\n{memory_guidance}"
-                        self.add_to_context("system", guidance_msg)
-                        skip_due_to_memory = True
-
-                # Fallback to original duplicate detection if CAG didn't catch it
-                if not skip_due_to_memory and executed_commands.get(cmd_signature, 0) >= 1:
-                    self.logger.warning(f"🚫 Skipping duplicate command: {cmd_signature}")
-                    self.add_to_context(
-                        "assistant",
-                        f"ERROR: Duplicate command `{cmd_name}` was skipped. Please choose a different tool or change parameters.",
-                    )
-                    skip_due_to_memory = True
-
-                if skip_due_to_memory:
-                    continue
-
-                executed_commands[cmd_signature] = executed_commands.get(cmd_signature, 0) + 1
-
-                # Track tool usage
-                tool_count = self.executed_tools.count(cmd_name)
-
-                # Special validation for rename_function to prevent context mismatches
-                if cmd_name == "rename_function" and "old_name" in cmd_params:
-                    old_name = cmd_params["old_name"]
-                    new_name = cmd_params.get("new_name", "")
-                    rename_count = self.executed_tools.count("rename_function")
-
-                    # Check for same-name rename (useless operation)
-                    if old_name == new_name:
-                        logging.warning(
-                            f"Detected same-name rename: '{old_name}' -> '{new_name}'. This is a useless operation."
-                        )
-                        same_name_guidance = f"""
-                        ATTENTION: You're trying to rename '{old_name}' to '{new_name}' - this is the SAME NAME!
-
-                        This is a useless operation. The function is already named '{old_name}'.
-
-                        If the function is already properly named, respond with "GOAL ACHIEVED".
-                        If you need to rename it, choose a DIFFERENT, more descriptive name based on the function's purpose.
-                        """
-                        self.add_to_context("system", same_name_guidance)
-                        continue  # Skip this command and get a new one
-
-                    if rename_count >= 2:  # After 2 rename attempts, provide guidance
-                        logging.warning("Multiple rename_function calls detected. Checking for context mismatch.")
-                        if getattr(self.config.ghidra, "backend", "http") == "pyghidra":
-                            rename_target_guidance = (
-                                "1. Do NOT call get_current_function(); the pyGhidra backend does not track the live Ghidra GUI selection\n"
-                                "2. Reuse an explicit function address or name from the current query/tool output\n"
-                                '3. If you have already renamed the intended function, respond with "GOAL ACHIEVED"'
-                            )
-                        else:
-                            rename_target_guidance = (
-                                "1. Call get_current_function() to see which function is currently selected in Ghidra\n"
-                                "2. Only rename the function that is currently selected\n"
-                                '3. If you have already renamed the correct function, respond with "GOAL ACHIEVED"'
-                            )
-                        context_guidance = f"""
-                        ATTENTION: You've called 'rename_function' {rename_count} times.
-
-                        You're trying to rename '{old_name}'. Please verify this is the CURRENT function:
-                        {rename_target_guidance}
-
-                        Do NOT rename functions from previous contexts or conversations.
-                        """
-                        self.add_to_context("system", context_guidance)
-
-                if tool_count >= self.tool_repetition_limit:
-                    logging.warning(
-                        f"Tool '{cmd_name}' has been called {tool_count} times. Possible repetitive behavior detected."
-                    )
-
-                    # Inject a guidance prompt to help the AI break out of the loop
-                    guidance_prompt = f"""
-                    ATTENTION: You've called '{cmd_name}' {tool_count} times already. This suggests you may be stuck in a loop.
-
-                    Based on the goal: "{self.current_goal}"
-
-                    Please review what you've accomplished so far and either:
-                    1. If you have enough information, proceed to the ACTION step (e.g., rename_function)
-                    2. If the goal is complete, respond with "GOAL ACHIEVED"
-                    3. If you need different information, use a different tool
-
-                    Do NOT repeat the same tool call again.
-                    """
-                    self.add_to_context("system", guidance_prompt)
-
-            # If no commands but the response indicates goal completion, mark as achieved
-            if not commands and ("INVESTIGATION COMPLETE" in response.upper() or "GOAL ACHIEVED" in response.upper()):
-                logging.info("AI indicates the goal has been achieved")
-                self.goal_achieved = True
-                all_results.append(f"Step {step_count} - Goal achievement indicated: {response}")
-                break
-
-            # Execute commands
-            execution_result = ""
-            for cmd_name, cmd_params in commands:
-                try:
-                    # Add tool call to context
-                    param_text = ", ".join([f'{k}="{v}"' for k, v in cmd_params.items()])
-                    tool_call = f"EXECUTE: {cmd_name}({param_text})"
-                    self.add_to_context("tool_call", tool_call)
-
-                    # Execute command with parameter normalization
-                    logging.info(f"Executing GhidraMCP command: {cmd_name} with params: {cmd_params}")
-                    result = self.execute_command(cmd_name, cmd_params)
-
-                    # Display the result to the user
-                    self._display_tool_result(cmd_name, result)
-
-                    # Format the result for context and logging
-                    if isinstance(result, dict) or isinstance(result, list):
-                        execution_result = json.dumps(result, indent=2)
-                    else:
-                        execution_result = str(result)
-
-                    # Dynamic truncation based on context budget from config
-                    max_result_chars = self._get_max_result_chars()
-
-                    context_result = execution_result
-                    if len(execution_result) > max_result_chars:
-                        # For list-like results, show a summary instead of full output
-                        lines = execution_result.split("\n")
-                        if len(lines) > 50:
-                            # Show first 30 and last 15 lines with a summary (increased from 20/10)
-                            first_lines = "\n".join(lines[:30])
-                            last_lines = "\n".join(lines[-15:])
-                            truncation_msg = f"\n... [Truncated {len(lines) - 45} lines for context efficiency] ...\n"
-                            context_result = (
-                                f"{first_lines}{truncation_msg}{last_lines}\n\nSummary: {len(lines)} total items returned"
-                            )
-                            logging.info(
-                                f"Truncated large result ({len(execution_result)} chars -> {len(context_result)} chars)"
-                            )
-                        else:
-                            # Simple truncation for non-list results
-                            context_result = (
-                                execution_result[:max_result_chars]
-                                + f"\n... [Truncated {len(execution_result) - max_result_chars} chars]"
-                            )
-
-                    # Add to Pydantic session (structured storage)
-                    self.session.add_tool_execution(
-                        tool_name=cmd_name, parameters=cmd_params, result=context_result, success=True
-                    )
-
-                    # Add command result to context (legacy - for backward compatibility)
-                    self.add_to_context("tool_result", context_result)
-                    # Cache signature for duplicate detection intelligence
-                    sig_exec = f"{cmd_name}({_canonical_params(cmd_name, cmd_params)})"
-                    self.analysis_state.setdefault("cached_results", {})[sig_exec] = True
-
-                    # Update analysis state
-                    command = {"name": cmd_name, "params": cmd_params}
-                    self._update_analysis_state(command, execution_result)
-
-                    # Add to all results
-                    all_results.append(f"Command: {cmd_name}\nResult: {execution_result}\n")
-
-                except Exception as e:
-                    error_msg = f"ERROR: {str(e)}"
-                    logging.error(f"Error executing {cmd_name}: {error_msg}")
-                    execution_result = error_msg
-                    self.add_to_context("tool_error", error_msg)
-                    all_results.append(f"Command: {cmd_name}\nError: {error_msg}\n")
-                    print(f"❌ Error executing {cmd_name}: {error_msg}")
-
-            # If no commands were found, note this and end loop if it's the second consecutive time
-            if not commands:
-                logging.info("No commands found in AI response, ending tool execution loop")
-                all_results.append(f"Step {step_count} - No tool calls: {response}")
-                break
-
-        if step_count >= self.max_goal_steps:
-            logging.info(f"Reached maximum steps ({self.max_goal_steps}), ending tool execution loop")
-
-        logging.info("Execution phase completed")
-        return "\n".join(all_results)
-
-    def _evaluate_goal_completion(self, query: str, execution_results: str) -> bool:
-        """
-        Ask the AI to evaluate if the goal has been completed.
-
-        Args:
-            query: The original user query.
-            execution_results: A summary of the execution phase.
-
-        Returns:
-            True if the goal is considered complete, False otherwise.
-        """
-        self.logger.info("Evaluating goal completion...")
-
-        # Format the evaluation prompt with the user's task description
-        prompt = self.llm_config.evaluation_system_prompt.format(user_task_description=query)
-
-        # Add the execution results for context
-        full_prompt = f"{prompt}\n\nExecution Summary:\n{execution_results}"
-
-        response = self.ollama.generate(full_prompt)
-        self.logger.info(f"Received evaluation response: {response.strip()}")
-
-        return "goal achieved" in response.strip().lower()
 
     def _clean_final_response(self, response: str) -> str:
         """
-        Clean up the final response for display by removing markers and formatting.
+        Clean up response formatting for display.
 
         Args:
             response: The raw final response
@@ -2791,15 +2021,9 @@ You can help analyze binary files by executing commands through GhidraMCP."""
         if not response:
             return ""
 
-        # Remove "FINAL RESPONSE:" marker if present
-        cleaned = re.sub(r"^FINAL RESPONSE:\s*", "", response, flags=re.IGNORECASE)
-
-        # Remove any trailing executing instructions
-        cleaned = re.sub(r"\n+\s*EXECUTE:.*$", "", cleaned, flags=re.MULTILINE)
-
         # Handle code blocks wrapping the entire response
         # Only strip if the response starts and ends with ```
-        cleaned = cleaned.strip()
+        cleaned = response.strip()
         if cleaned.startswith("```") and cleaned.endswith("```"):
             # Check if it's just one big block
             lines = cleaned.split("\n")
@@ -2809,159 +2033,6 @@ You can help analyze binary files by executing commands through GhidraMCP."""
 
         return cleaned.strip()
 
-    def _generate_analysis(self, query: str, execution_results: str) -> str:
-        """
-        Analyze the results of tool executions and generate a final response.
-
-        Args:
-            query: The original query
-            execution_results: Results from tool executions
-
-        Returns:
-            Final analysis response
-        """
-        logging.info("Starting review and reasoning phase")
-
-        # Update workflow stage to review
-        self.current_workflow_stage = "review"
-
-        self.goal_achieved = False
-        review_steps = 0
-        max_review_steps = self.max_goal_steps
-        final_response = ""
-        review_results = []
-
-        # Phase to iteratively review and refine our understanding
-        while not self.goal_achieved and review_steps < max_review_steps:
-            review_steps += 1
-            logging.info(f"Review step {review_steps}/{max_review_steps}: Sending query to Ollama")
-
-            # Build prompts for review
-            system_prompt, user_prompt = self._build_structured_prompt(phase="review")
-            user_prompt += f"\n\nGoal: {self.current_goal}\n\nExecution Results:\n{execution_results}\n\n"
-
-            # Add directive based on whether we have execution results
-            if execution_results and len(execution_results.strip()) > 50:
-                user_prompt += """Review the execution results above carefully.
-
-INVESTIGATION CRITERIA - Did you:
-✓ Examine ALL error messages and strings in the code?
-✓ Identify the protocol/technology (HTTP/2, TLS, etc.)?
-✓ Understand the function's primary purpose from error messages?
-✓ Extract semantic meaning from string literals?
-✓ Use the AI analysis summary if available?
-
-NAMING QUALITY CHECK:
-❌ AVOID generic names like: "data_processing", "handle_something", "process_data"
-✅ USE specific names based on: error messages, protocol operations, actual behavior
-   Examples: "handle_http2_stream_close", "validate_tls_handshake", "parse_certificate_data"
-
-Only provide FINAL RESPONSE when:
-1. The function name is SPECIFIC and DESCRIPTIVE (not generic)
-2. You've investigated all available information (strings, errors, AI analysis)
-3. No further investigation would improve the result
-
-If investigation is incomplete or name is too generic, use EXECUTE to call tools."""
-            else:
-                user_prompt += "No tool execution results are available yet. You MUST use the EXECUTE format to call the necessary tools to accomplish the goal. Do NOT provide a FINAL RESPONSE until tools have been executed and results obtained."
-
-            # Use CAG to enhance context
-            if self.enable_cag and self.cag_manager:
-                self.cag_manager.update_session_from_bridge_context(self.context)
-
-            # Generate review response with properly separated prompts
-            review_response = self.ollama.generate_with_phase(user_prompt, phase="analysis", system_prompt=system_prompt)
-            logging.info(f"Received review response: {review_response[:100]}...")
-
-            # Check for the final response marker
-            final_response_match = re.search(r"FINAL RESPONSE:\s*(.*?)(?:\n\s*$|\Z)", review_response, re.DOTALL)
-            if final_response_match:
-                final_response = final_response_match.group(1).strip()
-
-                # Check if the "final response" actually contains instructions to execute tools
-                # Common patterns: "should rename", "need to call", "must execute", "will rename", etc.
-                instruction_patterns = [
-                    r"\b(should|must|need to|will|let\'s)\s+(call|execute|rename|analyze|use)",
-                    r"\brename\s+.*\s+to\s+",
-                    r"\bcall\s+the\s+\w+\s+(function|tool|command)",
-                    r"\bexecute\s+.*\s+with\s+",
-                ]
-                contains_instructions = any(
-                    re.search(pattern, final_response, re.IGNORECASE) for pattern in instruction_patterns
-                )
-
-                if contains_instructions:
-                    logging.warning(
-                        "FINAL RESPONSE contains instructions instead of results - AI is describing actions rather than executing them"
-                    )
-                    logging.warning(f"Problematic response preview: {final_response[:200]}")
-                    # Don't treat this as a valid final response, continue review loop
-                    final_response = None
-                    review_results.append(
-                        f"[WARN] Review step {review_steps}: AI provided instructions instead of executing tools. Response ignored."
-                    )
-                    continue
-
-                # Validate that the final response is reasonable
-                if final_response and len(final_response) > 100:
-                    logging.info("Found high-quality 'FINAL RESPONSE' marker in review, ending review loop")
-                    self.goal_achieved = True
-                    break
-                elif final_response:
-                    if "unable" in final_response.lower() or "limit" in final_response.lower():
-                        logging.info(f"Final response is too short ({len(final_response)} chars)")
-                        logging.info("Found 'FINAL RESPONSE' marker but response indicates limitations, continuing review")
-                else:
-                    logging.info("'FINAL RESPONSE' marker found but unable to extract response")
-
-            # Check for additional tool calls in the review
-            commands = self.command_parser.extract_commands(review_response)
-            if commands:
-                new_execution_results = []
-                for cmd_name, cmd_params in commands:
-                    try:
-                        # Execute command
-                        result = self.execute_command(cmd_name, cmd_params)
-
-                        # Format result for display
-                        formatted_result = self.command_parser.format_command_results(cmd_name, cmd_params, result)
-                        logging.info(f"Review command executed: {cmd_name}")
-
-                        # Add result to context
-                        self.add_to_context("tool_result", formatted_result)
-
-                        # Store for injection back into execution_results
-                        tool_result_entry = (
-                            f"Tool Call: {cmd_name}\nParameters: {cmd_params}\nTool Result: {formatted_result}\n"
-                        )
-                        review_results.append(tool_result_entry)
-                        new_execution_results.append(tool_result_entry)
-                    except Exception as e:
-                        error_msg = f"ERROR: {str(e)}"
-                        logging.error(f"Error executing review command {cmd_name}: {error_msg}")
-                        self.add_to_context("tool_error", error_msg)
-                        error_entry = f"Error executing {cmd_name}: {error_msg}"
-                        review_results.append(error_entry)
-                        new_execution_results.append(error_entry)
-
-                # Inject new results back into execution_results for next iteration
-                if new_execution_results:
-                    execution_results += "\n" + "\n".join(new_execution_results)
-                    logging.info(f"Injected {len(new_execution_results)} new tool results into execution context")
-
-            # If no commands and no final response yet, continue
-            if not commands and not final_response:
-                review_results.append(f"Review step {review_steps}: {review_response}")
-
-        # If we have a final response, add it to the results
-        if final_response:
-            # Clean up the response for display
-            display_response = self._clean_final_response(final_response)
-            review_results.append(f"FINAL RESPONSE:\n{display_response}")
-        else:
-            review_results.append("No final response generated during review")
-
-        return "\n".join(review_results)
 
     def _execution_loop(self, plan: str, max_steps: int = 10) -> ExecutionPhaseResults:
         """
@@ -2980,6 +2051,13 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
         Returns:
             ExecutionPhaseResults with all accumulated tool executions
         """
+        plugin_context = self._run_plugin_hook(
+            PluginHook.BEFORE_EXECUTION,
+            plan=plan,
+            cycle=self.current_loop_number,
+        )
+        plan = plugin_context.plan
+
         # Initialize execution results
         exec_results = ExecutionPhaseResults(goal=self.current_goal or "Investigation", plan=plan)
 
@@ -3006,68 +2084,39 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
             # Build prompt for next tool execution
             system_prompt, user_prompt = self._build_execution_loop_prompt(exec_results, step)
 
-            # Ask AI: "What's the next tool to execute?"
+            # DSPy returns typed actions, completion state, and an optional
+            # question. No EXECUTE/ASK_USER text parsing is needed here.
             print(f"[Bridge] Execution Loop Step {step}: Requesting AI decision...")
-            response = self.ollama.generate_with_phase(user_prompt, phase="execution", system_prompt=system_prompt)
-            print(f"[Bridge] Received AI response (len={len(response)})")
+            decision = self.dspy_program.decide(system_prompt, user_prompt)
+            reasoning = decision.reasoning.strip()
+            commands = [(action.tool, dict(action.parameters)) for action in decision.actions]
+            print(f"[Bridge] Received {len(commands)} typed action(s)")
+            self.logger.info("Received execution decision: %d action(s), complete=%s", len(commands), decision.complete)
 
-            self.logger.info(f"Received execution loop response: {response[:100]}...")
-
-            # Extract reasoning first
-            reasoning = None
-            reasoning_match = re.search(r"REASONING:\s*(.*?)(?:\nEXECUTE:|$)", response, re.DOTALL)
-            if reasoning_match:
-                reasoning = reasoning_match.group(1).strip()
+            if reasoning:
                 self.logger.info(f"🤔 Reasoning: {reasoning}")
 
-            # Extract commands from the response
-            commands = self.command_parser.extract_commands(response)
-
-            # Check if investigation is complete
-            has_completion_signal = "INVESTIGATION COMPLETE" in response.upper() or "GOAL ACHIEVED" in response.upper()
-
-            if has_completion_signal:
-                # CRITICAL: Check if LLM violated completion rules by mixing commands and completion
+            if decision.complete:
                 if commands:
-                    self.logger.error(
-                        "[WARN] COMPLETION RULE VIOLATION: LLM output EXECUTE commands AND completion signal in same response!"
-                    )
-                    self.logger.warning(
-                        "[NOTE] This violates the prompt rules. Ignoring completion signal and continuing execution..."
-                    )
-
-                    # Add feedback to help LLM learn
-                    self.add_to_context(
-                        "system",
-                        "[WARN] FORMAT VIOLATION: You output both EXECUTE commands and 'INVESTIGATION COMPLETE' in the same response.\n"
-                        "This is explicitly forbidden. You must:\n"
-                        "1. Execute tools -> Wait for results -> Then decide\n"
-                        "2. NEVER output completion signals in the same response as tool calls\n"
-                        "Please continue with analysis of the tool results.",
-                    )
-                    # Don't mark as complete - continue execution
+                    self.logger.warning("Ignoring complete=True because the same decision contains tool actions")
                 else:
                     self.logger.info("✅ AI indicates investigation is complete")
                     exec_results.investigation_complete = True
                     exec_results.completed_at = datetime.now()
                     break
 
-            # Check for user question (ASK_USER directive)
-            if "ASK_USER:" in response:
-                question = self.question_handler.parse_from_response(response)
-                if question:
-                    self.logger.info(f"❓ AI asks: {question.question}")
-                    self._emit_cot("Question", f"❓ AI asks: {question.question}")
-                    if question.options:
-                        self._emit_cot("Question", f"   Options: {' | '.join(question.options)}")
-
-                    # Emit to UI if callback is set
-                    if self._ui_question_callback:
-                        self._ui_question_callback(question)
-
-                    exec_results.pending_question = question
-                    self.logger.info("[PAUSED] Execution paused - waiting for user input")
-                    break  # Pause execution loop
+            if decision.question:
+                question = UserQuestion(
+                    question=decision.question,
+                    header=decision.question[:30],
+                    options=decision.question_options,
+                )
+                self.logger.info(f"❓ AI asks: {question.question}")
+                self._emit_cot("Question", f"❓ AI asks: {question.question}")
+                if self._ui_question_callback:
+                    self._ui_question_callback(question)
+                exec_results.pending_question = question
+                break
 
             # Live CoT View - emit reasoning to both terminal and UI
             if reasoning and getattr(self.config.ollama, "show_reasoning", True):
@@ -3430,164 +2479,100 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
             exec_results.completed_at = datetime.now()
             self.logger.warning(f"[WARN] Execution loop ended after {step} steps (max reached)")
 
+        plugin_context.data["execution_results"] = exec_results
+        self.plugin_manager.run(PluginHook.AFTER_EXECUTION, plugin_context)
+        exec_results = plugin_context.data.get("execution_results", exec_results)
         self.logger.info(f"[OK] Execution loop complete: {exec_results.total_steps} steps executed")
         return exec_results
 
     def _execution_agent_rank(self, tool_name: str, result: Any, goal: str, max_items: int = 20) -> Any:
-        """Ask execution agent to rank/filter large results for relevance."""
-        result_str = json.dumps(result, indent=2) if isinstance(result, (dict, list)) else str(result)
-        item_count = (
-            len(result) if isinstance(result, list) else len(result.get("items", [])) if isinstance(result, dict) else 0
-        )
+        """Filter a large result using DSPy's typed index selection."""
+        container_key = None
+        if isinstance(result, list):
+            items = result
+        elif isinstance(result, dict):
+            container_key = next(
+                (key for key in ("items", "functions", "imports", "exports", "strings") if isinstance(result.get(key), list)),
+                None,
+            )
+            if container_key is None:
+                return result
+            items = result[container_key]
+        else:
+            return result
 
-        preview = "\n".join(result_str.split("\n")[:50])
-        if len(result_str.split("\n")) > 50:
-            preview += f"\n... ({len(result_str.split(chr(10))) - 50} more lines)"
-
-        ranking_prompt = f"""Executed {tool_name}, got {item_count} results. GOAL: {goal}
-
-Results Preview:
-{preview}
-
-Select top {max_items} MOST RELEVANT. Prioritize: security APIs, suspicious patterns, entry points, goal-specific.
-Output ONLY JSON (same structure), top {max_items} items."""
+        preview_lines = []
+        preview_size = 0
+        for index, item in enumerate(items):
+            line = f"{index}: {str(item)[:500]}"
+            if preview_size + len(line) > 12000:
+                break
+            preview_lines.append(line)
+            preview_size += len(line)
 
         try:
-            self.logger.info(f"🎯 Ranking {item_count} from {tool_name}")
-            resp = self.ollama.generate(prompt=ranking_prompt, system_prompt="Filter. Output JSON only.", phase="execution")
-            cleaned = "\n".join([line for line in resp.strip().split("\n") if not line.startswith("```")]).strip()
-            filtered = json.loads(cleaned)
-            self.logger.info(
-                f"[OK] Kept {len(filtered) if isinstance(filtered, list) else len(filtered.get('items', []))}/{item_count}"
-            )
+            indices = self.dspy_program.rank(goal, tool_name, "\n".join(preview_lines), max_items)
+            indices = list(dict.fromkeys(index for index in indices if 0 <= index < len(items)))
+            if not indices:
+                return result
+            selected = [items[index] for index in indices]
+            if container_key is None:
+                return selected
+            filtered = dict(result)
+            filtered[container_key] = selected
             return filtered
-        except Exception as e:
-            self.logger.warning(f"[WARN] Ranking failed: {e}")
+        except Exception as exc:
+            self.logger.warning("Execution ranking failed: %s", exc)
             return result
 
     def _build_execution_loop_prompt(self, exec_results: ExecutionPhaseResults, current_step: int) -> Tuple[str, str]:
-        """
-        Build prompt for execution loop iteration.
-
-        Shows AI the goal, plan, and results so far, asks for next tool.
-
-        Args:
-            exec_results: Accumulated execution results so far
-            current_step: Current step number
-
-        Returns:
-            Tuple of (system_prompt, user_prompt)
-        """
-        # Build base structured prompt for execution phase
-        system_prompt, _ = self._build_structured_prompt(phase="execution")
-
-        # Build custom user prompt (dynamic - shows progress)
+        """Build the dynamic evidence state for a typed DSPy execution decision."""
+        system_prompt, _ = self._build_phase_context(phase="execution")
         loop_num = self.current_loop_number
-        user_sections = [
-            f"## Investigation Goal\n{exec_results.goal}",
-            f"\n## Execution Plan\n{exec_results.plan}",
-            f"\n## Progress: Loop {loop_num}, Step {current_step} (completed {exec_results.total_steps} steps in this loop)",
+        sections = [
+            f"## Goal\n{exec_results.goal}",
+            f"## Plan\n{exec_results.plan}",
+            f"## Progress\nCycle {loop_num}, decision {current_step}; "
+            f"{exec_results.total_steps} tool actions completed this cycle.",
         ]
 
-        # Show previous loop results if this is cycle 2+
-        if loop_num > 1 and self.step_result_map:
-            prev_loop_results = [
-                (sid, exc) for sid, exc in self.step_result_map.values() if not sid.startswith(f"step_L{loop_num}_")
-            ]
-            if prev_loop_results:
-                user_sections.append("\n## Results from Previous Loop(s) (available via get_cached_result):")
-                for step_id, excerpt in prev_loop_results[:5]:  # Limit to 5 to avoid bloat
-                    user_sections.append(f"- {step_id}: {excerpt[:100]}...")
-                if len(prev_loop_results) > 5:
-                    user_sections.append(f"  ... and {len(prev_loop_results) - 5} more results")
+        previous = [
+            (step_id, excerpt)
+            for step_id, excerpt in self.step_result_map.values()
+            if not step_id.startswith(f"step_L{loop_num}_")
+        ]
+        if previous:
+            lines = [f"- {step_id}: {excerpt[:100]}" for step_id, excerpt in previous[:5]]
+            sections.append("## Earlier-cycle evidence (cached)\n" + "\n".join(lines))
 
-        # Show execution results so far in current loop
         if exec_results.tool_executions:
-            user_sections.append(f"\n## Execution Results (Loop {loop_num}):")
-            for i, tool_exec in enumerate(exec_results.tool_executions, 1):
-                step_id = f"step_L{loop_num}_{i}"
-                result_preview = str(tool_exec.result)[:500]  # Truncate for context
-                if len(str(tool_exec.result)) > 500:
-                    result_preview += "..."
-                user_sections.append(f"\n{step_id}: {tool_exec.tool_name}({tool_exec.parameters})")
-                user_sections.append(f"Result: {result_preview}")
+            lines = []
+            for index, execution in enumerate(exec_results.tool_executions, 1):
+                preview = str(execution.result)
+                if len(preview) > 500:
+                    preview = preview[:500] + "…"
+                lines.append(
+                    f"step_L{loop_num}_{index}: {execution.tool_name}({execution.parameters})\nResult: {preview}"
+                )
+            sections.append("## Current-cycle evidence\n" + "\n\n".join(lines))
 
-        # Helper to get coverage info (ONLY when task mode is enabled)
-        coverage_section = ""
-        task_mode_enabled = bool(getattr(self, "task_mode_enabled", False))
-
-        if task_mode_enabled and self.coverage_tracker:
-            coverage_section = self.coverage_tracker.format_for_prompt()
-
-        # Helper to get lead info (ONLY when task mode is enabled)
-        leads_section = ""
-        if task_mode_enabled and self.lead_tracker:
-            # Parse leads from previous cycle results if any
+        if self.task_mode_enabled and self.coverage_tracker:
+            sections.append(self.coverage_tracker.format_for_prompt())
+        if self.task_mode_enabled and self.lead_tracker:
             if exec_results.analysis_dump:
                 self.lead_tracker.parse_analysis_dump(exec_results.analysis_dump)
-            leads_section = self.lead_tracker.format_for_prompt()
+            sections.append(self.lead_tracker.format_for_prompt())
+        if self.grep_layer_enabled:
+            sections.append(
+                "Hybrid search is available for behavioral function discovery; "
+                "decompile relevant matches before treating them as evidence."
+            )
 
-        # Instructions for next step - WITH or WITHOUT investigation methodology based on task mode
-        if task_mode_enabled:
-            # Task Mode ON: Simplified instructions (methodology moved to system prompt)
-
-            # Add hybrid search reminder banner if enabled
-            hybrid_search_banner = ""
-            if self.grep_layer_enabled:
-                hybrid_search_banner = """
-🔥 **HYBRID SEARCH ENABLED** - Use search_function_summaries with BEHAVIORAL queries
-   Example: "Find code that reads credential files with obfuscated path construction"
-   (See system prompt for query construction guide)
-
-"""
-
-            user_sections.append(f"""
-{hybrid_search_banner}{coverage_section}
-
-{leads_section}
-
-## Your Task
-
-Based on the goal, plan, and results so far, determine the NEXT step(s).
-
-Use search_function_summaries with behavioral/semantic queries for discovery.
-Follow the 4-step methodology (DISCOVER → LOCATE → TRACE → VERIFY) from the system prompt.
-
-REASONING: [Why you're executing these tools - which area/lead are you investigating?]
-EXECUTE: tool_name(param1="value1", param2="value2")
-
-If investigation is complete: "INVESTIGATION COMPLETE"
-""")
-        else:
-            # Task Mode OFF: Simple, direct instructions
-
-            # Add hybrid search reminder banner if enabled
-            hybrid_search_banner = ""
-            if self.grep_layer_enabled:
-                hybrid_search_banner = """
-🔥 **HYBRID SEARCH ENABLED** - Use search_function_summaries with BEHAVIORAL queries
-   Example: "Find functions that decode configuration data at runtime"
-   (See system prompt for full query guide)
-
-"""
-
-            user_sections.append(f"""
-{hybrid_search_banner}## Your Task
-
-Answer the user's question using the appropriate Ghidra tools.
-
-Focus on what was asked - don't over-investigate unless it's a security analysis task.
-Use behavioral queries with search_function_summaries when discovering functions.
-
-REASONING: [What you're doing]
-EXECUTE: tool_name(param1="value1")
-
-If done: "INVESTIGATION COMPLETE"
-""")
-
-        user_prompt = "\n".join(user_sections)
-
-        return (system_prompt, user_prompt)
+        sections.append(
+            "Choose the next necessary tool actions. Ask a question only if a user choice is required. "
+            "Set complete only when the evidence is sufficient to answer the goal."
+        )
+        return system_prompt, "\n\n".join(section for section in sections if section)
 
     def _analyze_execution_results(self, exec_results: ExecutionPhaseResults) -> str:
         """
@@ -3608,6 +2593,12 @@ If done: "INVESTIGATION COMPLETE"
             Final analysis response
         """
         self.logger.info("📊 Starting analysis phase (hybrid approach)")
+        plugin_context = self._run_plugin_hook(
+            PluginHook.BEFORE_ANALYSIS,
+            cycle=self.current_loop_number,
+            execution_results=exec_results,
+        )
+        exec_results = plugin_context.data.get("execution_results", exec_results)
 
         # Import the hybrid context components
         from src.context_manager import RelevanceRanker, CorrelationHintBuilder
@@ -3691,7 +2682,10 @@ If done: "INVESTIGATION COMPLETE"
             except Exception as e:
                 self.logger.warning(f"Failed to save analysis dump: {e}")
 
-        return final_response
+        plugin_context.response = final_response
+        plugin_context.data["consolidated_findings"] = consolidated_findings
+        self.plugin_manager.run(PluginHook.AFTER_ANALYSIS, plugin_context)
+        return plugin_context.response
 
     def _generate_minimal_findings_from_raw(
         self, exec_results: ExecutionPhaseResults, formatted_ranked: str, formatted_hints: str
@@ -3775,435 +2769,46 @@ If done: "INVESTIGATION COMPLETE"
     def _consolidate_findings_hybrid(
         self, exec_results: ExecutionPhaseResults, formatted_ranked: str, formatted_hints: str
     ) -> dict:
-        """
-        Phase 3a: Consolidate findings using ranked results and correlation hints.
-
-        This replaces the original _consolidate_findings with hybrid context.
-
-        Args:
-            exec_results: Full execution results (for metadata)
-            formatted_ranked: Pre-formatted ranked results by category
-            formatted_hints: Pre-formatted correlation hints
-
-        Returns:
-            Structured dict with consolidated findings
-        """
-        self.logger.info("🔍 Phase 3a: Consolidating findings (hybrid)...")
-
-        # Build prompt with ranked results + hints
-        consolidation_prompt = f"""
-## Task: Extract Structured Findings
-
-You are analyzing binary analysis results that have been ranked by relevance and include cross-tool correlations.
-
-## Investigation Goal
-{exec_results.goal}
-
-## Ranked Results ({exec_results.total_steps} total steps, showing top per category)
-{formatted_ranked}
-
-{formatted_hints}
-
-## Required Output Format
-
-Return ONLY valid JSON with this exact structure (no markdown, no explanation):
-
-{{
-  "binary_purpose": "Brief 1-2 sentence description of what the binary does",
-  "security_apis": [
-    {{"address": "0x...", "name": "API_Name", "context": "How it's used (1 sentence)"}}
-  ],
-  "investigation_leads": [
-    {{"address": "0x...", "observation": "What you observed", "hypothesis": "What this might indicate", "priority": "HIGH/MEDIUM/LOW", "next_step": "Specific action to verify"}}
-  ],
-  "artifacts": [
-    {{"address": "0x...", "type": "manifest/string/key", "value": "The actual content (truncated if long)"}}
-  ],
-  "key_functions": [
-    {{"address": "0x...", "name": "Function name", "purpose": "What it does"}}
-  ],
-  "investigation_gaps": [
-    "What aspect still needs investigation"
-  ],
-  "recommended_next_steps": [
-    "Specific action or tool to use next"
-  ]
-}}
-
-RULES:
-1. Include items based on EVIDENCE from the ranked results above
-2. PAY SPECIAL ATTENTION to the Cross-Tool Correlations - these are high-value patterns
-3. investigation_leads captures patterns you find interesting or suspicious
-4. investigation_gaps identifies what's still unknown
-5. recommended_next_steps suggests specific tools/actions for follow-up
-6. Limit each array to the 10 MOST IMPORTANT items
-7. Keep descriptions concise (under 100 chars)
-8. If no items for a category, use an empty array []
-9. Return ONLY the JSON object, nothing else
-"""
-
-        system_prompt = """You are a binary analysis expert extracting structured findings.
-Output ONLY valid JSON. No markdown code blocks. No explanations. Just the JSON object."""
-
+        """Consolidate ranked evidence through DSPy's typed output contract."""
+        self.logger.info("🔍 Phase 3a: Consolidating findings with DSPy...")
         try:
-            response = self.ollama.generate(
-                prompt=consolidation_prompt,
-                system_prompt=system_prompt,
-                phase="analysis",
-                max_tokens=getattr(self.llm_config, "analysis_consolidation_max_tokens", 1200),
+            findings = self.dspy_program.consolidate(
+                goal=exec_results.goal,
+                ranked_evidence=formatted_ranked,
+                correlations=formatted_hints,
             )
-
-            # CRITICAL: Check if response is empty (happens with reasoning models)
-            if not response or len(response.strip()) == 0:
-                self.logger.error("[WARN] Consolidation returned EMPTY response - likely exhausted tokens on reasoning")
-                self.logger.info("[NOTE] Generating minimal findings structure from raw results...")
-                return self._generate_minimal_findings_from_raw(exec_results, formatted_ranked, formatted_hints)
-
-            # Clean response - remove any markdown code blocks if present
-            cleaned = response.strip()
-            if cleaned.startswith("```"):
-                lines = cleaned.split("\n")
-                lines = [line for line in lines if not line.startswith("```")]
-                cleaned = "\n".join(lines)
-
-            # Try to parse JSON
-            findings = json.loads(cleaned)
-
-            # Validate required keys
-            required_keys = [
-                "binary_purpose",
-                "security_apis",
-                "investigation_leads",
-                "artifacts",
-                "key_functions",
-                "investigation_gaps",
-                "recommended_next_steps",
-            ]
-            for key in required_keys:
-                if key not in findings:
-                    findings[key] = [] if key != "binary_purpose" else "Unknown"
-
             self.logger.info(
-                f"✅ Consolidated (hybrid): {len(findings.get('security_apis', []))} APIs, "
-                f"{len(findings.get('investigation_leads', []))} leads, "
-                f"{len(findings.get('investigation_gaps', []))} gaps"
+                "✅ Consolidated: %d APIs, %d leads, %d gaps",
+                len(findings["security_apis"]),
+                len(findings["investigation_leads"]),
+                len(findings["investigation_gaps"]),
             )
-
             return findings
+        except Exception as exc:
+            self.logger.warning("DSPy evidence consolidation failed: %s", exc)
+            return self._generate_minimal_findings_from_raw(exec_results, formatted_ranked, formatted_hints)
 
-        except json.JSONDecodeError as e:
-            self.logger.warning(f"JSON parse failed in hybrid consolidation: {e}")
-            return {
-                "binary_purpose": "Analysis consolidation failed - see raw results",
-                "security_apis": [],
-                "investigation_leads": [],
-                "artifacts": [],
-                "key_functions": [],
-                "investigation_gaps": ["Consolidation failed - check logs"],
-                "recommended_next_steps": ["Retry analysis"],
-                "_raw_response": response[:2000] if response else "",
-            }
-        except Exception as e:
-            self.logger.error(f"Hybrid consolidation failed: {e}")
-            # Fail-open: return a minimal structure plus compact previews so the run is usable even
-            # under 429/504 conditions.
-            ranked_preview = formatted_ranked
-            hints_preview = formatted_hints
-            try:
-                if self.result_compactor is not None:
-                    ranked_preview = self.result_compactor._cap_chars(str(formatted_ranked))
-                    hints_preview = self.result_compactor._cap_chars(str(formatted_hints))
-                else:
-                    ranked_preview = str(formatted_ranked)[:1500]
-                    hints_preview = str(formatted_hints)[:800]
-            except Exception:
-                ranked_preview = str(formatted_ranked)[:1500]
-                hints_preview = str(formatted_hints)[:800]
 
-            return {
-                "binary_purpose": f"Consolidation error: {str(e)}",
-                "security_apis": [],
-                "investigation_leads": [],
-                "artifacts": [],
-                "key_functions": [],
-                "investigation_gaps": ["LLM consolidation failed; see ranked preview"],
-                "recommended_next_steps": ["Retry analysis", "Use get_cached_result for key steps"],
-                "_ranked_preview": ranked_preview,
-                "_correlation_preview": hints_preview,
-            }
-
-    def _format_results_with_context(self, exec_results: ExecutionPhaseResults) -> str:
-        """
-        Format execution results with context-aware truncation and summarization.
-
-        Uses the context manager to:
-        - Apply sliding window: last MAX_DETAILED_STEPS get full context
-        - Apply tiered summarization: current loop > previous loop > older loops
-        - Summarize or truncate large results
-        - Stay within context budget
-
-        Args:
-            exec_results: Accumulated tool execution results
-
-        Returns:
-            Formatted string suitable for prompt inclusion
-        """
-        if not exec_results.tool_executions:
-            return "No tool executions recorded."
-
-        # Set current loop for tiered context
-        self.context_manager.set_current_loop(self.current_loop_number)
-
-        sections = []
-        total = len(exec_results.tool_executions)
-
-        # Determine sliding window boundary
-        sliding_window_start = max(0, total - self.context_manager.MAX_DETAILED_STEPS)
-
-        for i, tool_exec in enumerate(exec_results.tool_executions, 1):
-            # Determine if within sliding window (recent steps)
-            is_in_sliding_window = (i - 1) >= sliding_window_start
-
-            # Process result through context manager with tiered context
-            result_text = str(tool_exec.result) if tool_exec.result else "No result"
-            step_id = f"step_L{self.current_loop_number}_{i}"
-
-            # Get loop number for this result (default to current loop)
-            result_loop = getattr(tool_exec, "loop_number", self.current_loop_number)
-
-            if is_in_sliding_window:
-                # Within sliding window: use tiered display based on loop age
-                display_content = self.context_manager.get_tiered_display_content(
-                    result=result_text, result_loop=result_loop, tool_name=tool_exec.tool_name, step_id=step_id
-                )
-
-                # Build full section
-                section_lines = [f"\n### {step_id}: {tool_exec.tool_name}"]
-
-                # Add reasoning if present
-                if tool_exec.reasoning:
-                    # Truncate long reasoning
-                    reasoning_text = (
-                        tool_exec.reasoning[:150] + "..." if len(tool_exec.reasoning) > 150 else tool_exec.reasoning
-                    )
-                    section_lines.append(f"Reasoning: {reasoning_text}")
-
-                # Add parameters
-                param_str = ", ".join([f'{k}="{v}"' for k, v in tool_exec.parameters.items()])
-                section_lines.append(f"Parameters: {param_str}")
-
-                # Add result
-                section_lines.append(f"Result:\n{display_content}")
-
-                sections.append("\n".join(section_lines))
-            else:
-                # Outside sliding window: compressed one-liner with cache hint
-                section = f"\n• {step_id}: {tool_exec.tool_name} - "
-                if len(result_text) > 100:
-                    section += f'{len(result_text):,} chars [use get_cached_result("{step_id}")]'
-                else:
-                    section += result_text[:100]
-                sections.append(section)
-
-        return "\n".join(sections)
-
-    def _consolidate_findings(self, exec_results: ExecutionPhaseResults) -> dict:
-        """
-        Phase 3a: Extract and structure key findings from execution results.
-
-        This is the first step of two-phase analysis. It extracts key findings
-        into a structured JSON format, drastically reducing context size for
-        the subsequent synthesis step.
-
-        Args:
-            exec_results: Accumulated results from execution loop
-
-        Returns:
-            Structured dict with consolidated findings
-        """
-        self.logger.info("🔍 Phase 3a: Consolidating findings...")
-
-        # Format results (compressed for consolidation)
-        formatted_results = self._format_results_with_context(exec_results)
-
-        consolidation_prompt = f"""
-## Task: Extract Structured Findings
-
-You are analyzing binary analysis results. Extract the KEY findings into a structured JSON format.
-
-## Investigation Goal
-{exec_results.goal}
-
-## Execution Results ({exec_results.total_steps} steps)
-{formatted_results}
-
-## Required Output Format
-
-Return ONLY valid JSON with this exact structure (no markdown, no explanation):
-
-{{
-  "binary_purpose": "Brief 1-2 sentence description of what the binary does",
-  "security_apis": [
-    {{"address": "0x...", "name": "API_Name", "context": "How it's used (1 sentence)"}}
-  ],
-  "investigation_leads": [
-    {{"address": "0x...", "observation": "What you observed", "hypothesis": "What this might indicate", "priority": "HIGH/MEDIUM/LOW", "next_step": "Specific action to verify"}}
-  ],
-  "artifacts": [
-    {{"address": "0x...", "type": "manifest/string/key", "value": "The actual content (truncated if long)"}}
-  ],
-  "key_functions": [
-    {{"address": "0x...", "name": "Function name", "purpose": "What it does"}}
-  ]
-}}
-
-RULES:
-1. Include items based on EVIDENCE from the tool results above
-2. investigation_leads captures patterns YOU find interesting or suspicious:
-   - observation: What did you see in the data? (API call, string, pattern, behavior)
-   - hypothesis: What could this mean? (potential capability, vulnerability, behavior)
-   - priority: How security-relevant is this lead?
-   - next_step: What specific action would verify or disprove your hypothesis?
-3. Be autonomous - identify leads based on YOUR analysis, not a predefined list
-4. Include leads for anything that warrants deeper investigation
-5. Limit each array to the 10 MOST IMPORTANT items
-6. Keep descriptions concise (under 100 chars)
-7. If no items for a category, use an empty array []
-8. Return ONLY the JSON object, nothing else
-"""
-
-        system_prompt = """You are a binary analysis expert extracting structured findings.
-Output ONLY valid JSON. No markdown code blocks. No explanations. Just the JSON object."""
-
-        try:
-            response = self.ollama.generate(
-                prompt=consolidation_prompt,
-                system_prompt=system_prompt,
-                phase="analysis",
-                max_tokens=getattr(self.llm_config, "analysis_consolidation_max_tokens", 1200),
-            )
-
-            # Clean response - remove any markdown code blocks if present
-            cleaned = response.strip()
-            if cleaned.startswith("```"):
-                # Remove markdown code block
-                lines = cleaned.split("\n")
-                lines = [line for line in lines if not line.startswith("```")]
-                cleaned = "\n".join(lines)
-
-            # Try to parse JSON
-            findings = json.loads(cleaned)
-
-            # Validate required keys
-            required_keys = ["binary_purpose", "security_apis", "investigation_leads", "artifacts", "key_functions"]
-            for key in required_keys:
-                if key not in findings:
-                    findings[key] = [] if key != "binary_purpose" else "Unknown"
-
-            self.logger.info(
-                f"✅ Consolidated: {len(findings.get('security_apis', []))} APIs, "
-                f"{len(findings.get('investigation_leads', []))} leads, "
-                f"{len(findings.get('key_functions', []))} functions"
-            )
-
-            return findings
-
-        except json.JSONDecodeError as e:
-            self.logger.warning(f"JSON parse failed in consolidation: {e}")
-            # Return minimal structure with raw response for fallback
-            return {
-                "binary_purpose": "Analysis consolidation failed - see raw results",
-                "security_apis": [],
-                "investigation_leads": [],
-                "artifacts": [],
-                "key_functions": [],
-                "_raw_response": response[:2000] if response else "",
-            }
-        except Exception as e:
-            self.logger.error(f"Consolidation failed: {e}")
-            return {
-                "binary_purpose": f"Consolidation error: {str(e)}",
-                "security_apis": [],
-                "investigation_leads": [],
-                "artifacts": [],
-                "key_functions": [],
-            }
 
     def _synthesize_report(self, findings: dict, goal: str) -> str:
-        """
-        Phase 3b: Generate final analysis report from consolidated findings.
-
-        This is the second step of two-phase analysis. It receives the compact
-        structured findings (not raw results) and writes a complete report.
-
-        Args:
-            findings: Consolidated findings dict from _consolidate_findings
-            goal: Original investigation goal
-
-        Returns:
-            Final analysis report string
-        """
-        self.logger.info("📝 Phase 3b: Synthesizing final report...")
-
-        # Format findings for the synthesis prompt
-        findings_text = json.dumps(findings, indent=2)
-
-        synthesis_prompt = f"""
-## Task: Write Final Analysis Report
-
-Based on the consolidated findings below, write a comprehensive analysis report.
-
-## Original Goal
-{goal}
-
-## Consolidated Findings
-{findings_text}
-
-## Report Requirements
-
-Write a clear, well-structured report that:
-
-1. **Binary Purpose**: Describe what the binary does based on the findings
-2. **Security Assessment**:
-   - Discuss investigation leads and their security implications
-   - Highlight HIGH priority leads that warrant further analysis
-   - Note any confirmed or strongly suspected security issues
-3. **Key Artifacts**: Reference important addresses and their significance
-4. **Recommended Next Steps**: What to investigate further based on the leads
-
-## Format
-
-Start your response with "FINAL RESPONSE:" and provide a complete analysis.
-Use markdown formatting. Include specific addresses where relevant.
-End with a clear conclusion - do NOT leave the report incomplete.
-"""
-
-        system_prompt = """You are writing a final binary analysis report.
-Be thorough but concise. Include specific addresses.
-IMPORTANT: You must provide a COMPLETE report with a conclusion. Do not truncate."""
-
+        """Render typed findings as the final evidence-based report."""
+        self.logger.info("📝 Phase 3b: Synthesizing final report with DSPy...")
+        guidance = (
+            "Write a complete, concise Markdown reverse-engineering report. "
+            "Directly answer the goal, distinguish evidence from hypotheses, cite addresses, "
+            "identify important gaps, and end with concrete next steps."
+        )
+        evidence = f"Goal:\n{goal}\n\nStructured findings:\n{json.dumps(findings, indent=2)}"
         try:
-            response = self.ollama.generate(
-                prompt=synthesis_prompt,
-                system_prompt=system_prompt,
-                phase="analysis",
+            response = self.dspy_program.analyze(
+                guidance=guidance,
+                evidence=evidence,
                 max_tokens=getattr(self.llm_config, "analysis_report_max_tokens", 1600),
             )
-
-            # CRITICAL: Check if response is empty (happens with reasoning models)
-            if not response or len(response.strip()) == 0:
-                self.logger.error("[WARN] LLM returned EMPTY response - likely exhausted tokens on reasoning")
-                self.logger.info("[NOTE] Generating fallback report from structured findings...")
-
-                # Generate a comprehensive fallback report from findings
-                return self._generate_fallback_report(findings, goal)
-
-            return response
-
-        except Exception as e:
-            self.logger.error(f"Synthesis failed: {e}")
-            # Fallback: return findings as formatted text
-            return self._generate_fallback_report(findings, goal, error=str(e))
+            return response if response and response.strip() else self._generate_fallback_report(findings, goal)
+        except Exception as exc:
+            self.logger.error("Report synthesis failed: %s", exc)
+            return self._generate_fallback_report(findings, goal, error=str(exc))
 
     def _generate_fallback_report(self, findings: dict, goal: str, error: str = None) -> str:
         """
@@ -4217,7 +2822,7 @@ IMPORTANT: You must provide a COMPLETE report with a conclusion. Do not truncate
         Returns:
             Formatted report string
         """
-        report_lines = ["FINAL RESPONSE:", ""]
+        report_lines = []
 
         if error:
             report_lines.append(f"## Analysis Report (Synthesis Error: {error})")
@@ -4392,9 +2997,16 @@ IMPORTANT: You must provide a COMPLETE report with a conclusion. Do not truncate
             Tuple of (goal_achieved: bool, reason: str)
         """
         self.logger.info("🔍 Evaluating goal achievement...")
-
-        # Build evaluation prompt
-        system_prompt, _ = self._build_structured_prompt(phase="evaluation")
+        plugin_context = self._run_plugin_hook(
+            PluginHook.BEFORE_EVALUATION,
+            query=goal,
+            response=analysis,
+            cycle=self.current_loop_number,
+            execution_results=exec_results,
+        )
+        goal = plugin_context.query
+        analysis = plugin_context.response
+        exec_results = plugin_context.data.get("execution_results", exec_results)
 
         # Smart truncation: preserve beginning (context) AND end (conclusions)
         # The conclusion is critical for goal evaluation and often appears at the end
@@ -4403,8 +3015,6 @@ IMPORTANT: You must provide a COMPLETE report with a conclusion. Do not truncate
         PRESERVE_END = 1500
 
         if len(analysis) > EVAL_MAX_CHARS:
-            # Check for completion indicators to help evaluation
-            has_final_response = "FINAL RESPONSE:" in analysis
             has_conclusion = any(
                 marker in analysis.lower()
                 for marker in ["conclusion", "summary", "in summary", "overall assessment", "investigation complete"]
@@ -4418,8 +3028,6 @@ IMPORTANT: You must provide a COMPLETE report with a conclusion. Do not truncate
 
             # Add completion signal hints
             completion_hints = []
-            if has_final_response:
-                completion_hints.append("Contains 'FINAL RESPONSE' marker")
             if has_conclusion:
                 completion_hints.append("Contains conclusion/summary section")
             if completion_hints:
@@ -4449,47 +3057,21 @@ Consider:
 3. Are there obvious gaps or missing details?
 4. Would the user be satisfied with this response?
 
-Respond with EXACTLY ONE of these formats:
-
-**If goal is fully achieved:**
-GOAL ACHIEVED
-
-**If more investigation needed:**
-GOAL NOT ACHIEVED: [one sentence explaining what's missing]
-
-Examples:
-- "GOAL ACHIEVED"
-- "GOAL NOT ACHIEVED: Need to investigate callers to understand usage"
-- "GOAL NOT ACHIEVED: Missing information about error handling"
-
-Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisfied.
+Be strict: set goal_achieved only when the goal is fully and completely
+satisfied, and explain any remaining gap in one concise sentence.
 """
 
-        response = self.ollama.generate_with_phase(user_prompt, phase="evaluation", system_prompt=system_prompt)
+        evaluation_guidance = (
+            "Evaluate completion conservatively. Analysis alone does not satisfy a goal that requested a mutation; "
+            "the corresponding tool must have completed successfully. Return the typed DSPy fields."
+        )
+        goal_achieved, reason = self.dspy_program.evaluate(evaluation_guidance, user_prompt)
 
-        # Retry if empty response (extends retry-on-empty to evaluation phase)
-        if not response or not response.strip():
-            self.logger.warning("Empty evaluation response - retrying with clarification...")
-            retry_prompt = (
-                user_prompt
-                + "\n\n[NOTE: Your previous response was empty. Please respond with either 'GOAL ACHIEVED' or 'GOAL NOT ACHIEVED: [reason]']"
-            )
-            response = self.ollama.generate_with_phase(retry_prompt, phase="evaluation", system_prompt=system_prompt)
-
-        # Parse response
-        response_clean = response.strip() if response else ""
-        goal_achieved = "GOAL ACHIEVED" in response_clean.upper() and "NOT ACHIEVED" not in response_clean.upper()
-
-        if goal_achieved:
-            reason = "Goal fully satisfied based on analysis"
-        else:
-            # Extract reason after "GOAL NOT ACHIEVED:"
-            if "GOAL NOT ACHIEVED:" in response_clean:
-                reason = response_clean.split("GOAL NOT ACHIEVED:", 1)[1].strip()
-            elif not response_clean:
-                reason = "Evaluation returned empty response after retry"
-            else:
-                reason = response_clean
+        plugin_context.data["goal_achieved"] = goal_achieved
+        plugin_context.data["evaluation_reason"] = reason
+        self.plugin_manager.run(PluginHook.AFTER_EVALUATION, plugin_context)
+        goal_achieved = bool(plugin_context.data.get("goal_achieved", goal_achieved))
+        reason = str(plugin_context.data.get("evaluation_reason", reason))
 
         self.logger.info(
             f"{'[OK]' if goal_achieved else '[WARN]'} Evaluation: {'Achieved' if goal_achieved else 'Not achieved'}"
@@ -4499,43 +3081,8 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
 
         return goal_achieved, reason
 
-    def _capture_function_summary(self, function_identifier: str, analysis_text: str) -> None:
-        """
-        Capture and store a function summary from AI analysis text.
 
-        Args:
-            function_identifier: Function address or name identifier
-            analysis_text: The AI analysis text to extract summary from
-        """
-        self.logger.info(
-            f"DEBUG: _capture_function_summary called for {function_identifier}, text length: {len(analysis_text)}"
-        )
-        summary = self._extract_function_summary(analysis_text)
-        self.logger.info(f"DEBUG: _extract_function_summary returned: '{summary}'")
-
-        if summary and summary != "No clear summary found":
-            # Store in bridge summaries
-            if not hasattr(self, "function_summaries"):
-                self.function_summaries = {}
-            self.function_summaries[function_identifier] = summary
-            self.logger.info(f"DEBUG: Captured summary for {function_identifier}: {summary[:100]}...")
-
-            # RAG integration removed - use "Load Vectors" button for vector operations
-            # self._add_function_to_rag(function_identifier, summary)
-
-            # ------------------------------------------------------------------
-            #  NEW: Attempt to gather caller x-refs for this function
-            # ------------------------------------------------------------------
-            addr = self._normalize_address(str(function_identifier))
-            if addr:
-                try:
-                    self._collect_xref_context(addr)
-                except Exception as e:
-                    self.logger.debug(f"Xref context collection failed for {function_identifier}: {e}")
-        else:
-            self.logger.warning(f"DEBUG: No valid summary extracted for {function_identifier}")
-
-    def _add_function_to_rag(self, function_identifier: str, func_data: Dict[str, Any]) -> None:
+    def _add_function_to_rag(self, function_identifier: str, func_data: Dict[str, Any]) -> int:
         """
         Add a function with enhanced metadata as a RAG vector AND to the knowledge graph.
 
@@ -4543,6 +3090,7 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
             function_identifier: Function address or name identifier
             func_data: Complete function data dict with metadata
         """
+        added_count = 0
         try:
             self.logger.info(f"DEBUG: _add_function_to_rag called for {function_identifier}")
 
@@ -4564,9 +3112,9 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
 
             if not (has_cag and rag_enabled):
                 self.logger.warning(f"DEBUG: Skipping RAG integration - has_cag: {has_cag}, rag_enabled: {rag_enabled}")
-                return
+                return 0
 
-            # ============ ENHANCED RAG DOCUMENT BUILDING ============
+            # Build rich RAG documents when metadata is available.
             try:
                 from src.rag_document_builder import RAGDocumentBuilder
 
@@ -4584,7 +3132,7 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
 
             except Exception as build_error:
                 self.logger.error(f"Enhanced RAG document building failed: {build_error}")
-                # Fallback to legacy format
+                # Fall back to a minimal document if enrichment fails.
                 new_name = func_data.get("new_name", function_identifier)
                 old_name = func_data.get("old_name", "Unknown")
                 summary = func_data.get("raw_summary", func_data.get("summary", ""))
@@ -4605,8 +3153,6 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
             if hasattr(self.cag_manager, "vector_store") and self.cag_manager.vector_store:
                 try:
                     import numpy as np
-
-                    added_count = 0
 
                     for rag_doc in rag_documents:
                         # Generate embedding
@@ -4647,6 +3193,9 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
 
                         added_count += 1
 
+                    if added_count and hasattr(self.cag_manager.vector_store, "_build_faiss_index"):
+                        self.cag_manager.vector_store._build_faiss_index()
+
                     new_name = func_data.get("new_name", function_identifier)
                     self.logger.info(f"✅ Successfully added {added_count} vector(s) for '{new_name}' to RAG")
                     self.logger.info(f"📊 Total documents: {len(self.cag_manager.vector_store.documents)}")
@@ -4660,14 +3209,10 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
 
                 except Exception as e:
                     self.logger.error(f"Error adding function to RAG: {e}")
-                except Exception as e:
-                    self.logger.error(f"Failed to add function to RAG vectors: {e}")
-                    import traceback
-
-                    self.logger.error(f"Full traceback: {traceback.format_exc()}")
 
         except Exception as e:
             self.logger.warning(f"Failed to add function to RAG vectors: {e}")
+        return added_count
 
     def _get_current_timestamp(self) -> str:
         """Get current timestamp as string."""
@@ -4675,62 +3220,6 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
 
         return datetime.now().isoformat()
 
-    def _extract_function_summary(self, analysis_text: str) -> str:
-        """Extract a concise function summary from AI analysis text."""
-        if not analysis_text:
-            return ""
-
-        # Look for key phrases that indicate function purpose
-        lines = analysis_text.split("\n")
-        summary_indicators = [
-            "this function",
-            "the function",
-            "it appears to",
-            "appears to be",
-            "responsible for",
-            "purpose is",
-            "main purpose",
-            "primary function",
-            "function does",
-            "function is",
-            "seems to",
-            "likely",
-            "probably",
-        ]
-
-        best_summary = ""
-        for line in lines:
-            line = line.strip()
-            if len(line) > 20 and len(line) < 200:  # Reasonable length
-                line_lower = line.lower()
-                if any(indicator in line_lower for indicator in summary_indicators):
-                    # Clean up the line
-                    if line.endswith("."):
-                        line = line[:-1]
-                    # Remove common prefixes
-                    for prefix in ["Based on the analysis, ", "It appears that ", "The function "]:
-                        if line.startswith(prefix):
-                            line = line[len(prefix) :]
-
-                    if len(line) > len(best_summary) and len(line) < 150:
-                        best_summary = line
-
-        # Fallback: look for any descriptive sentence
-        if not best_summary:
-            for line in lines:
-                line = line.strip()
-                if (
-                    len(line) > 30
-                    and len(line) < 150
-                    and ("." in line or "," in line)
-                    and not line.startswith("EXECUTE:")
-                    and not line.startswith("Step ")
-                    and "function" in line.lower()
-                ):
-                    best_summary = line
-                    break
-
-        return best_summary[:150] if best_summary else "Analysis performed"
 
     def _update_analysis_state(self, command: Dict[str, Any], result: str) -> None:
         """
@@ -4744,20 +3233,9 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
         if "ERROR" in result or "Failed" in result:
             return
 
-        # Track decompiled functions and capture summaries
-        if command["name"] == "decompile_function" and "name" in command["params"]:
-            function_name = command["params"]["name"]
-            # Don't add to functions_analyzed - decompilation is not the same as analysis
-            # Only actual analysis commands should increment the analyzed count
-
-            # Capture summary from the most recent AI response
-            if hasattr(self, "partial_outputs") and self.partial_outputs:
-                for output in reversed(self.partial_outputs):
-                    if output.get("type") in ["reasoning", "review"] and output.get("content"):
-                        self._capture_function_summary(function_name, output["content"])
-                        break
-
-        elif command["name"] == "decompile_function_by_address" and "address" in command["params"]:
+        # Function summaries are produced by the dedicated bulk-analysis path,
+        # not inferred from transient agent text.
+        if command["name"] == "decompile_function_by_address" and "address" in command["params"]:
             address = command["params"]["address"]
             self.analysis_state["functions_decompiled"].add(address)
             # Don't add to functions_analyzed - decompilation is not the same as analysis
@@ -4771,19 +3249,6 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
                 # to avoid double-counting the same function
                 if address not in self.analysis_state.get("functions_renamed", {}):
                     self.analysis_state["functions_analyzed"].add(address)
-            else:
-                # If no address provided, analyze_function uses current function
-                # We'll add it when we capture the summary with the actual address
-                pass
-
-            # Capture summary from the most recent AI response
-            if hasattr(self, "partial_outputs") and self.partial_outputs:
-                for output in reversed(self.partial_outputs):
-                    if output.get("type") in ["reasoning", "review"] and output.get("content"):
-                        # Use address if provided, otherwise we'll need to extract it from the result
-                        identifier = address if address else "current_function"
-                        self._capture_function_summary(identifier, output["content"])
-                        break
 
         # Track renamed functions
         elif command["name"] == "rename_function" and "old_name" in command["params"] and "new_name" in command["params"]:
@@ -4805,7 +3270,7 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
             # Method 2: If no address in old_name, try get_current_function (single function rename scenario)
             if not address:
                 try:
-                    current_function_result = self.ghidra.get_current_function()
+                    current_function_result = self.ghidra_client.get_current_function()
                     if isinstance(current_function_result, str) and "at " in current_function_result:
                         # Extract address from result like "Function: FUN_401000 at 401000"
                         match = re.search(r"at\s+([0-9a-fA-F]+)", current_function_result)
@@ -4818,7 +3283,7 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
             # Method 3: If still no address, try to get it from decompiling the function by name
             if not address:
                 try:
-                    decompile_result = self.ghidra.decompile_function(old_name)
+                    decompile_result = self.ghidra_client.decompile_function(old_name)
                     if isinstance(decompile_result, str):
                         addr_match = re.search(r"([0-9a-fA-F]{8,})", decompile_result)
                         if addr_match:
@@ -4834,22 +3299,6 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
                 self.function_address_mapping[address] = {"old_name": old_name, "new_name": new_name}
                 self.logger.info(f"DEBUG: Stored function mapping at address {address}: {old_name} -> {new_name}")
 
-                # Capture summary from the most recent AI response for rename workflow
-                self.logger.info(
-                    f"DEBUG: Checking partial_outputs for summary extraction, has partial_outputs: {hasattr(self, 'partial_outputs')}"
-                )
-                if hasattr(self, "partial_outputs"):
-                    self.logger.info(f"DEBUG: partial_outputs length: {len(self.partial_outputs)}")
-
-                    for output in reversed(self.partial_outputs):
-                        if output.get("type") in ["reasoning", "review"] and output.get("content"):
-                            self.logger.info("DEBUG: Found suitable partial_output for summary extraction")
-                            self._capture_function_summary(address, output["content"])
-                            break
-                    else:
-                        self.logger.warning("DEBUG: No suitable partial_outputs found for summary extraction")
-                else:
-                    self.logger.warning("DEBUG: No partial_outputs attribute found")
             else:
                 # Fallback: no address found, use old_name as identifier
                 self.analysis_state["functions_renamed"][old_name] = new_name
@@ -4905,463 +3354,21 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
             functions_analyzed.discard(duplicate)
             self.logger.debug(f"Removed duplicate function tracking: {duplicate} (kept in functions_renamed)")
 
-    def _check_for_clarification_request(self, response: str) -> bool:
-        """
-        Check if the AI's response is a request for clarification from the user.
 
-        Args:
-            response: The AI's response text
 
-        Returns:
-            True if the response is a clarification request, False otherwise
-        """
-        # Simple heuristic: look for question marks near the end of the response
-        # and check if the response doesn't contain any tool calls
-        if "EXECUTE:" not in response and "?" in response:
-            last_paragraph = response.split("\n\n")[-1].strip()
-            # If the last paragraph ends with a question mark, it's likely a clarification request
-            if last_paragraph.endswith("?"):
-                # Additional check: make sure it's not just showing code examples with question marks
-                if not ("`" in last_paragraph or "```" in last_paragraph):
-                    return True
-        return False
 
-    def _extract_suggestions(self, response: str) -> Tuple[str, List[str]]:
-        """
-        Extract tool improvement suggestions from the AI's response.
 
-        Args:
-            response: The AI's response text
 
-        Returns:
-            Tuple of (cleaned_response, list_of_suggestions)
-        """
-        suggestions = []
-        cleaned_lines = []
 
-        # Simple parsing: look for lines starting with "SUGGESTION:"
-        for line in response.split("\n"):
-            if line.strip().startswith("SUGGESTION:"):
-                suggestion = line.strip()[len("SUGGESTION:") :].strip()
-                suggestions.append(suggestion)
-            else:
-                cleaned_lines.append(line)
 
-        # If suggestions were found, log them
-        if suggestions:
-            self.logger.info(f"Found {len(suggestions)} tool improvement suggestions")
-            for suggestion in suggestions:
-                self.logger.info(f"Tool suggestion: {suggestion}")
-
-        return "\n".join(cleaned_lines), suggestions
-
-    def _generate_cohesive_report(self) -> str:
-        """
-        Generate a cohesive report from various data gathered during the analysis.
-
-        Returns:
-            A comprehensive report as a string
-        """
-        if not self.partial_outputs:
-            return "No analysis was performed or captured."
-
-        # Organize our partial outputs into sections for the report
-        report_sections = {
-            "plan": [],  # Added section for the initial plan
-            "findings": [],
-            "insights": [],
-            "analysis": [],
-            "tools": [],
-            "errors": [],  # Added section for errors
-            "conclusions": [],
-        }
-
-        # First, process the raw responses to capture information that might be truncated in cleaned responses
-        raw_responses = []
-        for output in self.partial_outputs:
-            if output["type"] in ["raw_response", "raw_review"]:
-                raw_responses.append(output["content"])
-
-        # Process partial outputs to populate sections
-        for output in self.partial_outputs:
-            content = output.get("content", "")
-            output_type = output.get("type", "")
-
-            # --- Capture Initial Plan ---
-            if output_type == "planning":
-                report_sections["plan"].append(content)
-                continue  # Skip further processing for plan content
-
-            # --- Process Reasoning (Cleaned & Raw) ---
-            if output_type in ["reasoning", "review"]:
-                # Use the cleaned reasoning/review content for keyword/structure matching
-
-                # Extract numbered insights
-                numbered_insights = []
-                in_numbered_list = False
-                current_insight = ""
-                for line in content.split("\n"):
-                    if re.match(r"^\s*\d+\.\s", line):
-                        if in_numbered_list and current_insight.strip():
-                            numbered_insights.append(current_insight.strip())
-                        in_numbered_list = True
-                        current_insight = line.strip()
-                    elif in_numbered_list and line.strip():
-                        current_insight += " " + line.strip()
-                    elif in_numbered_list:  # End of item
-                        if current_insight.strip():
-                            numbered_insights.append(current_insight.strip())
-                        in_numbered_list = False
-                        current_insight = ""
-                if in_numbered_list and current_insight.strip():
-                    numbered_insights.append(current_insight.strip())
-                if numbered_insights:
-                    report_sections["insights"].extend(numbered_insights)
-
-                # Extract bulleted findings
-                findings_section = False
-                for line in content.split("\n"):
-                    if any(marker in line.lower() for marker in ["i found:", "findings:", "key observations:", "key finding"]):
-                        findings_section = True
-                    elif findings_section and not line.strip():
-                        findings_section = False
-                    if findings_section or line.strip().startswith("- ") or line.strip().startswith("* "):
-                        if line.strip():
-                            report_sections["findings"].append(line.strip())
-
-                # Extract conclusions
-                if any(
-                    marker in content.lower()
-                    for marker in ["in conclusion", "to summarize", "in summary", "conclusion:", "final analysis"]
-                ):
-                    conclusion_text = ""
-                    in_conclusion = False
-                    for line in content.split("\n"):
-                        if any(
-                            marker in line.lower()
-                            for marker in ["in conclusion", "to summarize", "in summary", "conclusion:", "final analysis"]
-                        ):
-                            in_conclusion = True
-                        if in_conclusion and line.strip():
-                            conclusion_text += line + "\n"
-                    if conclusion_text:
-                        report_sections["conclusions"].append(conclusion_text.strip())
-
-                # Extract general analysis (exclude already captured parts)
-                analysis_content = content
-                for category in ["findings", "insights", "conclusions"]:
-                    for item in report_sections[category]:
-                        analysis_content = analysis_content.replace(item, "")
-                if analysis_content.strip():
-                    # Only add if it contains relevant technical terms
-                    if any(
-                        term in analysis_content.lower()
-                        for term in [
-                            "function",
-                            "address",
-                            "import",
-                            "export",
-                            "binary",
-                            "assembly",
-                            "code",
-                            "decompile",
-                            "call",
-                            "pointer",
-                            "struct",
-                        ]
-                    ):
-                        report_sections["analysis"].append(analysis_content.strip())
-
-        # --- Process Raw Responses for Additional Detail (before EXECUTE) ---
-        for raw_response in raw_responses:
-            # Extract text before the first EXECUTE block
-            pre_execute_text = raw_response.split("EXECUTE:", 1)[0].strip()
-            if not pre_execute_text:
-                continue
-
-            # Extract numbered insights from raw text
-            numbered_insights_raw = []
-            in_numbered_list_raw = False
-            current_insight_raw = ""
-            for line in pre_execute_text.split("\n"):
-                if re.match(r"^\s*\d+\.\s", line):
-                    if in_numbered_list_raw and current_insight_raw.strip():
-                        numbered_insights_raw.append(current_insight_raw.strip())
-                    in_numbered_list_raw = True
-                    current_insight_raw = line.strip()
-                elif in_numbered_list_raw and line.strip():
-                    current_insight_raw += " " + line.strip()
-                elif in_numbered_list_raw:
-                    if current_insight_raw.strip():
-                        numbered_insights_raw.append(current_insight_raw.strip())
-                    in_numbered_list_raw = False
-                    current_insight_raw = ""
-            if in_numbered_list_raw and current_insight_raw.strip():
-                numbered_insights_raw.append(current_insight_raw.strip())
-            if numbered_insights_raw:
-                report_sections["insights"].extend(numbered_insights_raw)
-
-            # Extract bulleted findings from raw text
-            for line in pre_execute_text.split("\n"):
-                if line.strip().startswith("- ") or line.strip().startswith("* "):
-                    if line.strip():
-                        report_sections["findings"].append(line.strip())
-
-            # Extract general analysis from raw text (exclude already captured parts)
-            analysis_content_raw = pre_execute_text
-            for category in ["findings", "insights"]:
-                for item in report_sections[category]:
-                    analysis_content_raw = analysis_content_raw.replace(item, "")
-            if analysis_content_raw.strip():
-                if any(
-                    term in analysis_content_raw.lower()
-                    for term in [
-                        "function",
-                        "address",
-                        "import",
-                        "export",
-                        "binary",
-                        "assembly",
-                        "code",
-                        "decompile",
-                        "call",
-                        "pointer",
-                        "struct",
-                    ]
-                ):
-                    report_sections["analysis"].append(analysis_content_raw.strip())
-
-        # --- Process Tool Results & Errors ---
-        tool_results = []
-        for output in self.partial_outputs:
-            if output["type"] in ["tool_result", "review_tool_result"]:
-                result_text = output.get("result", "")
-                step_info = f"Step {output.get('step', output.get('review_step', '?'))}"
-                tool_info = (
-                    f"{output.get('tool', 'unknown')}({', '.join([f'{k}={v}' for k, v in output.get('params', {}).items()])})"
-                )
-
-                # Check for errors
-                if "ERROR:" in result_text or "Failed" in result_text:
-                    report_sections["errors"].append(f"{step_info}: {tool_info} -> {result_text}")
-                else:
-                    # Successful result - summarize and add to tools list
-                    result_lines = result_text.split("\n")
-                    # Remove the RESULT: prefix if present
-                    result_content = "\n".join([line.replace("RESULT: ", "", 1) for line in result_lines if line.strip()])
-                    result_summary = result_content[:150] + ("..." if len(result_content) > 150 else "")
-                    tool_results.append(f"{step_info}: {tool_info} -> {result_summary}")
-
-        report_sections["tools"] = tool_results
-
-        # --- Deduplicate Sections ---
-        for section in report_sections:
-            if isinstance(report_sections[section], list):
-                seen = set()
-                # Keep order, filter duplicates (case-insensitive for strings)
-                report_sections[section] = [
-                    x
-                    for x in report_sections[section]
-                    if not (
-                        (x.lower() if isinstance(x, str) else x) in seen or seen.add((x.lower() if isinstance(x, str) else x))
-                    )
-                ]
-
-        # Option 1: Build a structured report manually
-        report = self._build_structured_report(report_sections)
-
-        # Return the manually structured report
-        return report
-
-    def _build_structured_report(self, report_sections):
-        """
-        Build a structured report from the collected sections.
-
-        Args:
-            report_sections: Dict of report sections
-
-        Returns:
-            A formatted report string
-        """
-        report = "# Analysis Report\n\n"
-
-        if report_sections["plan"]:
-            report += "## Initial Plan\n"
-            report += "\n".join(report_sections["plan"]) + "\n\n"
-
-        if report_sections["insights"]:
-            report += "## Key Insights\n"
-            report += "\n".join(report_sections["insights"]) + "\n\n"
-
-        if report_sections["findings"]:
-            report += "## Findings\n"
-            report += "\n".join(report_sections["findings"]) + "\n\n"
-
-        if report_sections["analysis"]:
-            report += "## Analysis Details\n"
-            report += "\n\n".join(report_sections["analysis"]) + "\n\n"
-
-        if report_sections["tools"]:
-            report += "## Tools Used (Successful)\n"
-            report += "\n".join([f"- {tool}" for tool in report_sections["tools"]]) + "\n\n"
-
-        if report_sections["errors"]:
-            report += "## Errors Encountered\n"
-            report += "\n".join([f"- {error}" for error in report_sections["errors"]]) + "\n\n"
-
-        if report_sections["conclusions"]:
-            report += "## Conclusions\n"
-            report += "\n".join(report_sections["conclusions"]) + "\n"
-
-        return report.strip()
-
-    def _parse_plan_tools(self, plan: str) -> List[Dict[str, Any]]:
-        """Parses the PLAN section from the AI's response."""
-        tools = []
-        # Regex to find all TOOL: lines
-        tool_lines = re.findall(r"TOOL:\s*(.*)", plan)
-
-        for line in tool_lines:
-            try:
-                # Split the line into the tool name and its parameters part
-                parts = line.split(" PARAMS: ", 1)
-                command_name = parts[0].strip()
-                params_str = parts[1].strip() if len(parts) > 1 else ""
-
-                params = {}
-                if params_str:
-                    # Use a more robust regex to parse key-value pairs
-                    # This handles quoted strings and unquoted numbers
-                    param_pairs = re.findall(r'(\w+)\s*=\s*(".*?"|\S+)', params_str)
-                    for key, value in param_pairs:
-                        # Strip quotes from string values
-                        if value.startswith('"') and value.endswith('"'):
-                            params[key] = value[1:-1]
-                        else:
-                            # Attempt to convert to int/float, otherwise keep as string
-                            try:
-                                if "." in value:
-                                    params[key] = float(value)
-                                else:
-                                    params[key] = int(value)
-                            except ValueError:
-                                params[key] = value
-
-                tools.append({"tool": command_name, "params": params})
-
-            except Exception as e:
-                self.logger.error(f"Error parsing tool line '{line}': {e}")
-
-        self.logger.info(f"Extracted {len(tools)} planned tools from plan")
-        return tools
-
-    def _mark_tool_as_executed(self, command_name: str, params: Dict[str, Any]) -> None:
-        """
-        Mark a tool as executed in the planned tools tracker.
-
-        Args:
-            command_name: The name of the executed command
-            params: The parameters used for the command
-        """
-        for tool_entry in self.planned_tools_tracker["planned"]:
-            if tool_entry["tool"] == command_name:
-                tool_entry["execution_status"] = "executed"
-                break
-
-    def _get_pending_critical_tools_prompt(self) -> str:
-        """
-        Generate a prompt section about pending critical tools.
-
-        Returns:
-            A string to be included in the review prompt if there are pending critical tools
-        """
-        # Update the pending_critical list based on current execution status
-        self.planned_tools_tracker["pending_critical"] = [
-            tool
-            for tool in self.planned_tools_tracker["planned"]
-            if tool["is_critical"] and tool["execution_status"] == "pending"
-        ]
-
-        if not self.planned_tools_tracker["pending_critical"]:
-            return ""
-
-        # Generate the prompt
-        pending_tools_prompt = "\n\nThere are pending critical tool calls that appear necessary but have not been executed:\n"
-
-        for tool in self.planned_tools_tracker["pending_critical"]:
-            pending_tools_prompt += f'- {tool["tool"]}: Mentioned in context "{tool["context"]}"\n'
-
-        pending_tools_prompt += "\nPlease ensure these critical tool calls are explicitly executed before concluding the task."
-
-        return pending_tools_prompt
-
-    def _check_implied_actions_without_commands(self, response_text: str) -> str:
-        """
-        Check if the response text implies actions that should be taken but doesn't include
-        the actual EXECUTE commands to perform those actions.
-
-        Args:
-            response_text: The AI's response text
-
-        Returns:
-            A prompt string asking for explicit commands if needed, otherwise empty string
-        """
-        # Skip if there are already commands in the response
-        if "EXECUTE:" in response_text:
-            return ""
-
-        # Check if this is a review prompt we generated - if so, don't re-analyze it
-        if "Your response implies certain actions should be taken" in response_text:
-            return ""
-
-        # Patterns that indicate implied actions without explicit commands
-        implied_action_patterns = [
-            (r"(should|will|going to|let's) rename", "rename_function"),
-            (r"(should|will|going to|let's) add comment", "set_decompiler_comment"),
-            (r"(suggest|proposed|recommend) (naming|naming it|renaming)", "rename_function"),
-            (r"(suggest|proposed|recommend) (to|that) name", "rename_function"),
-            (r"(appropriate|suitable|better|good|descriptive) name would be", "rename_function"),
-            (r"function (should|could|would) be (named|called)", "rename_function"),
-            (r"rename (the|this) function (to|as)", "rename_function"),
-            (r"naming it ['\"]([\w_]+)['\"]", "rename_function"),
-        ]
-
-        response_lower = response_text.lower()
-
-        # Check for implied actions
-        implied_actions = []
-        for pattern, related_tool in implied_action_patterns:
-            if re.search(pattern, response_lower):
-                implied_actions.append((pattern, related_tool))
-
-        if not implied_actions:
-            return ""
-
-        # Generate a prompt asking for explicit commands
-        action_prompt = (
-            "\n\nYour response implies certain actions should be taken, but you didn't include explicit EXECUTE commands:\n"
-        )
-
-        for pattern, tool in implied_actions:
-            matches = re.findall(pattern, response_lower)
-            if matches:
-                action_prompt += f"- You mentioned: '{pattern.replace('|', ' or ')}'\n"
-
-        action_prompt += "\nPlease provide explicit EXECUTE commands to perform these actions."
-        return action_prompt
 
     def add_to_context(self, role: str, content: str) -> None:
-        """
-        Add an entry to the context history.
-
-        This method now uses the Pydantic SessionMemory for structured storage
-        while maintaining backward compatibility with the legacy context list.
+        """Add an entry to the structured session history.
 
         Args:
             role: The role of the entry ('user', 'assistant', 'tool_call', 'tool_result', etc.)
             content: The content of the entry
         """
-        # Add to new Pydantic session (primary storage)
         try:
             message_role = MessageRole(role.lower())
             self.session.add_message(message_role, content)
@@ -5370,20 +3377,9 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
             self.logger.warning(f"Unknown role '{role}', defaulting to SYSTEM")
             self.session.add_message(MessageRole.SYSTEM, content)
 
-        # Maintain legacy context for backward compatibility
-        if isinstance(self.context, list):
-            self.context.append({"role": role, "content": content})
-        elif isinstance(self.context, dict):
-            if "history" not in self.context:
-                self.context["history"] = []
-            self.context["history"].append({"role": role, "content": content})
-        else:
-            # Create a new list if neither
-            self.context = [{"role": role, "content": content}]
-
     @property
     def ghidra(self):
-        """Property for backward compatibility with code referencing bridge.ghidra."""
+        """Compatibility alias for integrations that predate ``ghidra_client``."""
         return self.ghidra_client
 
     def _get_latest_agent_analysis_text(self) -> str:
@@ -5497,7 +3493,7 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
 
         try:
             # Collect function information
-            functions_result = self._collect_all_paginated_list_results(self.ghidra.list_functions)
+            functions_result = self._collect_all_paginated_list_results(self.ghidra_client.list_functions)
             if isinstance(functions_result, list):
                 data["functions"] = functions_result
             elif isinstance(functions_result, str) and not functions_result.startswith("ERROR:"):
@@ -5531,7 +3527,7 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
             data["metadata"]["analyzed_count"] = len(data["function_summaries"])
 
             # Collect imports
-            imports_result = self._collect_all_paginated_list_results(self.ghidra.list_imports)
+            imports_result = self._collect_all_paginated_list_results(self.ghidra_client.list_imports)
             if isinstance(imports_result, (list, str)) and not str(imports_result).startswith("ERROR:"):
                 if isinstance(imports_result, str):
                     data["imports"] = [i.strip() for i in imports_result.split("\n") if i.strip()]
@@ -5539,7 +3535,7 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
                     data["imports"] = imports_result
 
             # Collect exports
-            exports_result = self._collect_all_paginated_list_results(self.ghidra.list_exports)
+            exports_result = self._collect_all_paginated_list_results(self.ghidra_client.list_exports)
             if isinstance(exports_result, (list, str)) and not str(exports_result).startswith("ERROR:"):
                 if isinstance(exports_result, str):
                     data["exports"] = [e.strip() for e in exports_result.split("\n") if e.strip()]
@@ -5547,7 +3543,7 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
                     data["exports"] = exports_result
 
             # Collect memory segments
-            segments_result = self._collect_all_paginated_list_results(self.ghidra.list_segments)
+            segments_result = self._collect_all_paginated_list_results(self.ghidra_client.list_segments)
             if isinstance(segments_result, (list, str)) and not str(segments_result).startswith("ERROR:"):
                 if isinstance(segments_result, str):
                     data["segments"] = [s.strip() for s in segments_result.split("\n") if s.strip()]
@@ -5555,13 +3551,13 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
                     data["segments"] = segments_result
 
             # Collect classes/namespaces
-            classes_result = self._collect_all_paginated_list_results(self.ghidra.list_classes)
+            classes_result = self._collect_all_paginated_list_results(self.ghidra_client.list_classes)
             if isinstance(classes_result, (list, str)) and not str(classes_result).startswith("ERROR:"):
                 if isinstance(classes_result, str):
                     data["classes"] = [c.strip() for c in classes_result.split("\n") if c.strip()]
                 else:
                     data["classes"] = classes_result
-            namespaces_result = self._collect_all_paginated_list_results(self.ghidra.list_namespaces)
+            namespaces_result = self._collect_all_paginated_list_results(self.ghidra_client.list_namespaces)
             if isinstance(namespaces_result, (list, str)) and not str(namespaces_result).startswith("ERROR:"):
                 if isinstance(namespaces_result, str):
                     data["namespaces"] = [n.strip() for n in namespaces_result.split("\n") if n.strip()]
@@ -5569,7 +3565,7 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
                     data["namespaces"] = namespaces_result
 
             # Collect data items
-            data_items_result = self._collect_all_paginated_list_results(self.ghidra.list_data_items)
+            data_items_result = self._collect_all_paginated_list_results(self.ghidra_client.list_data_items)
             if isinstance(data_items_result, (list, str)) and not str(data_items_result).startswith("ERROR:"):
                 if isinstance(data_items_result, str):
                     data["data_items"] = [d.strip() for d in data_items_result.split("\n") if d.strip()]
@@ -5578,7 +3574,7 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
 
             # Collect strings with addresses for evidence
             try:
-                strings_result = self._collect_all_paginated_list_results(self.ghidra.list_strings)
+                strings_result = self._collect_all_paginated_list_results(self.ghidra_client.list_strings)
                 if isinstance(strings_result, list):
                     data["strings"] = strings_result  # JSON format likely includes addresses
                 elif isinstance(strings_result, str) and not strings_result.startswith("ERROR:"):
@@ -5594,7 +3590,7 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
 
         # Collect binary name and info
         try:
-            program_info = self.ghidra.get_current_program_info()
+            program_info = self.ghidra_client.get_current_program_info()
             data["metadata"]["binary_name"] = program_info.get("name", "Unknown Binary")
             data["metadata"]["project_name"] = program_info.get("project", "Unknown Project")
             self.logger.info(f"Collected binary info: {data['metadata']['binary_name']}")
@@ -5605,1292 +3601,91 @@ Be strict: Only mark as GOAL ACHIEVED if the goal is FULLY and COMPLETELY satisf
         return data
 
     def _perform_comprehensive_ai_analysis(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Perform AI-powered analysis of collected binary data."""
-        analysis = {
-            "software_classification": {},
-            "security_assessment": {},
-            "function_categorization": {},
-            "behavioral_analysis": {},
-            "architecture_analysis": {},
-            "risk_assessment": {},
+        """Analyze whole-program evidence through one typed DSPy signature."""
+        evidence = {
+            "metadata": data.get("metadata", {}),
+            "imports": data.get("imports", [])[:200],
+            "exports": data.get("exports", [])[:100],
+            "strings": data.get("strings", [])[:200],
+            "segments": data.get("segments", [])[:50],
+            "classes": data.get("classes", [])[:100],
+            "namespaces": data.get("namespaces", [])[:100],
+            "renamed_functions": data.get("renamed_functions", [])[:200],
+            "function_summaries": dict(list(data.get("function_summaries", {}).items())[:300]),
+            "prior_agent_analysis": data.get("agent_analysis_history", "")[-12000:],
         }
 
+        # Reuse the whole-program function index when available instead of
+        # rebuilding ad-hoc prompt-specific retrieval pipelines.
+        rag_context = []
+        seen = set()
+        vector_store = getattr(getattr(self, "cag_manager", None), "vector_store", None)
+        if vector_store:
+            for query in (
+                "software purpose and primary workflows",
+                "security sensitive behavior and dangerous APIs",
+                "architecture modules interfaces and initialization",
+            ):
+                try:
+                    for match in vector_store.search(query, top_k=12):
+                        document = match.get("document", {})
+                        identity = document.get("metadata", {}).get("address") or document.get("name")
+                        if identity in seen:
+                            continue
+                        seen.add(identity)
+                        rag_context.append(document)
+                except Exception as exc:
+                    self.logger.debug("Report RAG query failed: %s", exc)
+        evidence["rag_function_context"] = rag_context[:30]
+
         try:
-            # Software Classification Analysis
-            classification_prompt = self._build_classification_prompt(data)
-            classification_response = self.ollama.generate(prompt=classification_prompt)
-            analysis["software_classification"] = self._parse_classification_response(classification_response)
+            return self.dspy_program.analyze_software(json.dumps(evidence, default=str))
+        except Exception as exc:
+            self.logger.error("Whole-program DSPy analysis failed: %s", exc)
+            return {
+                "software_classification": {},
+                "security_assessment": {},
+                "function_categorization": {},
+                "behavioral_analysis": {},
+                "architecture_analysis": {},
+                "risk_assessment": {},
+                "error": str(exc),
+            }
 
-            # Security Assessment Analysis
-            security_prompt = self._build_security_assessment_prompt(data)
-            security_response = self.ollama.generate(prompt=security_prompt)
-            analysis["security_assessment"] = self._parse_security_response(security_response)
 
-            # Function Categorization Analysis
-            function_prompt = self._build_function_categorization_prompt(data)
-            function_response = self.ollama.generate(prompt=function_prompt)
-            analysis["function_categorization"] = self._parse_function_response(function_response)
 
-            # Behavioral Pattern Analysis
-            behavior_prompt = self._build_behavioral_analysis_prompt(data)
-            behavior_response = self.ollama.generate(prompt=behavior_prompt)
-            analysis["behavioral_analysis"] = self._parse_behavioral_response(behavior_response)
 
-            # Architecture Analysis
-            architecture_prompt = self._build_architecture_prompt(data)
-            architecture_response = self.ollama.generate(prompt=architecture_prompt)
-            analysis["architecture_analysis"] = self._parse_architecture_response(architecture_response)
 
-            # Overall Risk Assessment
-            risk_prompt = self._build_risk_assessment_prompt(data, analysis)
-            risk_response = self.ollama.generate(prompt=risk_prompt)
-            analysis["risk_assessment"] = self._parse_risk_response(risk_response)
 
-        except Exception as e:
-            self.logger.error(f"Error during AI analysis: {e}")
-            # Return partial analysis with error noted
-            analysis["error"] = str(e)
 
-        return analysis
 
-    def _format_agent_analysis_context(self, data: Dict[str, Any], analysis_type: str = "analysis") -> str:
-        """
-        Format the agent analysis history section for prompts.
 
-        Handles empty analysis gracefully by providing fallback content
-        and explicit permission to speculate based on available data.
 
-        Args:
-            data: Binary data dict containing 'agent_analysis_history'
-            analysis_type: Type of analysis for context-specific guidance
 
-        Returns:
-            Formatted analysis context string
-        """
-        analysis_history = data.get("agent_analysis_history", "")
 
-        # Check if analysis history is empty or just whitespace
-        if not analysis_history or not analysis_history.strip():
-            return f"""No prior agent analysis available for this binary.
 
-**IMPORTANT GUIDANCE:**
-- You may SPECULATE based on the binary data provided above (imports, exports, function names, strings).
-- Base your {analysis_type} on the concrete evidence available (function names, API imports, string references).
-- Clearly indicate when you are inferring behavior vs. reporting confirmed findings.
-- Do NOT refuse to analyze - provide your best assessment based on available data.
-- If certain about something, state it confidently. If uncertain, use phrases like "likely", "appears to", "suggests"."""
-        else:
-            return analysis_history
 
-    def _build_classification_prompt(self, data: Dict[str, Any]) -> str:
-        """Build prompt for software classification analysis."""
-        return f"""Analyze this binary and classify the software type and purpose.
 
-**Binary Information:**
-- Total Functions: {data["metadata"]["total_functions"]}
-- Renamed Functions: {data["metadata"]["renamed_count"]}
-- Analyzed Functions: {data["metadata"]["analyzed_count"]}
-- Imports: {len(data["imports"])} ({", ".join(data["imports"][:10])}{"..." if len(data["imports"]) > 10 else ""})
-- Exports: {len(data["exports"])} ({", ".join(data["exports"][:10])}{"..." if len(data["exports"]) > 10 else ""})
-- Memory Segments: {len(data["segments"])}
-- Classes/Namespaces: {len(data["classes"]) + len(data["namespaces"])}
 
-**Function Summaries:**
-{self._format_summaries_for_prompt(data["function_summaries"])}
 
-**Analysis Requirements:**
-Provide a structured classification following this EXACT format:
 
-**SOFTWARE_TYPE:** [Select ONE: Application, Library, Driver, Malware, System_Tool, Game, Utility, Service, Other]
-**PRIMARY_PURPOSE:** [Brief description of main functionality]
-**SECONDARY_FUNCTIONS:** [List of additional capabilities]
-**TARGET_PLATFORM:** [Windows/Linux/macOS/Cross-platform/Embedded]
-**ARCHITECTURE_STYLE:** [Monolithic/Modular/Service-oriented/Plugin-based/Other]
-**COMPLEXITY_LEVEL:** [Low/Medium/High/Very_High]
-**CLASSIFICATION_CONFIDENCE:** [0-100%]
-**EVIDENCE:** [Key evidence supporting this classification - MUST include specific function addresses, function names, and string examples. Format: "Function at address 0x... named '...' does X", "String 'Y' found at Z"]
 
-**PREVIOUS AGENT ANALYSIS:**
-{self._format_agent_analysis_context(data, "classification")}
 
-**IMPORTANT:** If prior analysis exists, use it as the PRIMARY SOURCE of truth. Otherwise, base your classification on the Binary Information above."""
 
-    def _build_security_assessment_prompt(self, data: Dict[str, Any]) -> str:
-        """Build prompt for security risk assessment."""
-        return f"""Perform a comprehensive security assessment of this binary.
 
-**Binary Data for Analysis:**
-- Functions: {data["metadata"]["total_functions"]} total, {data["metadata"]["renamed_count"]} renamed
-- Key Imports: {", ".join(data["imports"][:15])}{"..." if len(data["imports"]) > 15 else ""}
-- Function Summaries: {len(data["function_summaries"])} available
 
-**Renamed Functions and Behaviors:**
-{self._format_function_behaviors_for_security(data)}
 
-**Security Analysis Requirements:**
-Analyze for security risks and provide assessment in this EXACT format:
 
-**IMPORTANT:** For EACH suspicious indicator, security concern, or finding, you MUST provide:
-1. The specific function address (e.g., 0x401000)
-2. The function name
-3. Actual string values, API calls, or code patterns found
-4. Concrete examples from the binary
 
-**OVERALL_RISK_LEVEL:** [CRITICAL/HIGH/MEDIUM/LOW]
-**RISK_SCORE:** [0-100]
-**SECURITY_CATEGORIES:**
-- Network_Operations: [NONE/LOW/MEDIUM/HIGH/CRITICAL] - [description with specific addresses and functions]
-- File_System_Access: [NONE/LOW/MEDIUM/HIGH/CRITICAL] - [description with specific addresses and functions]
-- Registry_Manipulation: [NONE/LOW/MEDIUM/HIGH/CRITICAL] - [description with specific addresses and functions]
-- Process_Manipulation: [NONE/LOW/MEDIUM/HIGH/CRITICAL] - [description with specific addresses and functions]
-- Cryptographic_Operations: [NONE/LOW/MEDIUM/HIGH/CRITICAL] - [description with specific addresses and functions]
-- Memory_Management: [NONE/LOW/MEDIUM/HIGH/CRITICAL] - [description with specific addresses and functions]
-- Persistence_Mechanisms: [NONE/LOW/MEDIUM/HIGH/CRITICAL] - [description with specific addresses and functions]
-**SUSPICIOUS_INDICATORS:** [List EACH concerning behavior with format: "Description at address 0x... in function '...' - Evidence: specific API/string/pattern"]
-**MITIGATION_RECOMMENDATIONS:** [Security recommendations]
-**IOCS:** [Potential Indicators of Compromise with specific addresses and strings found]
 
-**PREVIOUS AGENT ANALYSIS:**
-{self._format_agent_analysis_context(data, "security assessment")}
 
-**IMPORTANT:** If prior analysis exists, use it as the PRIMARY SOURCE of truth. Otherwise, assess security risks based on the imports, function names, and behaviors observable in the Binary Data above."""
-
-    def _build_function_categorization_prompt(self, data: Dict[str, Any]) -> str:
-        """Build prompt for function categorization analysis."""
-        return f"""Categorize all functions in this binary by their primary purpose and behavior.
-
-**Available Function Data:**
-- Total Functions: {data["metadata"]["total_functions"]}
-- Renamed Functions with Summaries: {data["metadata"]["analyzed_count"]}
-- Sample Functions: {", ".join(data["functions"][:10])}{"..." if len(data["functions"]) > 10 else ""}
-
-**Function Summaries for Categorization:**
-{self._format_summaries_for_categorization(data["function_summaries"])}
-
-**Renamed Functions:**
-{self._format_renamed_functions(data["renamed_functions"])}
-
-**Categorization Requirements:**
-Analyze and categorize functions into standard categories. Provide results in this EXACT format:
-
-**IMPORTANT:** For each category with functions, list notable functions WITH their addresses in format: "function_name at 0x..."
-
-**FUNCTION_CATEGORIES:**
-**Network_Operations:** [count] - [function names WITH addresses (0x...) and brief descriptions]
-**File_IO_Operations:** [count] - [function names WITH addresses (0x...) and brief descriptions]
-**Memory_Management:** [count] - [function names WITH addresses (0x...) and brief descriptions]
-**Cryptographic_Functions:** [count] - [function names WITH addresses (0x...) and brief descriptions]
-**String_Processing:** [count] - [function names WITH addresses (0x...) and brief descriptions]
-**UI_Interface:** [count] - [function names WITH addresses (0x...) and brief descriptions]
-**Registry_Operations:** [count] - [function names WITH addresses (0x...) and brief descriptions]
-**Process_Control:** [count] - [function names WITH addresses (0x...) and brief descriptions]
-**Authentication:** [count] - [function names WITH addresses (0x...) and brief descriptions]
-**Configuration:** [count] - [function names WITH addresses (0x...) and brief descriptions]
-**Utility_Helper:** [count] - [function names WITH addresses (0x...) and brief descriptions]
-**Error_Handling:** [count] - [function names WITH addresses (0x...) and brief descriptions]
-**Main_Core:** [count] - [function names WITH addresses (0x...) and brief descriptions]
-**Unknown_Other:** [count] - [function names WITH addresses (0x...) and brief descriptions]
-
-**CATEGORY_INSIGHTS:** [Analysis of what the function distribution reveals about software purpose, cite specific address examples]
-
-**PREVIOUS AGENT ANALYSIS:**
-{self._format_agent_analysis_context(data, "function categorization")}
-
-**IMPORTANT:** If prior analysis exists, use it to guide categorization. Otherwise, categorize based on function names, import patterns, and observable code structure."""
-
-    def _build_behavioral_analysis_prompt(self, data: Dict[str, Any]) -> str:
-        """Build prompt for behavioral pattern analysis."""
-        return f"""Analyze behavioral patterns and workflows in this binary.
-
-**Behavioral Data:**
-- Function Summaries: {len(data["function_summaries"])} detailed analyses
-- Import Dependencies: {", ".join(data["imports"][:20])}
-- Export Capabilities: {", ".join(data["exports"][:10])}
-
-**Function Behavior Details:**
-{self._format_behavioral_data(data)}
-
-**Behavioral Analysis Requirements:**
-Identify patterns, workflows, and behavioral characteristics. Format response as:
-
-**IMPORTANT:** Cite specific function addresses demonstrating each behavioral pattern. Use format: "Behavior demonstrated by function at 0x..."
-
-**PRIMARY_WORKFLOWS:** [Main execution flows and processes - cite specific function addresses]
-**DATA_FLOW_PATTERNS:** [How data moves through the application - cite specific function addresses]
-**INTERACTION_PATTERNS:** [User, network, file, system interactions - cite specific function addresses and strings]
-**EXECUTION_MODELS:** [How the software operates - service, interactive, batch, etc. - cite specific function addresses]
-**DEPENDENCY_ANALYSIS:** [Key dependencies and their purposes - cite specific import/export addresses]
-**OPERATIONAL_MODES:** [Different modes of operation - cite specific function addresses]
-**TRIGGER_MECHANISMS:** [What causes different behaviors - cite specific addresses and conditions]
-**BEHAVIORAL_FINGERPRINT:** [Unique behavioral characteristics that identify this software - cite specific addresses and evidence]
-
-**PREVIOUS AGENT ANALYSIS:**
-{self._format_agent_analysis_context(data, "behavioral analysis")}
-
-**IMPORTANT:** If prior analysis exists, use it as the PRIMARY SOURCE. Otherwise, infer behavioral patterns from imports, exports, and function structures."""
-
-    def _build_architecture_prompt(self, data: Dict[str, Any]) -> str:
-        """Build prompt for software architecture analysis."""
-        return f"""Analyze the software architecture and design patterns used in this binary.
-
-**Architecture Data:**
-- Code Organization: {len(data["classes"])} classes, {len(data["namespaces"])} namespaces
-- Memory Layout: {len(data["segments"])} segments
-- Function Structure: {data["metadata"]["total_functions"]} functions
-- Data Structures: {len(data["data_items"])} data items
-
-**Function Architecture:**
-{self._format_architecture_data(data)}
-
-**Architecture Analysis Requirements:**
-Analyze the software architecture and provide results in this EXACT format:
-
-**ARCHITECTURAL_PATTERN:** [Layered/MVC/Component-based/Microservices/Monolithic/Other]
-**CODE_ORGANIZATION:** [How code is structured and organized]
-**MODULE_STRUCTURE:** [How different modules/components are arranged]
-**DESIGN_PATTERNS:** [Observable design patterns like Singleton, Factory, Observer, etc.]
-**MEMORY_LAYOUT:** [How memory is organized and used]
-**INTERFACE_DESIGN:** [How different components interface with each other]
-**SCALABILITY_DESIGN:** [How the architecture supports scalability]
-**ARCHITECTURE_QUALITY:** [Assessment of architectural quality and maintainability]
-**COMPLEXITY_METRICS:** [Analysis of architectural complexity]
-
-**PREVIOUS AGENT ANALYSIS:**
-{self._format_agent_analysis_context(data, "architecture analysis")}
-
-**IMPORTANT:** If prior analysis exists, align your architecture analysis with it. Otherwise, derive architectural insights from code organization and structure."""
-
-    def _build_risk_assessment_prompt(self, data: Dict[str, Any], analysis: Dict[str, Any]) -> str:
-        """Build prompt for overall risk assessment."""
-        return f"""Provide a comprehensive risk assessment based on all analysis conducted.
-
-**Analysis Summary:**
-- Software Classification: {analysis.get("software_classification", {}).get("type", "Unknown")}
-- Security Assessment: {analysis.get("security_assessment", {}).get("risk_level", "Unknown")}
-- Function Categories: {len(analysis.get("function_categorization", {}))} categories analyzed
-- Architecture: {analysis.get("architecture_analysis", {}).get("pattern", "Unknown")}
-
-**Risk Assessment Requirements:**
-Provide final risk assessment in this EXACT format:
-
-**IMPORTANT:** For EACH risk factor identified, cite the specific address where the risk was identified. Format: "Risk description at address 0x... in function '...'"
-
-**OVERALL_RISK_RATING:** [CRITICAL/HIGH/MEDIUM/LOW]
-**RISK_SCORE:** [0-100]
-**PRIMARY_RISK_FACTORS:** [Top 3-5 risk factors WITH specific addresses and function names where identified]
-**THREAT_LEVEL:** [IMMEDIATE/HIGH/MODERATE/LOW/MINIMAL]
-**RECOMMENDED_ACTIONS:** [Specific actions to take, referencing specific addresses/functions if applicable]
-**MONITORING_RECOMMENDATIONS:** [What to monitor if deployed, cite specific functions/addresses to watch]
-**CONTAINMENT_STRATEGY:** [How to safely contain or isolate if needed]
-**BUSINESS_IMPACT:** [Potential business/operational impact]
-**TECHNICAL_RISK:** [Technical risks and implications with specific addresses]
-
-**PREVIOUS AGENT ANALYSIS:**
-{self._format_agent_analysis_context(data, "risk assessment")}
-
-**IMPORTANT:** If prior analysis exists, use it as the PRIMARY SOURCE for risk calculation. Otherwise, assess risks based on the analysis summary and observable indicators."""
-
-    def _format_summaries_for_prompt(self, summaries: Dict[str, str]) -> str:
-        """Format function summaries for AI prompts with comprehensive RAG retrieval."""
-        if not summaries:
-            return "No function summaries available."
-
-        formatted = []
-
-        # Enhanced RAG approach: Use vector store to find ALL relevant functions
-        if (
-            hasattr(self, "enable_cag")
-            and self.enable_cag
-            and hasattr(self, "cag_manager")
-            and self.cag_manager
-            and hasattr(self.cag_manager, "vector_store")
-            and self.cag_manager.vector_store
-        ):
-            # Use comprehensive multi-vector retrieval
-            enhanced_context = self._get_comprehensive_function_context(summaries)
-            if enhanced_context:
-                return enhanced_context
-
-        # Fallback to basic formatting with limited functions
-        for func, summary in list(summaries.items())[:10]:  # Limit for prompt size
-            formatted.append(f"- {func}: {summary[:100]}{'...' if len(summary) > 100 else ''}")
-
-        if len(summaries) > 10:
-            formatted.append(f"... and {len(summaries) - 10} more functions with summaries")
-
-        return "\n".join(formatted)
-
-    def _get_comprehensive_function_context(self, summaries: Dict[str, str]) -> str:
-        """Get comprehensive function context using multi-vector RAG retrieval."""
-        try:
-            vector_store = self.cag_manager.vector_store
-            all_context = []
-
-            # Strategy 1: Search for different categories of functions
-            search_queries = [
-                "security cryptography authentication encryption",
-                "network communication socket http tcp",
-                "file system disk read write open",
-                "memory allocation buffer management",
-                "process thread execution control",
-                "registry configuration system settings",
-                "string parsing text processing",
-                "user interface input output display",
-                "database storage data management",
-                "error handling exception logging",
-                "main entry point initialization",
-                "malware persistence backdoor",
-            ]
-
-            retrieved_functions = set()
-            query_results = []
-
-            # Perform multiple targeted searches
-            for query in search_queries:
-                results = vector_store.search(query, top_k=5)
-                for result in results:
-                    doc = result["document"]
-                    if doc.get("type") == "function_analysis" and doc.get("name") not in retrieved_functions:
-                        query_results.append(
-                            {
-                                "name": doc.get("name"),
-                                "content": doc.get("text", ""),
-                                "score": result["score"],
-                                "category": query.split()[0],  # First word as category
-                            }
-                        )
-                        retrieved_functions.add(doc.get("name"))
-
-            # Strategy 2: Include high-priority functions from summaries
-            priority_keywords = [
-                "main",
-                "entry",
-                "init",
-                "start",
-                "connect",
-                "send",
-                "receive",
-                "read",
-                "write",
-                "create",
-                "delete",
-                "encrypt",
-                "decrypt",
-                "auth",
-            ]
-
-            for func_name, summary in summaries.items():
-                if func_name not in retrieved_functions and any(
-                    keyword.lower() in func_name.lower() or keyword.lower() in summary.lower() for keyword in priority_keywords
-                ):
-                    query_results.append({"name": func_name, "content": summary, "score": 1.0, "category": "priority"})
-                    retrieved_functions.add(func_name)
-
-            # Strategy 3: Add remaining functions by relevance score
-            remaining_functions = []
-            for func_name, summary in summaries.items():
-                if func_name not in retrieved_functions:
-                    # Simple relevance scoring based on summary length and keywords
-                    relevance_score = len(summary) / 500.0  # Longer summaries get higher scores
-                    if any(
-                        keyword in summary.lower() for keyword in ["critical", "important", "key", "main", "core", "primary"]
-                    ):
-                        relevance_score += 0.5
-
-                    remaining_functions.append(
-                        {"name": func_name, "content": summary, "score": relevance_score, "category": "additional"}
-                    )
-
-            # Sort by score and add top remaining functions
-            remaining_functions.sort(key=lambda x: x["score"], reverse=True)
-            query_results.extend(remaining_functions[:20])  # Add top 20 remaining
-
-            # Format comprehensive context
-            if query_results:
-                all_context.append("## COMPREHENSIVE FUNCTION ANALYSIS")
-                all_context.append(f"**Total Functions Analyzed: {len(query_results)} of {len(summaries)}**\n")
-
-                # Group by category for better organization
-                categories = {}
-                for result in query_results:
-                    category = result["category"]
-                    if category not in categories:
-                        categories[category] = []
-                    categories[category].append(result)
-
-                # Format each category
-                for category, functions in categories.items():
-                    if len(functions) > 0:
-                        all_context.append(f"### {category.upper()} FUNCTIONS:")
-                        for func in functions[:10]:  # Limit per category for readability
-                            name = func["name"]
-                            content = func["content"]
-                            # Truncate very long content but be more generous
-                            truncated_content = content[:300] + "..." if len(content) > 300 else content
-                            all_context.append(f"- **{name}**: {truncated_content}")
-
-                        if len(functions) > 10:
-                            all_context.append(f"  *... and {len(functions) - 10} more {category} functions*")
-                        all_context.append("")
-
-                return "\n".join(all_context)
-
-        except Exception as e:
-            self.logger.warning(f"Error in comprehensive RAG retrieval: {e}")
-
-        return None
-
-    def _format_function_behaviors_for_security(self, data: Dict[str, Any]) -> str:
-        """Format function behaviors specifically for security analysis with comprehensive RAG."""
-        # Enhanced RAG approach for security analysis
-        if (
-            hasattr(self, "enable_cag")
-            and self.enable_cag
-            and hasattr(self, "cag_manager")
-            and self.cag_manager
-            and hasattr(self.cag_manager, "vector_store")
-            and self.cag_manager.vector_store
-        ):
-            enhanced_security_context = self._get_comprehensive_security_context(data)
-            if enhanced_security_context:
-                return enhanced_security_context
-
-        # Fallback to basic formatting
-        formatted = []
-
-        # Add renamed functions with their behaviors
-        for old_name, new_name in data["renamed_functions"][:15]:
-            summary = data["function_summaries"].get(old_name, "No summary available")
-            formatted.append(f"- {old_name} → {new_name}: {summary[:150]}{'...' if len(summary) > 150 else ''}")
-
-        return "\n".join(formatted) if formatted else "No renamed functions with behavioral data available."
-
-    def _get_comprehensive_security_context(self, data: Dict[str, Any]) -> str:
-        """Get comprehensive security-focused function context using RAG."""
-        try:
-            vector_store = self.cag_manager.vector_store
-            all_context = []
-
-            # Security-focused search queries
-            security_queries = [
-                "authentication login password credential verification",
-                "encryption cryptography cipher hash algorithm",
-                "network socket communication tcp udp http",
-                "file access read write permission disk",
-                "registry key value configuration system",
-                "process execution spawn thread creation",
-                "memory allocation buffer overflow protection",
-                "privilege escalation administrator elevation",
-                "persistence startup autorun service",
-                "injection code dll payload shellcode",
-                "obfuscation packing anti-analysis stealth",
-                "communication c2 command control callback",
-            ]
-
-            retrieved_functions = set()
-            security_results = []
-
-            # Perform security-focused searches
-            for query in security_queries:
-                results = vector_store.search(query, top_k=8)  # More results for security
-                for result in results:
-                    doc = result["document"]
-                    if doc.get("type") == "function_analysis" and doc.get("name") not in retrieved_functions:
-                        # Calculate security relevance score
-                        content = doc.get("text", "")
-                        security_score = self._calculate_security_score(content)
-
-                        security_results.append(
-                            {
-                                "old_name": doc.get("name", "unknown"),
-                                "new_name": self._find_renamed_function(doc.get("name"), data),
-                                "content": content,
-                                "vector_score": result["score"],
-                                "security_score": security_score,
-                                "category": query.split()[0],
-                            }
-                        )
-                        retrieved_functions.add(doc.get("name"))
-
-            # Add high-risk functions from renamed functions
-            for old_name, new_name in data["renamed_functions"]:
-                if old_name not in retrieved_functions:
-                    summary = data["function_summaries"].get(old_name, "")
-                    security_score = self._calculate_security_score(summary)
-
-                    if security_score > 0.3:  # Only include if security-relevant
-                        security_results.append(
-                            {
-                                "old_name": old_name,
-                                "new_name": new_name,
-                                "content": summary,
-                                "vector_score": 0.8,
-                                "security_score": security_score,
-                                "category": "renamed",
-                            }
-                        )
-
-            # Sort by combined security and vector scores
-            security_results.sort(key=lambda x: (x["security_score"] + x["vector_score"]) / 2, reverse=True)
-
-            if security_results:
-                all_context.append("## COMPREHENSIVE SECURITY ANALYSIS")
-                all_context.append(f"**Security-Relevant Functions Analyzed: {len(security_results)}**\n")
-
-                # Group by security risk level
-                high_risk = [r for r in security_results if r["security_score"] > 0.7]
-                medium_risk = [r for r in security_results if 0.4 <= r["security_score"] <= 0.7]
-                low_risk = [r for r in security_results if r["security_score"] < 0.4]
-
-                if high_risk:
-                    all_context.append("### 🔴 HIGH SECURITY RISK FUNCTIONS:")
-                    for result in high_risk[:15]:  # Top 15 high-risk
-                        self._format_security_function(result, all_context)
-                    all_context.append("")
-
-                if medium_risk:
-                    all_context.append("### 🟡 MEDIUM SECURITY RISK FUNCTIONS:")
-                    for result in medium_risk[:10]:  # Top 10 medium-risk
-                        self._format_security_function(result, all_context)
-                    all_context.append("")
-
-                if low_risk:
-                    all_context.append("### 🟢 LOWER RISK / UTILITY FUNCTIONS:")
-                    for result in low_risk[:5]:  # Top 5 low-risk for completeness
-                        self._format_security_function(result, all_context)
-                    all_context.append("")
-
-                return "\n".join(all_context)
-
-        except Exception as e:
-            self.logger.warning(f"Error in comprehensive security RAG retrieval: {e}")
-
-        return None
-
-    def _calculate_security_score(self, content: str) -> float:
-        """Calculate security relevance score for function content."""
-        if not content:
-            return 0.0
-
-        content_lower = content.lower()
-        score = 0.0
-
-        # High-risk indicators
-        high_risk_keywords = [
-            "encrypt",
-            "decrypt",
-            "password",
-            "credential",
-            "authentication",
-            "privilege",
-            "administrator",
-            "system",
-            "registry",
-            "service",
-            "network",
-            "socket",
-            "http",
-            "tcp",
-            "udp",
-            "connect",
-            "send",
-            "file",
-            "read",
-            "write",
-            "delete",
-            "create",
-            "access",
-            "process",
-            "thread",
-            "spawn",
-            "execute",
-            "injection",
-            "memory",
-            "allocation",
-            "buffer",
-            "overflow",
-            "shellcode",
-            "persistence",
-            "startup",
-            "autorun",
-            "malware",
-            "backdoor",
-        ]
-
-        # Medium-risk indicators
-        medium_risk_keywords = [
-            "string",
-            "parse",
-            "format",
-            "validate",
-            "check",
-            "verify",
-            "error",
-            "exception",
-            "log",
-            "debug",
-            "config",
-            "setting",
-        ]
-
-        # Count occurrences
-        for keyword in high_risk_keywords:
-            if keyword in content_lower:
-                score += 0.15
-
-        for keyword in medium_risk_keywords:
-            if keyword in content_lower:
-                score += 0.05
-
-        # Bonus for function names that indicate security functions
-        if any(name in content_lower for name in ["auth", "crypt", "security", "protect", "verify"]):
-            score += 0.2
-
-        return min(score, 1.0)  # Cap at 1.0
-
-    def _find_renamed_function(self, old_name: str, data: Dict[str, Any]) -> str:
-        """Find the new name for a renamed function."""
-        for old, new in data["renamed_functions"]:
-            if old == old_name:
-                return new
-        return old_name  # Return original if not renamed
-
-    def _format_security_function(self, result: Dict[str, Any], context_list: List[str]) -> None:
-        """Format a security function result for the context."""
-        old_name = result["old_name"]
-        new_name = result["new_name"]
-        content = result["content"]
-        security_score = result["security_score"]
-
-        # Truncate content but be more generous for security analysis
-        truncated_content = content[:400] + "..." if len(content) > 400 else content
-
-        if old_name != new_name:
-            context_list.append(f"- **{old_name} → {new_name}** (Security Risk: {security_score:.2f}): {truncated_content}")
-        else:
-            context_list.append(f"- **{old_name}** (Security Risk: {security_score:.2f}): {truncated_content}")
-
-    def _format_summaries_for_categorization(self, summaries: Dict[str, str]) -> str:
-        """Format summaries for function categorization with comprehensive RAG."""
-        # Use the same comprehensive approach as the main formatter
-        return self._format_summaries_for_prompt(summaries)
-
-    def _format_renamed_functions(self, renamed_functions: List[tuple]) -> str:
-        """Format renamed functions list."""
-        if not renamed_functions:
-            return "No functions have been renamed yet."
-
-        formatted = []
-        for old_name, new_name in renamed_functions[:20]:
-            formatted.append(f"- {old_name} → {new_name}")
-
-        if len(renamed_functions) > 20:
-            formatted.append(f"... and {len(renamed_functions) - 20} more renamed functions")
-
-        return "\n".join(formatted)
-
-    def _format_behavioral_data(self, data: Dict[str, Any]) -> str:
-        """Format behavioral data with comprehensive RAG analysis."""
-        # Enhanced RAG approach for behavioral analysis
-        if (
-            hasattr(self, "enable_cag")
-            and self.enable_cag
-            and hasattr(self, "cag_manager")
-            and self.cag_manager
-            and hasattr(self.cag_manager, "vector_store")
-            and self.cag_manager.vector_store
-        ):
-            enhanced_behavioral_context = self._get_comprehensive_behavioral_context(data)
-            if enhanced_behavioral_context:
-                return enhanced_behavioral_context
-
-        # Fallback to basic behavioral data
-        return self._format_summaries_for_prompt(data["function_summaries"])
-
-    def _get_comprehensive_behavioral_context(self, data: Dict[str, Any]) -> str:
-        """Get comprehensive behavioral context using RAG."""
-        try:
-            vector_store = self.cag_manager.vector_store
-            all_context = []
-
-            # Behavioral analysis search queries
-            behavioral_queries = [
-                "initialization startup entry point main",
-                "workflow process sequence execution flow",
-                "data processing transformation parsing",
-                "communication interaction interface api",
-                "state management configuration settings",
-                "event handling callback response trigger",
-                "loop iteration recursive repetitive",
-                "decision logic conditional branching",
-                "cleanup finalization termination shutdown",
-                "validation verification check constraint",
-            ]
-
-            retrieved_functions = set()
-            behavioral_results = []
-
-            # Perform behavioral-focused searches
-            for query in behavioral_queries:
-                results = vector_store.search(query, top_k=6)
-                for result in results:
-                    doc = result["document"]
-                    if doc.get("type") == "function_analysis" and doc.get("name") not in retrieved_functions:
-                        content = doc.get("text", "")
-                        behavioral_score = self._calculate_behavioral_score(content)
-
-                        behavioral_results.append(
-                            {
-                                "name": doc.get("name"),
-                                "content": content,
-                                "vector_score": result["score"],
-                                "behavioral_score": behavioral_score,
-                                "category": query.split()[0],
-                            }
-                        )
-                        retrieved_functions.add(doc.get("name"))
-
-            # Add important functions from summaries
-            for func_name, summary in data["function_summaries"].items():
-                if func_name not in retrieved_functions:
-                    behavioral_score = self._calculate_behavioral_score(summary)
-                    if behavioral_score > 0.4:  # Only include behaviorally significant functions
-                        behavioral_results.append(
-                            {
-                                "name": func_name,
-                                "content": summary,
-                                "vector_score": 0.7,
-                                "behavioral_score": behavioral_score,
-                                "category": "identified",
-                            }
-                        )
-                        retrieved_functions.add(func_name)
-
-            # Sort by behavioral relevance
-            behavioral_results.sort(key=lambda x: x["behavioral_score"], reverse=True)
-
-            if behavioral_results:
-                all_context.append("## COMPREHENSIVE BEHAVIORAL ANALYSIS")
-                all_context.append(f"**Behaviorally Significant Functions: {len(behavioral_results)}**\n")
-
-                # Group by behavioral significance
-                core_behavior = [r for r in behavioral_results if r["behavioral_score"] > 0.8]
-                supporting_behavior = [r for r in behavioral_results if 0.5 <= r["behavioral_score"] <= 0.8]
-                utility_behavior = [r for r in behavioral_results if r["behavioral_score"] < 0.5]
-
-                if core_behavior:
-                    all_context.append("### 🎯 CORE BEHAVIORAL FUNCTIONS:")
-                    for result in core_behavior[:12]:
-                        self._format_behavioral_function(result, all_context)
-                    all_context.append("")
-
-                if supporting_behavior:
-                    all_context.append("### 🔧 SUPPORTING BEHAVIORAL FUNCTIONS:")
-                    for result in supporting_behavior[:15]:
-                        self._format_behavioral_function(result, all_context)
-                    all_context.append("")
-
-                if utility_behavior:
-                    all_context.append("### UTILITY / HELPER FUNCTIONS:")
-                    for result in utility_behavior[:8]:
-                        self._format_behavioral_function(result, all_context)
-                    all_context.append("")
-
-                return "\n".join(all_context)
-
-        except Exception as e:
-            self.logger.warning(f"Error in comprehensive behavioral RAG retrieval: {e}")
-
-        return None
-
-    def _calculate_behavioral_score(self, content: str) -> float:
-        """Calculate behavioral significance score for function content."""
-        if not content:
-            return 0.0
-
-        content_lower = content.lower()
-        score = 0.0
-
-        # Core behavioral indicators
-        core_indicators = [
-            "main",
-            "entry",
-            "start",
-            "initialize",
-            "init",
-            "setup",
-            "process",
-            "execute",
-            "run",
-            "handle",
-            "manage",
-            "control",
-            "create",
-            "generate",
-            "build",
-            "construct",
-            "parse",
-            "connect",
-            "communicate",
-            "send",
-            "receive",
-            "transfer",
-            "validate",
-            "verify",
-            "check",
-            "authenticate",
-            "authorize",
-        ]
-
-        # Supporting behavioral indicators
-        supporting_indicators = [
-            "configure",
-            "setup",
-            "prepare",
-            "cleanup",
-            "finalize",
-            "update",
-            "modify",
-            "change",
-            "transform",
-            "convert",
-            "save",
-            "load",
-            "read",
-            "write",
-            "store",
-            "retrieve",
-            "format",
-            "encode",
-            "decode",
-            "compress",
-            "extract",
-        ]
-
-        # State and flow indicators
-        flow_indicators = [
-            "loop",
-            "iterate",
-            "repeat",
-            "while",
-            "for",
-            "next",
-            "if",
-            "then",
-            "else",
-            "switch",
-            "case",
-            "condition",
-            "callback",
-            "event",
-            "trigger",
-            "signal",
-            "notify",
-            "wait",
-            "sleep",
-            "pause",
-            "resume",
-            "continue",
-            "stop",
-        ]
-
-        # Count occurrences with different weights
-        for indicator in core_indicators:
-            if indicator in content_lower:
-                score += 0.25
-
-        for indicator in supporting_indicators:
-            if indicator in content_lower:
-                score += 0.15
-
-        for indicator in flow_indicators:
-            if indicator in content_lower:
-                score += 0.10
-
-        # Bonus for function names that suggest behavioral significance
-        behavioral_names = ["main", "entry", "process", "handle", "execute", "init"]
-        if any(name in content_lower for name in behavioral_names):
-            score += 0.3
-
-        return min(score, 1.0)  # Cap at 1.0
-
-    def _format_behavioral_function(self, result: Dict[str, Any], context_list: List[str]) -> None:
-        """Format a behavioral function result for the context."""
-        name = result["name"]
-        content = result["content"]
-        behavioral_score = result["behavioral_score"]
-
-        # Truncate content but preserve behavioral details
-        truncated_content = content[:350] + "..." if len(content) > 350 else content
-
-        context_list.append(f"- **{name}** (Behavioral Score: {behavioral_score:.2f}): {truncated_content}")
-
-    def _format_architecture_data(self, data: Dict[str, Any]) -> str:
-        """Format architecture data with comprehensive analysis."""
-        # Enhanced RAG approach for architecture analysis
-        if (
-            hasattr(self, "enable_cag")
-            and self.enable_cag
-            and hasattr(self, "cag_manager")
-            and self.cag_manager
-            and hasattr(self.cag_manager, "vector_store")
-            and self.cag_manager.vector_store
-        ):
-            enhanced_architecture_context = self._get_comprehensive_architecture_context(data)
-            if enhanced_architecture_context:
-                return enhanced_architecture_context
-
-        # Fallback to basic architecture data
-        return self._format_summaries_for_prompt(data["function_summaries"])
-
-    def _get_comprehensive_architecture_context(self, data: Dict[str, Any]) -> str:
-        """Get comprehensive architecture context using RAG."""
-        try:
-            vector_store = self.cag_manager.vector_store
-            all_context = []
-
-            # Architecture-focused search queries
-            architecture_queries = [
-                "initialization setup configuration startup",
-                "interface api public private function",
-                "module component service layer structure",
-                "dependency injection factory pattern",
-                "data model structure class object",
-                "controller handler manager coordinator",
-                "utility helper common shared library",
-                "persistence storage database file system",
-                "logging debug error monitoring trace",
-                "cleanup disposal finalize terminate",
-            ]
-
-            retrieved_functions = set()
-            architecture_results = []
-
-            # Perform architecture-focused searches
-            for query in architecture_queries:
-                results = vector_store.search(query, top_k=5)
-                for result in results:
-                    doc = result["document"]
-                    if doc.get("type") == "function_analysis" and doc.get("name") not in retrieved_functions:
-                        content = doc.get("text", "")
-                        architecture_score = self._calculate_architecture_score(content)
-
-                        architecture_results.append(
-                            {
-                                "name": doc.get("name"),
-                                "content": content,
-                                "vector_score": result["score"],
-                                "architecture_score": architecture_score,
-                                "category": query.split()[0],
-                            }
-                        )
-                        retrieved_functions.add(doc.get("name"))
-
-            # Sort by architectural significance
-            architecture_results.sort(key=lambda x: x["architecture_score"], reverse=True)
-
-            if architecture_results:
-                all_context.append("## COMPREHENSIVE ARCHITECTURE ANALYSIS")
-                all_context.append(f"**Architecturally Significant Functions: {len(architecture_results)}**\n")
-
-                # Group by architectural layer/role
-                categories = {}
-                for result in architecture_results:
-                    category = result["category"]
-                    if category not in categories:
-                        categories[category] = []
-                    categories[category].append(result)
-
-                # Format each architectural category
-                for category, functions in categories.items():
-                    if len(functions) > 0:
-                        all_context.append(f"### {category.upper()} LAYER:")
-                        for func in functions[:8]:  # Limit per category
-                            self._format_architecture_function(func, all_context)
-                        all_context.append("")
-
-                return "\n".join(all_context)
-
-        except Exception as e:
-            self.logger.warning(f"Error in comprehensive architecture RAG retrieval: {e}")
-
-        return None
-
-    def _calculate_architecture_score(self, content: str) -> float:
-        """Calculate architectural significance score for function content."""
-        if not content:
-            return 0.0
-
-        content_lower = content.lower()
-        score = 0.0
-
-        # Architecture pattern indicators
-        pattern_indicators = [
-            "factory",
-            "singleton",
-            "observer",
-            "strategy",
-            "adapter",
-            "facade",
-            "proxy",
-            "decorator",
-            "builder",
-            "command",
-        ]
-
-        # Component/layer indicators
-        layer_indicators = [
-            "controller",
-            "service",
-            "repository",
-            "model",
-            "view",
-            "handler",
-            "manager",
-            "coordinator",
-            "processor",
-            "engine",
-        ]
-
-        # Structure indicators
-        structure_indicators = [
-            "interface",
-            "abstract",
-            "base",
-            "parent",
-            "child",
-            "public",
-            "private",
-            "static",
-            "dynamic",
-            "virtual",
-        ]
-
-        # Count architectural significance
-        for indicator in pattern_indicators:
-            if indicator in content_lower:
-                score += 0.3
-
-        for indicator in layer_indicators:
-            if indicator in content_lower:
-                score += 0.2
-
-        for indicator in structure_indicators:
-            if indicator in content_lower:
-                score += 0.1
-
-        return min(score, 1.0)  # Cap at 1.0
-
-    def _format_architecture_function(self, result: Dict[str, Any], context_list: List[str]) -> None:
-        """Format an architecture function result for the context."""
-        name = result["name"]
-        content = result["content"]
-        architecture_score = result["architecture_score"]
-
-        # Truncate content for architecture analysis
-        truncated_content = content[:300] + "..." if len(content) > 300 else content
-
-        context_list.append(f"- **{name}** (Arch Score: {architecture_score:.2f}): {truncated_content}")
-
-    def _format_summaries_for_categorization(self, summaries: Dict[str, str]) -> str:
-        """Format summaries for function categorization with comprehensive RAG."""
-        # Use the same comprehensive approach as the main formatter
-        return self._format_summaries_for_prompt(summaries)
-
-    def _format_renamed_functions(self, renamed_functions: List[tuple]) -> str:
-        """Format renamed functions list."""
-        if not renamed_functions:
-            return "No functions have been renamed yet."
-
-        formatted = []
-        for old_name, new_name in renamed_functions[:20]:
-            formatted.append(f"- {old_name} → {new_name}")
-
-        if len(renamed_functions) > 20:
-            formatted.append(f"... and {len(renamed_functions) - 20} more renamed functions")
-
-        return "\n".join(formatted)
-
-    def _format_behavioral_data(self, data: Dict[str, Any]) -> str:
-        """Format data for behavioral analysis."""
-        return self._format_summaries_for_prompt(data["function_summaries"])
-
-    def _format_architecture_data(self, data: Dict[str, Any]) -> str:
-        """Format data for architecture analysis."""
-        formatted = []
-        if data["classes"]:
-            formatted.append(f"Classes: {', '.join(data['classes'][:10])}")
-        if data["namespaces"]:
-            formatted.append(f"Namespaces: {', '.join(data['namespaces'][:10])}")
-        if data["segments"]:
-            formatted.append(f"Memory Segments: {', '.join(data['segments'][:5])}")
-
-        return "\n".join(formatted) if formatted else "Limited architecture data available."
 
     # Response parsing methods
-    def _parse_classification_response(self, response: str) -> Dict[str, str]:
-        """Parse software classification response."""
-        parsed = {}
-        try:
-            lines = response.split("\n")
-            for line in lines:
-                if "**SOFTWARE_TYPE:**" in line:
-                    parsed["type"] = line.split("**SOFTWARE_TYPE:**")[1].strip()
-                elif "**PRIMARY_PURPOSE:**" in line:
-                    parsed["purpose"] = line.split("**PRIMARY_PURPOSE:**")[1].strip()
-                elif "**CLASSIFICATION_CONFIDENCE:**" in line:
-                    parsed["confidence"] = line.split("**CLASSIFICATION_CONFIDENCE:**")[1].strip()
-                elif "**EVIDENCE:**" in line:
-                    parsed["evidence"] = line.split("**EVIDENCE:**")[1].strip()
 
-            # Extract addresses from the evidence section
-            parsed["addresses"] = self._extract_addresses_from_analysis(response)
-        except Exception as e:
-            self.logger.warning(f"Error parsing classification response: {e}")
-            parsed["raw_response"] = response
 
-        return parsed
 
-    def _parse_security_response(self, response: str) -> Dict[str, str]:
-        """Parse security assessment response."""
-        parsed = {}
-        try:
-            lines = response.split("\n")
-            indicators_section = []
-            capturing_indicators = False
 
-            for line in lines:
-                if "**OVERALL_RISK_LEVEL:**" in line:
-                    parsed["risk_level"] = line.split("**OVERALL_RISK_LEVEL:**")[1].strip()
-                elif "**RISK_SCORE:**" in line:
-                    parsed["risk_score"] = line.split("**RISK_SCORE:**")[1].strip()
-                elif "**SUSPICIOUS_INDICATORS:**" in line:
-                    capturing_indicators = True
-                    # Get initial content after the header
-                    remainder = line.split("**SUSPICIOUS_INDICATORS:**")[1].strip()
-                    if remainder:
-                        indicators_section.append(remainder)
-                elif "**MITIGATION_RECOMMENDATIONS:**" in line or "**IOCS:**" in line:
-                    capturing_indicators = False
-                elif capturing_indicators and line.strip():
-                    indicators_section.append(line.strip())
 
-            if indicators_section:
-                parsed["indicators"] = "\n".join(indicators_section)
-
-            # Extract addresses from suspicious indicators and entire response
-            parsed["addresses"] = self._extract_addresses_from_analysis(response)
-
-            # Extract IOCs section if present
-            if "**IOCS:**" in response:
-                iocs_match = response.split("**IOCS:**")[1].split("**")[0] if "**IOCS:**" in response else ""
-                parsed["iocs"] = iocs_match.strip()
-
-        except Exception as e:
-            self.logger.warning(f"Error parsing security response: {e}")
-            parsed["raw_response"] = response
-
-        return parsed
-
-    def _parse_function_response(self, response: str) -> Dict[str, str]:
-        """Parse function categorization response."""
-        parsed = {}
-        try:
-            # Extract function categories with addresses preserved
-            import re
-
-            categories = re.findall(r"\*\*([^:]+):\*\* \[(\d+)\] - ([^*]+)", response)
-            for category, count, description in categories:
-                # Keep the full description which should now include addresses
-                parsed[category.lower().replace("_", " ")] = f"{count} functions: {description.strip()}"
-
-            # Extract all addresses from function categorization
-            parsed["addresses"] = self._extract_addresses_from_analysis(response)
-
-            # Also capture insights if present
-            if "**CATEGORY_INSIGHTS:**" in response:
-                insights_match = (
-                    response.split("**CATEGORY_INSIGHTS:**")[1].split("**")[0] if "**CATEGORY_INSIGHTS:**" in response else ""
-                )
-                parsed["insights"] = insights_match.strip()
-
-        except Exception as e:
-            self.logger.warning(f"Error parsing function response: {e}")
-            parsed["raw_response"] = response
-
-        return parsed
-
-    def _parse_behavioral_response(self, response: str) -> Dict[str, str]:
-        """Parse behavioral analysis response."""
-        parsed = {}
-        try:
-            lines = response.split("\n")
-            for line in lines:
-                if "**PRIMARY_WORKFLOWS:**" in line:
-                    parsed["workflows"] = line.split("**PRIMARY_WORKFLOWS:**")[1].strip()
-                elif "**BEHAVIORAL_FINGERPRINT:**" in line:
-                    parsed["fingerprint"] = line.split("**BEHAVIORAL_FINGERPRINT:**")[1].strip()
-
-            # Extract addresses from behavioral analysis
-            parsed["addresses"] = self._extract_addresses_from_analysis(response)
-
-        except Exception as e:
-            self.logger.warning(f"Error parsing behavioral response: {e}")
-            parsed["raw_response"] = response
-
-        return parsed
-
-    def _parse_architecture_response(self, response: str) -> Dict[str, str]:
-        """Parse architecture analysis response."""
-        parsed = {}
-        try:
-            lines = response.split("\n")
-            for line in lines:
-                if "**ARCHITECTURAL_PATTERN:**" in line:
-                    parsed["pattern"] = line.split("**ARCHITECTURAL_PATTERN:**")[1].strip()
-                elif "**ARCHITECTURE_QUALITY:**" in line:
-                    parsed["quality"] = line.split("**ARCHITECTURE_QUALITY:**")[1].strip()
-        except Exception as e:
-            self.logger.warning(f"Error parsing architecture response: {e}")
-            parsed["raw_response"] = response
-
-        return parsed
-
-    def _parse_risk_response(self, response: str) -> Dict[str, str]:
-        """Parse risk assessment response."""
-        parsed = {}
-        try:
-            lines = response.split("\n")
-            risk_factors_section = []
-            capturing_factors = False
-
-            for line in lines:
-                if "**OVERALL_RISK_RATING:**" in line:
-                    parsed["rating"] = line.split("**OVERALL_RISK_RATING:**")[1].strip()
-                elif "**THREAT_LEVEL:**" in line:
-                    parsed["threat_level"] = line.split("**THREAT_LEVEL:**")[1].strip()
-                elif "**RECOMMENDED_ACTIONS:**" in line:
-                    capturing_factors = False
-                    parsed["recommendations"] = line.split("**RECOMMENDED_ACTIONS:**")[1].strip()
-                elif "**PRIMARY_RISK_FACTORS:**" in line:
-                    capturing_factors = True
-                    remainder = line.split("**PRIMARY_RISK_FACTORS:**")[1].strip()
-                    if remainder:
-                        risk_factors_section.append(remainder)
-                elif capturing_factors and line.strip() and not line.startswith("**"):
-                    risk_factors_section.append(line.strip())
-
-            if risk_factors_section:
-                parsed["risk_factors"] = "\n".join(risk_factors_section)
-
-            # Extract addresses from risk assessment
-            parsed["addresses"] = self._extract_addresses_from_analysis(response)
-
-        except Exception as e:
-            self.logger.warning(f"Error parsing risk response: {e}")
-            parsed["raw_response"] = response
-
-        return parsed
 
     def _generate_structured_software_report(self, data: Dict[str, Any], analysis: Dict[str, Any], format_type: str) -> str:
         """Generate the final structured software report."""
@@ -7042,294 +3837,77 @@ This section provides specific addresses and evidence for key findings identifie
         return report
 
     def _generate_html_report(self, data: Dict[str, Any], analysis: Dict[str, Any]) -> str:
-        """
-        Generate HTML-formatted vulnerability report using AI.
+        """Generate an HTML report from typed DSPy section specifications."""
+        from src.report_template import (
+            ReportMetadata,
+            ReportSection,
+            build_attack_vectors,
+            build_key_findings,
+            build_security_imports,
+            build_stats_grid,
+            build_table,
+            build_timeline,
+            build_vulnerability_discovery,
+            generate_html_report,
+        )
 
-        This method:
-        1. Builds a context summary from analysis data
-        2. Calls the LLM with html_report_generation_prompt to get structured JSON
-        3. Parses the JSON response into sections
-        4. Assembles final HTML using the report_template module
-        """
-        from src.report_template import generate_html_report, ReportMetadata
-
-        # Build context for the AI
-        context = self._build_html_report_context(data, analysis)
-
-        # Get the HTML report generation prompt
-        prompt = self.config.ollama.html_report_generation_prompt
-
-        # Build the full prompt with context
-        full_prompt = f"""{prompt}
-
-## ANALYSIS DATA TO REPORT:
-
-### Binary Information:
-- **Binary Name:** {data.get("metadata", {}).get("binary_name", "Unknown Binary")}
-- **Total Functions:** {data.get("metadata", {}).get("total_functions", 0)}
-- **Analyzed Functions:** {data.get("metadata", {}).get("analyzed_count", 0)}
-- **Renamed Functions:** {data.get("metadata", {}).get("renamed_count", 0)}
-- **Imports:** {len(data.get("imports", []))}
-- **Exports:** {len(data.get("exports", []))}
-
-### Security Assessment:
-- **Risk Level:** {analysis.get("security_assessment", {}).get("risk_level", "Not assessed")}
-- **Risk Score:** {analysis.get("security_assessment", {}).get("risk_score", "N/A")}/100
-- **Indicators:** {analysis.get("security_assessment", {}).get("indicators", "None")}
-
-### Software Classification:
-- **Type:** {analysis.get("software_classification", {}).get("type", "Unknown")}
-- **Purpose:** {analysis.get("software_classification", {}).get("purpose", "Unknown")}
-- **Confidence:** {analysis.get("software_classification", {}).get("confidence", "N/A")}
-
-### Risk Assessment:
-- **Rating:** {analysis.get("risk_assessment", {}).get("rating", "Not assessed")}
-- **Threat Level:** {analysis.get("risk_assessment", {}).get("threat_level", "Unknown")}
-- **Recommendations:** {analysis.get("risk_assessment", {}).get("recommendations", "None")}
-
-### Key Imports (sample):
-{self._format_imports_sample(data.get("imports", [])[:20])}
-
-### Behavioral Analysis:
-- **Workflows:** {analysis.get("behavioral_analysis", {}).get("workflows", "Not analyzed")}
-- **Fingerprint:** {analysis.get("behavioral_analysis", {}).get("fingerprint", "Not identified")}
-
-### Evidence with Addresses:
-{self._format_address_evidence(analysis)}
-
-Finally here is some context that will be helpful:
-{context}
-
-Now generate the JSON report based on this data.
-"""
-
+        evidence = {
+            "metadata": data.get("metadata", {}),
+            "imports": data.get("imports", [])[:50],
+            "exports": data.get("exports", [])[:50],
+            "strings": data.get("strings", [])[:50],
+            "function_summaries": dict(list(data.get("function_summaries", {}).items())[:50]),
+            "analysis": analysis,
+        }
         try:
-            # Call LLM to generate the structured report
-            response = self._call_llm_for_html_report(full_prompt)
-
-            # Parse the JSON response
-            sections, ai_metadata = self._parse_html_report_response(response)
-
-            # If no sections were generated, use the fallback report
+            ai_metadata, specifications = self.dspy_program.render_html_report(
+                json.dumps(evidence, default=str)
+            )
+            sections = []
+            list_builders = {
+                "stats": build_stats_grid,
+                "attack_vectors": build_attack_vectors,
+                "key_findings": build_key_findings,
+                "discovery": build_vulnerability_discovery,
+                "security_imports": build_security_imports,
+                "timeline": build_timeline,
+            }
+            for specification in specifications:
+                content = specification.content
+                if specification.content_type in list_builders and isinstance(content, list):
+                    content = list_builders[specification.content_type](content)
+                elif specification.content_type == "table" and isinstance(content, dict):
+                    headers = content.get("headers", [])
+                    rows = content.get("rows", [])
+                    address_columns = [0] if headers and "Address" in str(headers[0]) else []
+                    content = build_table(headers, rows, address_columns)
+                sections.append(
+                    ReportSection(
+                        id=specification.id,
+                        title=specification.title,
+                        icon=specification.icon,
+                        content_type=specification.content_type,
+                        content=str(content),
+                    )
+                )
             if not sections:
-                self.logger.info("No sections generated from AI, using fallback report")
                 return self._generate_fallback_html_report(data, analysis)
 
-            # Create metadata
-            binary_name = data.get("metadata", {}).get("binary_name", "Unknown Binary")
             metadata = ReportMetadata(
-                binary_name=binary_name,
+                binary_name=data.get("metadata", {}).get("binary_name", "Unknown Binary"),
                 severity=ai_metadata.get("severity", "MEDIUM"),
                 subtitle=ai_metadata.get("subtitle", "AI-Powered Binary Analysis Report"),
                 tool_name="OGhidra MCP",
             )
-
-            # Generate the final HTML
             return generate_html_report(sections, metadata)
-
-        except Exception as e:
-            self.logger.error(f"Error generating HTML report: {e}")
-            # Fallback to a basic HTML report
+        except Exception as exc:
+            self.logger.error("Typed HTML report generation failed: %s", exc)
             return self._generate_fallback_html_report(data, analysis)
 
-    def _build_html_report_context(self, data: Dict[str, Any], analysis: Dict[str, Any]) -> str:
-        """Build context string for HTML report generation."""
-        context_parts = []
 
-        # Add function summaries if available
-        summaries = data.get("function_summaries", {})
-        if summaries:
-            context_parts.append("## Key Function Summaries:")
-            for name, summary in list(summaries.items())[:10]:
-                context_parts.append(f"- **{name}:** {summary[:200]}...")
 
-        return "\n".join(context_parts)
 
-    def _format_imports_sample(self, imports: List[str]) -> str:
-        """Format a sample of imports for the prompt."""
-        if not imports:
-            return "No imports available"
-        return "\n".join(f"- {imp}" for imp in imports[:15])
 
-    def _format_address_evidence(self, analysis: Dict[str, Any]) -> str:
-        """Format address evidence from analysis for the prompt."""
-        evidence = []
-
-        # Collect addresses from various sections
-        for section_name in ["security_assessment", "software_classification", "risk_assessment"]:
-            section = analysis.get(section_name, {})
-            addresses = section.get("addresses", [])
-            if addresses:
-                for addr_info in addresses[:5]:
-                    if isinstance(addr_info, dict):
-                        evidence.append(f"- {addr_info.get('address', 'N/A')}: {addr_info.get('context', 'No context')}")
-
-        return "\n".join(evidence) if evidence else "No specific address evidence available"
-
-    def _call_llm_for_html_report(self, prompt: str) -> str:
-        """Call the LLM to generate the HTML report structure."""
-        try:
-            # Use the configured LLM client (self.ollama holds either OllamaClient or ExternalClient)
-            if hasattr(self, "ollama") and self.ollama:
-                # Both clients support the generate method
-                response = self.ollama.generate(prompt=prompt)
-                return response
-            else:
-                self.logger.warning("No LLM client available for HTML report generation")
-                return "{}"
-        except Exception as e:
-            self.logger.error(f"Error calling LLM for HTML report: {e}")
-            return "{}"
-
-    def _parse_html_report_response(self, response: str) -> tuple:
-        """
-        Parse the AI's JSON response into ReportSection objects.
-
-        Returns:
-            Tuple of (List[ReportSection], metadata_dict)
-        """
-        from src.report_template import ReportSection, build_stats_grid, build_attack_vectors, build_timeline, build_table
-        import json
-        import re
-
-        sections = []
-        metadata = {"severity": "MEDIUM", "subtitle": "Binary Analysis Report"}
-
-        try:
-            # Try to extract JSON from the response
-            # Handle cases where the AI might wrap it in markdown code blocks
-            json_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", response, re.DOTALL)
-            if json_match:
-                json_str = json_match.group(1)
-            else:
-                # Try to find raw JSON
-                json_start = response.find("{")
-                json_end = response.rfind("}") + 1
-                if json_start >= 0 and json_end > json_start:
-                    json_str = response[json_start:json_end]
-                else:
-                    raise ValueError("No JSON found in response")
-
-            report_data = json.loads(json_str)
-
-            # Extract metadata
-            if "metadata" in report_data:
-                metadata = report_data["metadata"]
-
-            # Process sections
-            for section_data in report_data.get("sections", []):
-                section_id = section_data.get("id", "unknown")
-                title = section_data.get("title", "Section")
-                icon = section_data.get("icon", "📄")
-                content_type = section_data.get("content_type", "html")
-                content = section_data.get("content", "")
-
-                # Process content based on type
-                if content_type == "stats" and isinstance(content, (str, list)):
-                    if isinstance(content, str):
-                        try:
-                            content = json.loads(content)
-                        except Exception as e:
-                            self.logger.warning(f"Failed to load JSON for 'stats': {e}")
-                            pass
-                    if isinstance(content, list):
-                        content = build_stats_grid(content)
-
-                elif content_type == "attack_vectors" and isinstance(content, (str, list)):
-                    if isinstance(content, str):
-                        try:
-                            content = json.loads(content)
-                        except Exception as e:
-                            self.logger.warning(f"Failed to load JSON for 'attack_vectors': {e}")
-                            pass
-                    if isinstance(content, list):
-                        content = build_attack_vectors(content)
-
-                elif content_type == "timeline" and isinstance(content, (str, list)):
-                    if isinstance(content, str):
-                        try:
-                            content = json.loads(content)
-                        except Exception as e:
-                            self.logger.warning(f"Failed to load JSON for 'timeline': {e}")
-                            pass
-                    if isinstance(content, list):
-                        content = build_timeline(content)
-
-                elif content_type == "table" and isinstance(content, (str, dict)):
-                    if isinstance(content, str):
-                        try:
-                            content = json.loads(content)
-                        except Exception as e:
-                            self.logger.warning(f"Failed to load JSON for 'table': {e}")
-                            pass
-                    if isinstance(content, dict):
-                        headers = content.get("headers", [])
-                        rows = content.get("rows", [])
-                        address_cols = [0] if headers and "Address" in headers[0] else []
-                        content = build_table(headers, rows, address_cols)
-
-                elif content_type == "discovery" and isinstance(content, (str, list)):
-                    from src.report_template import build_vulnerability_discovery
-
-                    if isinstance(content, str):
-                        try:
-                            content = json.loads(content)
-                        except Exception as e:
-                            self.logger.warning(f"Failed to load JSON for 'discovery': {e}")
-                            pass
-                    if isinstance(content, list):
-                        content = build_vulnerability_discovery(content)
-
-                elif content_type == "key_findings" and isinstance(content, (str, list)):
-                    from src.report_template import build_key_findings
-
-                    if isinstance(content, str):
-                        try:
-                            content = json.loads(content)
-                        except Exception as e:
-                            self.logger.warning(f"Failed to load JSON for 'key_findings': {e}")
-                            pass
-                    if isinstance(content, list):
-                        content = build_key_findings(content)
-
-                elif content_type == "security_imports" and isinstance(content, (str, list)):
-                    from src.report_template import build_security_imports
-
-                    if isinstance(content, str):
-                        try:
-                            content = json.loads(content)
-                        except Exception as e:
-                            self.logger.warning(f"Failed to load JSON for 'security_imports': {e}")
-                            pass
-                    if isinstance(content, list):
-                        content = build_security_imports(content)
-
-                sections.append(
-                    ReportSection(id=section_id, title=title, icon=icon, content_type=content_type, content=str(content))
-                )
-
-            # If parsing succeeded but no sections were created, add fallback
-            if not sections:
-                raise ValueError("No sections found in parsed response")
-
-        except Exception as e:
-            self.logger.warning(f"Error parsing HTML report response: {e}")
-            # Create a fallback section with the raw response
-            if response and response.strip() and response != "{}":
-                sections.append(
-                    ReportSection(
-                        id="raw_analysis",
-                        title="Analysis Results",
-                        icon="📋",
-                        content_type="html",
-                        content=f'<div class="summary-content"><pre>{response[:5000]}</pre></div>',
-                    )
-                )
-            else:
-                # No valid response - return empty sections to trigger full fallback
-                self.logger.warning("Empty or invalid LLM response, using fallback report")
-
-        return sections, metadata
 
     def _generate_fallback_html_report(self, data: Dict[str, Any], analysis: Dict[str, Any]) -> str:
         """Generate a basic HTML report without AI, as fallback."""
@@ -7507,55 +4085,6 @@ Now generate the JSON report based on this data.
     # Address and Evidence Extraction Helpers
     # ------------------------------------------------------------------
 
-    def _extract_addresses_from_analysis(self, analysis_text: str) -> List[Dict[str, str]]:
-        """
-        Extract addresses and their associated findings from AI analysis text.
-
-        Args:
-            analysis_text: The AI-generated analysis text
-
-        Returns:
-            List of dictionaries with 'address', 'context', 'finding' keys
-        """
-        import re
-
-        findings = []
-
-        # Pattern to match addresses with context
-        # Matches patterns like: "at address 0x401000", "0x401000 in function", etc.
-        address_patterns = [
-            r'(?:at|in|address)\s+(0x[0-9a-fA-F]{6,})\s+(?:in\s+)?(?:function\s+)?["\']?([^"\'\n,.:]+)?',
-            r'(0x[0-9a-fA-F]{6,})\s+["\']([^"\'\n,.:]+)["\']',
-            r'function\s+["\']?([^"\'\s]+)["\']?\s+at\s+(0x[0-9a-fA-F]{6,})',
-        ]
-
-        lines = analysis_text.split("\n")
-        for line in lines:
-            for pattern in address_patterns:
-                matches = re.finditer(pattern, line, re.IGNORECASE)
-                for match in matches:
-                    groups = match.groups()
-                    # Handle different capture group orders
-                    address = None
-                    function = None
-
-                    for group in groups:
-                        if group and group.startswith("0x"):
-                            address = group
-                        elif group and not group.startswith("0x"):
-                            function = group
-
-                    if address:
-                        findings.append(
-                            {
-                                "address": address,
-                                "function": function or "unknown",
-                                "context": line.strip(),
-                                "finding": line.strip(),
-                            }
-                        )
-
-        return findings
 
     def _format_findings_with_addresses(self, findings: List[Dict[str, str]], max_findings: int = 20) -> str:
         """
@@ -7586,123 +4115,16 @@ Now generate the JSON report based on this data.
 
         return "\n".join(formatted)
 
-    def _enrich_findings_with_locations(self, analysis: Dict[str, Any], data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Enrich analysis findings with specific location data.
-
-        Args:
-            analysis: The analysis dictionary from AI
-            data: The collected binary data
-
-        Returns:
-            Enriched analysis with location data
-        """
-        enriched = analysis.copy()
-
-        # Extract addresses from all analysis sections
-        all_findings = []
-
-        for section_key, section_value in analysis.items():
-            if isinstance(section_value, dict):
-                for key, value in section_value.items():
-                    if isinstance(value, str):
-                        findings = self._extract_addresses_from_analysis(value)
-                        for finding in findings:
-                            finding["section"] = section_key
-                            finding["subsection"] = key
-                            all_findings.append(finding)
-            elif isinstance(section_value, str):
-                findings = self._extract_addresses_from_analysis(section_value)
-                for finding in findings:
-                    finding["section"] = section_key
-                    all_findings.append(finding)
-
-        # Add extracted findings to enriched analysis
-        enriched["extracted_findings"] = all_findings
-
-        return enriched
 
     # ------------------------------------------------------------------
     # X-ref context helper
     # ------------------------------------------------------------------
 
-    def _collect_xref_context(self, address: str, max_funcs: int = 10) -> None:
-        """Fetch functions that reference *address* and capture quick summaries.
-
-        Stores results in self.function_xrefs[address] = [caller_addrs].
-        Also decompiles and extracts summaries for new callers (up to *max_funcs*).
-        """
-        if not hasattr(self, "function_xrefs"):
-            self.function_xrefs = {}
-
-        if address in self.function_xrefs:
-            # Already collected
-            return
-
-        # Call MCP client
-        xrefs = []
-        try:
-            xrefs = self.ghidra.get_xrefs_to(address, limit=max_funcs)  # type: ignore
-        except Exception as e:
-            self.logger.debug(f"get_xrefs_to failed for {address}: {e}")
-            return
-
-        # Normalise list to raw addresses
-        caller_addrs = []
-        for ref in xrefs[:max_funcs]:
-            if isinstance(ref, dict):
-                addr = ref.get("from") or ref.get("address") or ""
-            else:
-                addr = str(ref)
-            if addr and re.fullmatch(r"[0-9a-fA-F]{6,}", addr):
-                caller_addrs.append(addr)
-
-        self.function_xrefs[address] = caller_addrs
-
-        # Capture summaries for each caller if not already known
-        for caller in caller_addrs:
-            if hasattr(self, "function_summaries") and caller in self.function_summaries:
-                continue
-            try:
-                decomp = self.ghidra.decompile_function_by_address(caller)  # type: ignore
-                if isinstance(decomp, str):
-                    caller_summary = self._extract_function_summary(decomp)
-                    if caller_summary:
-                        if not hasattr(self, "function_summaries"):
-                            self.function_summaries = {}
-                        self.function_summaries[caller] = caller_summary
-            except Exception as e:
-                self.logger.debug(f"Failed to decompile caller {caller}: {e}")
 
     # ------------------------------------------------------------------
     #  Address normalisation helpers
     # ------------------------------------------------------------------
 
-    def _normalize_address(self, identifier: str) -> Optional[str]:
-        """Try to extract a pure hexadecimal address from various identifier
-        forms (e.g. 'FUN_401000', 'thunk_FUN_401000', '0x401000',
-        'Function: FUN_401000 at 401000').
-
-        Returns the hex string (lower-case, no '0x' prefix) or ``None`` if
-        no valid address can be found.
-        """
-        if not identifier:
-            return None
-
-        # Strip common 0x prefix if present
-        if identifier.startswith(("0x", "0X")):
-            identifier = identifier[2:]
-
-        # Already a bare hex value?
-        if re.fullmatch(r"[0-9a-fA-F]{6,}", identifier):
-            return identifier.lower()
-
-        # Search for a hex substring of length ≥6 anywhere in the string
-        match = re.search(r"([0-9a-fA-F]{6,})", identifier)
-        if match:
-            return match.group(1).lower()
-
-        return None
 
 
 def main():
@@ -7751,6 +4173,7 @@ def main():
         config.ollama.model_map["execution"] = args.execution_model
     if args.analysis_model:
         config.ollama.model_map["analysis"] = args.analysis_model
+    config.ollama.max_execution_steps = args.max_steps
 
     # Initialize clients
     ollama_client = OllamaClient(config.ollama)
@@ -7769,7 +4192,7 @@ def main():
         return 0
 
     # Initialize the bridge
-    bridge = Bridge(config=config, include_capabilities=args.include_capabilities, max_agent_steps=args.max_steps)
+    bridge = Bridge(config=config, include_capabilities=args.include_capabilities)
 
     # Health check for Ollama and GhidraMCP
     ollama_health = "OK" if ollama_client.check_health() else "FAIL"

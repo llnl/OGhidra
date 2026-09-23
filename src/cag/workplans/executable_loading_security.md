@@ -8,10 +8,10 @@ Identify all functions that load executables or libraries dynamically.
 Execute simultaneously to find all dynamic loading:
 
 ```
-EXECUTE: search_functions_by_name(query="LoadLibrary", offset=0, limit=50)
-EXECUTE: search_functions_by_name(query="CreateProcess", offset=0, limit=50)
-EXECUTE: search_functions_by_name(query="ShellExecute", offset=0, limit=30)
-EXECUTE: search_functions_by_name(query="WinExec", offset=0, limit=20)
+Tool: search_functions_by_name(query="LoadLibrary", offset=0, limit=50)
+Tool: search_functions_by_name(query="CreateProcess", offset=0, limit=50)
+Tool: search_functions_by_name(query="ShellExecute", offset=0, limit=30)
+Tool: search_functions_by_name(query="WinExec", offset=0, limit=20)
 ```
 
 **Target APIs**:

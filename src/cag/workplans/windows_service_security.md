@@ -8,9 +8,9 @@ Determine if the binary is a Windows service and assess its privilege context.
 Execute simultaneously to discover service-related imports:
 
 ```
-EXECUTE: list_imports(offset=0, limit=300)
-EXECUTE: list_strings(offset=0, limit=500, filter="Service")
-EXECUTE: list_strings(offset=0, limit=500, filter="service")
+Tool: list_imports(offset=0, limit=300)
+Tool: list_strings(offset=0, limit=500, filter="Service")
+Tool: list_strings(offset=0, limit=500, filter="service")
 ```
 
 **Look for these service control APIs**:

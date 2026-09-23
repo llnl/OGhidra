@@ -26,33 +26,7 @@ class TestBridge(unittest.TestCase):
 
         # Mock the Ollama client
         self.bridge.ollama = MagicMock()
-        self.bridge.ollama.generate_with_phase.return_value = "Test response"
 
-    def test_check_implied_actions_without_commands_basic(self):
-        """Test that the method correctly identifies implied actions."""
-        # Test with a response that implies an action but doesn't include an EXECUTE command
-        response = "I suggest renaming the function to something more descriptive."
-        result = self.bridge._check_implied_actions_without_commands(response)
-
-        # Check that it identified an implied action
-        self.assertIsInstance(result, str)
-        self.assertNotEqual(result, "")
-        # Since the actual text may vary, check for key phrases that should be in the result
-        self.assertIn("actions", result.lower())
-
-        # Test with a response that has an EXECUTE command
-        response_with_command = "EXECUTE: rename_function(old_name='func1', new_name='betterName')"
-        result = self.bridge._check_implied_actions_without_commands(response_with_command)
-
-        # Should return empty string since EXECUTE is present
-        self.assertEqual(result, "")
-
-        # Test with a prompt we generated before
-        prev_prompt = "Your response implies certain actions should be taken, but you didn't include explicit EXECUTE commands:"
-        result = self.bridge._check_implied_actions_without_commands(prev_prompt)
-
-        # Should return empty string since this is our own prompt
-        self.assertEqual(result, "")
 
     def test_command_name_conversion(self):
         """Test the camelCase to snake_case conversion algorithm."""

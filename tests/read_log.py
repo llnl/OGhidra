@@ -24,13 +24,8 @@ try:
         print(f"\n--- GENERATION -{5 - i} ---")
         print(f"Phase: {gen.get('phase')}")
 
-        # Try to extract the 'REASONING' from the response if it exists
         response = gen.get("response", "")
-        if "REASONING:" in response:
-            reasoning = response.split("REASONING:")[1].split("EXECUTE:")[0].strip()
-            print(f"REASONING: {reasoning}")
-        else:
-            print(f"Response (Fragment): {response[:200]}...")
+        print(f"Response (Fragment): {response[:200]}...")
 
         # Check if it was an empty or confusing response
         if not response or len(response) < 10:

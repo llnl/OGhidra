@@ -8,13 +8,13 @@ This workplan outlines strategies for progressively analyzing a binary to build 
 
 1. **Identify the entry point**:
    ```
-   EXECUTE: list_functions()
+   Tool: list_functions()
    ```
    Look for `main`, `_start`, `WinMain`, or `DllMain`.
 
 2. **Decompile the entry point function**:
    ```
-   EXECUTE: decompile_function(name="ENTRY_POINT")
+   Tool: decompile_function(name="ENTRY_POINT")
    ```
    Note: Replace with actual entry point function name.
 
@@ -44,7 +44,7 @@ This workplan outlines strategies for progressively analyzing a binary to build 
 
 1. **List all imports**:
    ```
-   EXECUTE: list_imports()
+   Tool: list_imports()
    ```
 
 2. **Group imports by category**:
@@ -55,13 +55,13 @@ This workplan outlines strategies for progressively analyzing a binary to build 
 
 3. **Find functions that use key imports**:
    ```
-   EXECUTE: find_references_to_import(import_name="IMPORT_NAME")
+   Tool: find_references_to_import(import_name="IMPORT_NAME")
    ```
    Note: Replace with actual import name.
 
 4. **Analyze functions using critical imports**:
    ```
-   EXECUTE: decompile_function(name="FUNCTION_USING_IMPORT")
+   Tool: decompile_function(name="FUNCTION_USING_IMPORT")
    ```
    Note: Replace with actual function name.
 
@@ -81,7 +81,7 @@ This workplan outlines strategies for progressively analyzing a binary to build 
 
 1. **Extract all strings**:
    ```
-   EXECUTE: list_strings()
+   Tool: list_strings()
    ```
 
 2. **Categorize strings**:
@@ -93,13 +93,13 @@ This workplan outlines strategies for progressively analyzing a binary to build 
 
 3. **Find functions referencing key strings**:
    ```
-   EXECUTE: find_references_to_string(string="KEY_STRING")
+   Tool: find_references_to_string(string="KEY_STRING")
    ```
    Note: Replace with actual string.
 
 4. **Analyze functions using important strings**:
    ```
-   EXECUTE: decompile_function(name="FUNCTION_USING_STRING")
+   Tool: decompile_function(name="FUNCTION_USING_STRING")
    ```
    Note: Replace with actual function name.
 
@@ -119,7 +119,7 @@ This workplan outlines strategies for progressively analyzing a binary to build 
 
 1. **Start with a key function**:
    ```
-   EXECUTE: decompile_function(name="KEY_FUNCTION")
+   Tool: decompile_function(name="KEY_FUNCTION")
    ```
    Note: Replace with actual function name.
 
@@ -130,7 +130,7 @@ This workplan outlines strategies for progressively analyzing a binary to build 
 
 3. **For each important called function**:
    ```
-   EXECUTE: decompile_function(name="CALLED_FUNCTION")
+   Tool: decompile_function(name="CALLED_FUNCTION")
    ```
    Note: Replace with actual function name.
 
@@ -165,13 +165,13 @@ This workplan outlines strategies for progressively analyzing a binary to build 
 
 2. **Trace data initialization**:
    ```
-   EXECUTE: decompile_function(name="INITIALIZATION_FUNCTION")
+   Tool: decompile_function(name="INITIALIZATION_FUNCTION")
    ```
    Note: Replace with actual function name.
 
 3. **Follow data through processing functions**:
    ```
-   EXECUTE: decompile_function(name="PROCESSING_FUNCTION")
+   Tool: decompile_function(name="PROCESSING_FUNCTION")
    ```
    Note: Replace with actual function name.
 
@@ -202,7 +202,7 @@ This workplan outlines strategies for progressively analyzing a binary to build 
 2. **Verify Arguments (MANDATORY)**:
    For each critical API found:
    ```
-   EXECUTE: decompile_function(name="CallerFunction")
+   Tool: decompile_function(name="CallerFunction")
    ```
    *   **Check 1**: Are security attributes (lpSecurityAttributes) NULL?
    *   **Check 2**: Are file paths hardcoded or dynamically constructed?

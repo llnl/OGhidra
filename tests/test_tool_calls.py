@@ -404,10 +404,8 @@ class ToolCapabilityTester:
                 f.write("\n---\n\n")
 
             f.write("## Calling Tools from AI Agent\n\n")
-            f.write("When using these tools from the AI agent, use the following format:\n\n")
-            f.write('```\nEXECUTE: tool_name(param1="value1", param2="value2")\n```\n\n')
-            f.write("For example:\n\n")
-            f.write('```\nEXECUTE: decompile_function(name="main")\n```\n\n')
+            f.write("DSPy returns typed `ToolAction` objects. For example:\n\n")
+            f.write('```json\n{"tool":"decompile_function","parameters":{"name":"main"}}\n```\n\n')
 
             # Get current date and time
             current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")

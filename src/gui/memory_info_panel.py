@@ -365,8 +365,8 @@ class MemoryInfoPanel:
             if hasattr(self.bridge, "current_goal") and self.bridge.current_goal:
                 stats.append("\n=== Current Goal ===")
                 stats.append(f"Goal: {self.bridge.current_goal}")
-                stats.append(f"Steps Taken: {getattr(self.bridge, 'goal_steps_taken', 0)}")
-                stats.append(f"Max Steps: {getattr(self.bridge, 'max_goal_steps', 0)}")
+                stats.append(f"Current Cycle: {getattr(self.bridge, 'current_loop_number', 1)}")
+                stats.append(f"Max Cycles: {getattr(self.bridge.llm_config, 'max_agentic_cycles', 1)}")
                 stats.append(f"Achieved: {'Yes' if getattr(self.bridge, 'goal_achieved', False) else 'No'}")
 
         except Exception as e:

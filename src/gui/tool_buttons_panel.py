@@ -7,7 +7,6 @@ import threading
 import time
 import json
 import re
-from typing import Dict, Any
 from .daemon_thread_pool_executor import DaemonThreadPoolExecutor
 from .ui_thread import ui_safe
 from concurrent.futures import as_completed
@@ -159,8 +158,8 @@ class ToolButtonsPanel:
                 )
 
                 # Step 1: Call the specific Ghidra tool (with pagination for list tools)
-                if hasattr(self.bridge.ghidra, tool_name):
-                    tool_method = getattr(self.bridge.ghidra, tool_name)
+                if hasattr(self.bridge.ghidra_client, tool_name):
+                    tool_method = getattr(self.bridge.ghidra_client, tool_name)
 
                     try:
                         # Check if this is a list tool that supports pagination
@@ -230,7 +229,7 @@ class ToolButtonsPanel:
                             for addr in addresses:
                                 # Get incoming xrefs (who references this string)
                                 try:
-                                    xrefs = self.bridge.ghidra.get_xrefs_to(addr)
+                                    xrefs = self.bridge.ghidra_client.get_xrefs_to(addr)
                                 except Exception as e:
                                     xrefs = [f"Error getting xrefs_to({addr}): {e}"]
 
@@ -257,7 +256,7 @@ class ToolButtonsPanel:
 
                                 for faddr in fn_addrs:
                                     try:
-                                        code = self.bridge.ghidra.decompile_function_by_address(faddr)
+                                        code = self.bridge.ghidra_client.decompile_function_by_address(faddr)
                                         code_snippet = "\n".join(code.splitlines()[:60])  # cap lines
                                     except Exception as e:
                                         code_snippet = f"Error decompiling {faddr}: {e}"
@@ -284,7 +283,7 @@ class ToolButtonsPanel:
                         self.response_panel.add_response("Tool Error", raw_tool_result)
 
                 else:
-                    error_msg = f"Tool {tool_name} not found in bridge.ghidra"
+                    error_msg = f"Tool {tool_name} not found in bridge.ghidra_client"
                     self.response_panel.add_response("Error", error_msg)
 
                 # Final stage update
@@ -316,7 +315,7 @@ class ToolButtonsPanel:
 
                 # Step 1: Get current function
                 try:
-                    current_function_result = self.bridge.ghidra.get_current_function()
+                    current_function_result = self.bridge.ghidra_client.get_current_function()
                     if isinstance(current_function_result, str) and current_function_result.lower().startswith("error:"):
                         self.response_panel.add_response("Error", f"Failed to get current function: {current_function_result}")
                         return
@@ -347,128 +346,18 @@ class ToolButtonsPanel:
                 try:
                     self.workflow_diagram.set_current_stage("analysis")
 
-                    # Create a detailed query for the AI agent to analyze and suggest rename
-                    analysis_query = f"""Analyze the function '{function_name}' and provide a highly descriptive rename suggestion.
+                    decompiled_code = self.bridge.ghidra_client.decompile_function(name=function_name)
+                    function_analysis = self.bridge.dspy_program.analyze_function(
+                        function_name=function_name,
+                        decompiled_code=str(decompiled_code),
+                    )
+                    ai_response = function_analysis.as_markdown()
+                    function_summary = ai_response
+                    suggested_name = function_analysis.suggested_name
 
-You MUST follow this EXACT format in your response:
+                    self.response_panel.add_response("Step 2: AI Analysis & Name Suggestion", ai_response)
 
-**Function Analysis:**
-[Provide comprehensive analysis: What does this function do? Identify specific operations like memory allocation, string manipulation, network operations, file I/O, cryptographic operations, data validation, etc. Examine parameters, return values, called functions, and code patterns. Look for domain-specific functionality.]
-
-**Behavior Summary:**
-[Write a precise 1-4 sentence summary describing the function's primary behavior, data flow, and purpose in the program architecture]
-
-**Suggested Name:** [descriptiveSpecificFunctionName]
-**Rationale:** [Explain in detail why this name accurately captures the function's specific purpose and distinguishes it from other functions]
-
-ENHANCED NAMING REQUIREMENTS:
-- Be HIGHLY SPECIFIC about the operation (e.g., "parseHttpHeaders" not "parseData", "validateEmailFormat" not "validateInput")
-- Include data type/domain context (e.g., "processNetworkPacket", "decryptUserCredentials", "compressImageBuffer")
-- Use action verbs that describe the EXACT operation: parse, validate, encrypt, decrypt, compress, decompress, serialize, deserialize, allocate, deallocate, transform, convert, extract, insert, remove, update, calculate, generate, verify, authenticate, etc.
-- Use precise nouns: Buffer, Packet, Header, Payload, Token, Credential, Session, Connection, Registry, Configuration, Certificate, Signature, etc.
-- Be domain-aware: If it's crypto operations use crypto terms, if it's network use network terms, if it's file system use file terms
-- Use camelCase format
-- Length: 2-5 words (prioritize clarity over brevity)
-- Avoid generic terms: process, handle, manage, data, function, method, routine, etc.
-
-EXAMPLES of good names:
-- parseJsonConfiguration (not parseData)
-- validateTlsCertificate (not validateInput)
-- encryptAesPayload (not encryptData)
-- allocateMemoryBuffer (not allocateMemory)
-- extractRegistryKeys (not extractData)
-- calculateChecksumValue (not calculateValue)
-
-CRITICAL: You MUST include all four sections with the exact headers shown above. Focus on making the suggested name as specific and descriptive as possible."""
-
-                    # Use direct ollama.generate instead of bridge.process_query to avoid infinite loops
-                    # This follows the same fix pattern as the "Analyze Current Function" tool
-                    ai_response = self.bridge.ollama.generate(prompt=analysis_query)
-
-                    if ai_response and ai_response.strip():
-                        self.response_panel.add_response("Step 2: AI Analysis & Name Suggestion", ai_response)
-
-                        # USE THE ENTIRE AI RESPONSE as the behavior summary
-                        function_summary = ai_response.strip()
-                        self.response_panel.add_response(
-                            "Debug", f"📝 Using full AI response as behavior summary (length: {len(function_summary)} chars)"
-                        )
-
-                        # Extract suggested name from AI response
-                        suggested_name = None
-
-                        # Split AI response into lines for parsing
-                        lines = ai_response.split("\n")
-
-                        # First, look for the "Suggested Name:" pattern
-                        for line in lines:
-                            line = line.strip()
-                            if "Suggested Name:" in line:
-                                # Extract everything after "Suggested Name:"
-                                name_part = line.split("Suggested Name:", 1)[1].strip()
-                                # Remove any markdown formatting
-                                name_part = name_part.replace("**", "").replace("*", "").strip()
-                                # Extract the actual function name (should be camelCase/snake_case)
-                                import re
-
-                                name_match = re.search(r"\b([a-z][a-zA-Z0-9_]*[a-zA-Z0-9]|[a-z][a-zA-Z0-9]*)\b", name_part)
-                                if name_match:
-                                    suggested_name = name_match.group(1)
-                                    break
-
-                        # Fallback: look for patterns in the response that might indicate function names
-                        if not suggested_name:
-                            # Look for camelCase patterns in the response
-                            import re
-
-                            # First, try to find words that look like function names (camelCase with at least one capital)
-                            camel_case_matches = re.findall(r"\b([a-z][a-zA-Z0-9]*[A-Z][a-zA-Z0-9]*)\b", ai_response)
-
-                            # Filter out common words
-                            excluded_words = {
-                                "function",
-                                "name",
-                                "suggest",
-                                "analysis",
-                                "code",
-                                "parameter",
-                                "value",
-                                "data",
-                                "result",
-                                "return",
-                                "call",
-                                "method",
-                                "functionName",
-                                "newFunctionName",
-                                "descriptiveFunctionName",
-                            }
-
-                            for match in camel_case_matches:
-                                if (
-                                    len(match) > 4
-                                    and match.lower() not in excluded_words
-                                    and not match.startswith("FUN_")
-                                    and not any(word in match.lower() for word in ["function", "name", "example"])
-                                ):
-                                    suggested_name = match
-                                    break
-
-                            # If still no match, look for any reasonable identifier
-                            if not suggested_name:
-                                simple_matches = re.findall(r"\b([a-z][a-zA-Z0-9_]*)\b", ai_response)
-                                for match in simple_matches:
-                                    if (
-                                        len(match) > 6
-                                        and match.lower() not in excluded_words
-                                        and not match.startswith("FUN_")
-                                        and not any(
-                                            word in match.lower()
-                                            for word in ["function", "name", "example", "analysis", "response"]
-                                        )
-                                    ):
-                                        suggested_name = match
-                                        break
-
+                    if ai_response:
                         if suggested_name:
                             self.response_panel.add_response("Step 3a: Extracted Suggested Name", suggested_name)
 
@@ -482,7 +371,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                                 # STORE the captured summary for this function
                                 if function_summary and hasattr(self.bridge, "function_summaries"):
                                     # Get the function address to use as identifier
-                                    current_function_result = self.bridge.ghidra.get_current_function()
+                                    current_function_result = self.bridge.ghidra_client.get_current_function()
                                     if isinstance(current_function_result, str) and "at " in current_function_result:
                                         import re
 
@@ -557,7 +446,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                                 if self.renamed_functions_panel and function_summary:
                                     try:
                                         # Get the address from current function result
-                                        current_function_result = self.bridge.ghidra.get_current_function()
+                                        current_function_result = self.bridge.ghidra_client.get_current_function()
                                         address = "Unknown"
                                         if isinstance(current_function_result, str) and "at " in current_function_result:
                                             import re
@@ -751,7 +640,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
             # this works reliably across backends (HTTP MCP and pyGhidra)
             # regardless of how auto-generated names are formatted.
             try:
-                function_decompile_result = self.bridge.ghidra.decompile_function_by_address(address=address)
+                function_decompile_result = self.bridge.ghidra_client.decompile_function_by_address(address=address)
                 if isinstance(function_decompile_result, str) and function_decompile_result.lower().startswith("error:"):
                     result["error_msg"] = f"Failed to decompile: {function_decompile_result}"
                     result["result_type"] = "failed"
@@ -798,112 +687,17 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
 
             while retry_count <= max_retries and not ai_response:
                 contextual_info = self._format_context_for_prompt(context)
-                analysis_query = f"""Analyze the function '{function_name}' and provide a highly descriptive rename suggestion.
+                function_analysis = self.bridge.dspy_program.analyze_function(
+                    function_name=function_name,
+                    decompiled_code=str(function_decompile_result),
+                    related_context=contextual_info,
+                )
+                ai_response = function_analysis.as_markdown()
 
-## TARGET FUNCTION: {function_name}
-```c
-{function_decompile_result}
-```
-{contextual_info}
-
-Based on the target function's code AND the contextual information about its callers and callees above, analyze the function thoroughly and provide a highly descriptive rename suggestion.
-
-You MUST follow this EXACT format in your response:
-
-**Function Analysis:**
-[Provide comprehensive analysis: What does this function do? Identify specific operations like memory allocation, string manipulation, network operations, file I/O, cryptographic operations, data validation, etc. Examine parameters, return values, called functions, and code patterns. Look for domain-specific functionality.]
-
-**Behavior Summary:**
-[Write a precise 1-4 sentence summary describing the function's primary behavior, data flow, and purpose in the program architecture]
-
-**Suggested Name:** [descriptiveSpecificFunctionName]
-**Rationale:** [Explain in detail why this name accurately captures the function's specific purpose and distinguishes it from other functions]
-
-ENHANCED NAMING REQUIREMENTS:
-- Be HIGHLY SPECIFIC about the operation (e.g., "parseHttpHeaders" not "parseData", "validateEmailFormat" not "validateInput")
-- Include data type/domain context (e.g., "processNetworkPacket", "decryptUserCredentials", "compressImageBuffer")
-- Use action verbs that describe the EXACT operation: parse, validate, encrypt, decrypt, compress, decompress, serialize, deserialize, allocate, deallocate, transform, convert, extract, insert, remove, update, calculate, generate, verify, authenticate, etc.
-- Use precise nouns: Buffer, Packet, Header, Payload, Token, Credential, Session, Connection, Registry, Configuration, Certificate, Signature, etc.
-- Be domain-aware: If it's crypto operations use crypto terms, if it's network use network terms, if it's file system use file terms
-- Use camelCase format
-- Length: 2-5 words (prioritize clarity over brevity)
-- Avoid generic terms: process, handle, manage, data, function, method, routine, etc.
-
-EXAMPLES of good names:
-- parseJsonConfiguration (not parseData)
-- validateTlsCertificate (not validateInput)
-- encryptAesPayload (not encryptData)
-- allocateMemoryBuffer (not allocateMemory)
-- extractRegistryKeys (not extractData)
-- calculateChecksumValue (not calculateValue)
-
-CRITICAL: You MUST include all four sections with the exact headers shown above. Focus on making the suggested name as specific and descriptive as possible."""
-
-                ai_response = self.bridge.ollama.generate(prompt=analysis_query)
-
-                if ai_response and ai_response.strip():
-                    function_summary = ai_response.strip()
+                if ai_response:
+                    function_summary = ai_response
                     result["summary"] = function_summary
-
-                    # Extract suggested name
-                    suggested_name = None
-                    lines = ai_response.split("\n")
-
-                    for line in lines:
-                        line = line.strip()
-                        if "Suggested Name:" in line:
-                            name_part = line.split("Suggested Name:", 1)[1].strip()
-                            name_part = name_part.replace("**", "").replace("*", "").strip()
-                            name_match = re.search(r"\b([a-z][a-zA-Z0-9_]*[a-zA-Z0-9]|[a-z][a-zA-Z0-9]*)\b", name_part)
-                            if name_match:
-                                suggested_name = name_match.group(1)
-                                break
-
-                    # Fallback extraction
-                    if not suggested_name:
-                        camel_case_matches = re.findall(r"\b([a-z][a-zA-Z0-9]*[A-Z][a-zA-Z0-9]*)\b", ai_response)
-                        excluded_words = {
-                            "function",
-                            "name",
-                            "suggest",
-                            "analysis",
-                            "code",
-                            "parameter",
-                            "value",
-                            "data",
-                            "result",
-                            "return",
-                            "call",
-                            "method",
-                            "functionName",
-                            "newFunctionName",
-                            "descriptiveFunctionName",
-                        }
-
-                        for match in camel_case_matches:
-                            if (
-                                len(match) > 4
-                                and match.lower() not in excluded_words
-                                and not match.startswith("FUN_")
-                                and not any(word in match.lower() for word in ["function", "name", "example"])
-                            ):
-                                suggested_name = match
-                                break
-
-                        if not suggested_name:
-                            simple_matches = re.findall(r"\b([a-z][a-zA-Z0-9_]*)\b", ai_response)
-                            for match in simple_matches:
-                                if (
-                                    len(match) > 6
-                                    and match.lower() not in excluded_words
-                                    and not match.startswith("FUN_")
-                                    and not any(
-                                        word in match.lower()
-                                        for word in ["function", "name", "example", "analysis", "response"]
-                                    )
-                                ):
-                                    suggested_name = match
-                                    break
+                    suggested_name = function_analysis.suggested_name
 
                     # Handle enumeration vs renaming
                     # FIXED: Process renamed functions correctly in enumeration modes
@@ -968,8 +762,13 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                             function_decompile_result, suggested_name if suggested_name else function_name, context
                         )
 
-                        # Parse AI response into structured sections
-                        structured_summary = self._parse_ai_response_sections(ai_response)
+                        structured_summary = {
+                            "function_analysis": function_analysis.analysis,
+                            "behavior_summary": function_analysis.behavior_summary,
+                            "suggested_name": function_analysis.suggested_name,
+                            "rationale": function_analysis.rationale,
+                            "raw": function_summary,
+                        }
 
                     except Exception as meta_error:
                         logger.warning(f"Metadata extraction failed: {meta_error}")
@@ -1050,7 +849,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
             return result
 
     def _create_batch_rag_vectors(self, processed_functions_data):
-        """Create RAG vectors in batches for processed functions with visual progress feedback."""
+        """Run post-analysis plugin phases, including whole-program RAG indexing."""
         if not processed_functions_data:
             return 0
 
@@ -1062,53 +861,25 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
         # Initialize RAG progress in workflow diagram
         self.workflow_diagram.set_rag_progress(0, total_functions, active=True)
 
-        # Batch create RAG vectors for all processed functions
         rag_success_count = 0
-        rag_batch_size = 25  # Process RAG vectors in smaller batches
-
-        for batch_start in range(0, total_functions, rag_batch_size):
-            batch_end = min(batch_start + rag_batch_size, total_functions)
-            batch = processed_functions_data[batch_start:batch_end]
-
-            self.response_panel.add_response(
-                "📊 RAG Batch", f"Processing RAG vectors {batch_start + 1}-{batch_end} of {total_functions}"
+        failures = []
+        if hasattr(self.bridge, "finalize_function_analysis"):
+            context = self.bridge.finalize_function_analysis(
+                processed_functions_data,
+                metadata={"source": "bulk_function_analysis"},
             )
+            rag_result = context.data.get("function_rag", {})
+            rag_success_count = int(rag_result.get("indexed", 0))
+            failures = list(rag_result.get("failures", []))
 
-            for i, func_data in enumerate(batch):
-                try:
-                    # RAG integration removed - use "Load Vectors" button for vector operations
-                    # if hasattr(self.bridge, '_add_function_to_rag'):
-                    #     self.bridge._add_function_to_rag(
-                    #         func_data['address'],
-                    #         func_data['summary']
-                    #     )
-                    rag_success_count += 1
-
-                    # Update progress bar for each vector created
-                    current_progress = batch_start + i + 1
-                    self.workflow_diagram.set_rag_progress(current_progress, total_functions, active=True)
-
-                    # Small delay to make progress visible (can be removed for production)
-                    import time
-
-                    time.sleep(0.01)  # 10ms delay for visual feedback
-
-                except Exception as e:
-                    logger.warning(f"Could not add function {func_data['old_name']} to RAG: {e}")
-
-            # Check for stop signal during RAG processing
-            if hasattr(self, "should_stop") and self.should_stop:
-                self.response_panel.add_response(
-                    "🛑 RAG Cancelled", f"RAG vector creation stopped by user. Created {rag_success_count} vectors."
-                )
-                # Still mark RAG stage as complete even if cancelled
-                self.workflow_diagram.complete_rag_stage()
-                return rag_success_count
+        self.workflow_diagram.set_rag_progress(rag_success_count, total_functions, active=True)
+        for failure in failures:
+            logger.warning("Could not add function to RAG: %s", failure)
 
         # Mark RAG creation as complete
         self.workflow_diagram.complete_rag_stage()
         self.response_panel.add_response(
-            "✅ RAG Complete", f"Successfully created {rag_success_count}/{total_functions} RAG vectors"
+            "✅ RAG Complete", f"Successfully indexed {rag_success_count}/{total_functions} function analyses"
         )
 
         # Update memory panel to reflect new vector count
@@ -1146,7 +917,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
         # Cache miss - fetch from Ghidra
         self._cache_misses += 1
         try:
-            code = self.bridge.ghidra.decompile_function_by_address(address=str(address))
+            code = self.bridge.ghidra_client.decompile_function_by_address(address=str(address))
 
             # Only cache successful results (not errors)
             if code and not code.lower().startswith("error"):
@@ -1199,7 +970,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
         try:
             # Get callers (who calls this function?)
             try:
-                callers_result = self.bridge.ghidra.get_xrefs_to(address=address)
+                callers_result = self.bridge.ghidra_client.get_xrefs_to(address=address)
                 if isinstance(callers_result, list) and callers_result:
                     # Handle both dict format (JSON) and string format (text)
                     caller_addresses = []
@@ -1239,7 +1010,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
 
             # Get callees (what does this function call?)
             try:
-                callees_result = self.bridge.ghidra.get_xrefs_from(address=address)
+                callees_result = self.bridge.ghidra_client.get_xrefs_from(address=address)
                 if isinstance(callees_result, list) and callees_result:
                     # Handle both dict format (JSON) and string format (text)
                     callee_addresses = []
@@ -1327,77 +1098,6 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
             sections.append("\n*Note: Context truncated to fit character limits. Showing most relevant callers/callees.*")
 
         return "\n".join(sections)
-
-    def _parse_ai_response_sections(self, ai_response: str) -> Dict[str, Any]:
-        """
-        Parse AI response into structured sections.
-
-        Args:
-            ai_response: Raw AI response text
-
-        Returns:
-            Dict with parsed sections
-        """
-        sections = {
-            "function_analysis": "",
-            "behavior_summary": "",
-            "suggested_name": "",
-            "rationale": "",
-            "key_operations": [],
-            "raw": ai_response,  # Keep raw for backward compat
-        }
-
-        try:
-            # Split by common section markers
-            lines = ai_response.split("\n")
-            current_section = None
-            current_content = []
-
-            for line in lines:
-                line_stripped = line.strip()
-
-                # Detect section headers
-                if "Function Analysis:" in line or "**Function Analysis:**" in line:
-                    if current_section and current_content:
-                        sections[current_section] = "\n".join(current_content).strip()
-                    current_section = "function_analysis"
-                    current_content = []
-                elif "Behavior Summary:" in line or "**Behavior Summary:**" in line:
-                    if current_section and current_content:
-                        sections[current_section] = "\n".join(current_content).strip()
-                    current_section = "behavior_summary"
-                    current_content = []
-                elif "Suggested Name:" in line or "**Suggested Name:**" in line:
-                    if current_section and current_content:
-                        sections[current_section] = "\n".join(current_content).strip()
-                    current_section = "suggested_name"
-                    # Extract name directly
-                    name_part = line.split(":", 1)[1] if ":" in line else ""
-                    sections["suggested_name"] = name_part.strip().replace("**", "").replace("*", "")
-                    current_section = None
-                elif "Rationale:" in line or "**Rationale:**" in line:
-                    if current_section and current_content:
-                        sections[current_section] = "\n".join(current_content).strip()
-                    current_section = "rationale"
-                    current_content = []
-                elif current_section:
-                    # Add to current section
-                    # Extract bullet points for key operations
-                    if current_section == "function_analysis":
-                        if line_stripped.startswith(("- ", "* ", "• ", "1.", "2.", "3.")):
-                            clean_line = line_stripped.lstrip("-*•0123456789. ")
-                            if clean_line:
-                                sections["key_operations"].append(clean_line)
-                    current_content.append(line)
-
-            # Save final section
-            if current_section and current_content:
-                sections[current_section] = "\n".join(current_content).strip()
-
-        except Exception as e:
-            logger.warning(f"Error parsing AI response sections: {e}")
-
-        return sections
 
     @staticmethod
     def _canon_addr(value):
@@ -1489,7 +1189,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                     limit = 200  # Request 200 functions per page
 
                     while True:
-                        batch_result = self.bridge.ghidra.list_functions(offset=offset, limit=limit)
+                        batch_result = self.bridge.ghidra_client.list_functions(offset=offset, limit=limit)
 
                         if isinstance(batch_result, str) and batch_result.lower().startswith("error:"):
                             self.response_panel.add_response(
@@ -1590,6 +1290,14 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                                 f"All {session_skipped} functions were already analyzed in the loaded session.",
                             )
                             return
+
+                    # Plugins may prioritize entry points, call-graph roots,
+                    # suspicious functions, or any project-specific ordering.
+                    if hasattr(self.bridge, "prepare_functions_for_analysis"):
+                        valid_functions = self.bridge.prepare_functions_for_analysis(
+                            valid_functions,
+                            metadata={"enumeration_mode": enumeration_mode, "skip_analyzed": skip_analyzed},
+                        )
 
                     total_functions = len(valid_functions)
                     self.response_panel.add_response("Step 1 Complete", f"Found {total_functions} functions to process")
@@ -1929,7 +1637,7 @@ Check the tab to see detailed analysis results and manage function information.
 
                 # Step 1: Get current function
                 try:
-                    current_function_result = self.bridge.ghidra.get_current_function()
+                    current_function_result = self.bridge.ghidra_client.get_current_function()
                     if isinstance(current_function_result, str) and current_function_result.lower().startswith("error:"):
                         self.response_panel.add_response("Error", f"Failed to get current function: {current_function_result}")
                         return
@@ -1958,7 +1666,7 @@ Check the tab to see detailed analysis results and manage function information.
 
                 # Step 2: Decompile the function to get its code
                 try:
-                    decompile_result = self.bridge.ghidra.decompile_function(name=function_name)
+                    decompile_result = self.bridge.ghidra_client.decompile_function(name=function_name)
                     if isinstance(decompile_result, str) and decompile_result.lower().startswith("error:"):
                         self.response_panel.add_response(
                             "Error", f"Failed to decompile function {function_name}: {decompile_result}"
@@ -2000,8 +1708,8 @@ Check the tab to see detailed analysis results and manage function information.
 
                     try:
                         if address:
-                            xrefs_to = self.bridge.ghidra.get_xrefs_to(address=address)
-                            xrefs_from = self.bridge.ghidra.get_xrefs_from(address=address)
+                            xrefs_to = self.bridge.ghidra_client.get_xrefs_to(address=address)
+                            xrefs_from = self.bridge.ghidra_client.get_xrefs_from(address=address)
                             # Ensure lists
                             xrefs_to = xrefs_to if isinstance(xrefs_to, list) else [str(xrefs_to)]
                             xrefs_from = xrefs_from if isinstance(xrefs_from, list) else [str(xrefs_from)]
@@ -2503,13 +2211,13 @@ Please provide a comprehensive analysis of this information.
                 )
 
                 # Run the scan directly (no LLM needed)
-                tables = self.bridge.ghidra.scan_function_pointer_tables(
+                tables = self.bridge.ghidra_client.scan_function_pointer_tables(
                     min_table_entries=3, pointer_size=8, max_scan_size=65536
                 )
 
                 if tables:
                     # Format results
-                    formatted = self.bridge.ghidra.format_table_scan_results(tables)
+                    formatted = self.bridge.ghidra_client.format_table_scan_results(tables)
                     self.response_panel.add_response(f"Scan Complete: Found {len(tables)} Table(s)", formatted)
 
                     # Now send to AI for interpretation
@@ -2539,7 +2247,7 @@ Please provide:
                 else:
                     # Get segment info for context
                     try:
-                        segments = self.bridge.ghidra.list_segments()
+                        segments = self.bridge.ghidra_client.list_segments()
                         seg_info = "\n".join(f"  {s}" for s in segments[:8])
                     except Exception as e:
                         error_message = "  (Could not retrieve segment info)"

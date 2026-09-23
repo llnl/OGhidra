@@ -187,29 +187,6 @@ class CAGManager:
 
         return ""
 
-    def update_session_from_bridge_context(self, context_history: List[Dict[str, Any]]) -> None:
-        """
-        Update the session context from the Bridge's context history.
-
-        Args:
-            context_history: List of context items from the Bridge
-        """
-        if not self.session:
-            return
-
-        # Context could be a list of dictionaries or a list
-        if not isinstance(context_history, list):
-            # Convert to list if it's not already
-            logger.warning(f"Expected context_history to be a list, got {type(context_history)}")
-            return
-
-        for item in context_history:
-            if isinstance(item, dict) and "role" in item and "content" in item:
-                self.session.add_message(item["role"], item["content"])
-            else:
-                logger.warning(f"Unexpected context item format: {item}")
-                continue
-
     def update_from_function_decompile(self, address: str, name: str, decompiled_code: str) -> None:
         """
         Update the session cache with a decompiled function.
@@ -804,10 +781,8 @@ class CAGManager:
         if not self.session:
             return
 
-        # Add the command execution to context
-        param_str = ", ".join([f'{k}="{v}"' for k, v in params.items()]) if params else ""
-        tool_call = f"EXECUTE: {command_name}({param_str})"
-        self.session.add_message("tool_call", tool_call)
+        # Store a readable representation of the already-typed tool action.
+        self.session.add_message("tool_call", f"{command_name}({params})")
 
         # Add the result
         self.session.add_message("tool_result", result)

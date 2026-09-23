@@ -864,7 +864,7 @@ class OGhidraUI:
 
             # Check Ghidra backend (HTTP MCP server or pyGhidra)
             try:
-                ghidra_health = self.bridge.ghidra.check_health()
+                ghidra_health = self.bridge.ghidra_client.check_health()
                 # Decide label based on configured backend
                 backend = getattr(self.config.ghidra, "backend", "http")
                 if backend == "pyghidra":

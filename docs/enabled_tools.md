@@ -104,40 +104,7 @@ The following tools have been disabled to focus on the most useful analysis func
 
 ## Tool Usage
 
-To use these tools from the AI agent, use the following format:
-
-```
-EXECUTE: tool_name(param1="value1", param2="value2")
-```
-
-For example:
-
-```
-EXECUTE: analyze_function()
-EXECUTE: decompile_function(name="main")
-EXECUTE: list_strings(limit=10)
-```
+The DSPy execution program selects tools through typed `ToolAction` outputs.
+Tool names and parameters are validated before dispatch to Ghidra.
 
 ---
-
-## Friendly aliases (CLI / agent)
-For convenience the command parser recognises two high-level aliases and converts them to the underlying tools:
-
-* `xref_lookup(...)` – maps to `get_xrefs_to`, `get_xrefs_from`, or `get_function_xrefs` depending on parameters (see below).
-* `string_search(filter="<text>")` – maps to `list_strings(filter="<text>")`.
-
-Alias usage examples:
-
-```
-# All refs *to* address 0x401000
-EXECUTE: xref_lookup(address="401000", direction="to")
-
-# All refs *from* address (defaults to direction="from")
-EXECUTE: xref_lookup(address="401000", direction="from")
-
-# Refs to function by name
-EXECUTE: xref_lookup(name="CreateFileW")
-
-# Find all strings that mention "passwd"
-EXECUTE: string_search(filter="passwd")
-```

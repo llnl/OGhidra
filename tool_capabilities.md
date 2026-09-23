@@ -1317,16 +1317,10 @@ Result: Failed to set variable type
 
 ## Calling Tools from AI Agent
 
-When using these tools from the AI agent, use the following format:
+DSPy returns typed `ToolAction` objects. For example:
 
-```
-EXECUTE: tool_name(param1="value1", param2="value2")
-```
-
-For example:
-
-```
-EXECUTE: decompile_function(name="main")
+```json
+{"tool":"decompile_function","parameters":{"name":"main"}}
 ```
 
 ## Generated Documentation

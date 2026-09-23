@@ -8,28 +8,28 @@ This workplan outlines how to capture and organize knowledge about a binary duri
 
 1. **Identify binary type and architecture**:
    ```
-   EXECUTE: get_program_info()
+   Tool: get_program_info()
    ```
 
 2. **List all imports to understand external dependencies**:
    ```
-   EXECUTE: list_imports()
+   Tool: list_imports()
    ```
 
 3. **List all exports to identify key functionality**:
    ```
-   EXECUTE: list_exports()
+   Tool: list_exports()
    ```
 
 4. **Identify potential string clues**:
    Use `list_strings()` first, then pivot to xrefs/decompilation:
    ```
-   EXECUTE: list_strings(offset=0, limit=20)
+   Tool: list_strings(offset=0, limit=20)
    ```
    Then, for interesting strings:
    ```
-   EXECUTE: get_xrefs_to(address="0x...", limit=10)
-   EXECUTE: decompile_function_by_address(address="0x...")
+   Tool: get_xrefs_to(address="0x...", limit=10)
+   Tool: decompile_function_by_address(address="0x...")
    ```
 
 5. **Summarize findings** into a structured overview:
@@ -49,7 +49,7 @@ This workplan outlines how to capture and organize knowledge about a binary duri
 
 1. **Decompile the target function**:
    ```
-   EXECUTE: decompile_function(name="FUN_14000A000")
+   Tool: decompile_function(name="FUN_14000A000")
    ```
    Note: Replace with actual function name.
 
@@ -62,19 +62,19 @@ This workplan outlines how to capture and organize knowledge about a binary duri
 3. **Understand function context (callers and callees)**:
    Use cross-references and decompilation:
    ```
-   EXECUTE: get_xrefs_to(address="0x...", limit=10)
-   EXECUTE: decompile_function_by_address(address="0x...")
+   Tool: get_xrefs_to(address="0x...", limit=10)
+   Tool: decompile_function_by_address(address="0x...")
    ```
 
 4. **Examine calling functions for context**:
    ```
-   EXECUTE: decompile_function(name="CALLING_FUNCTION")
+   Tool: decompile_function(name="CALLING_FUNCTION")
    ```
    Note: Replace with actual calling function name.
 
 5. **Propose a descriptive name** based on analysis:
    ```
-   EXECUTE: rename_function(old_name="FUN_14000A000", new_name="descriptive_name")
+   Tool: rename_function(old_name="FUN_14000A000", new_name="descriptive_name")
    ```
 
 ### Common Errors and Solutions:
@@ -88,7 +88,7 @@ This workplan outlines how to capture and organize knowledge about a binary duri
 
 1. **Locate structure usage in functions**:
    ```
-   EXECUTE: decompile_function(name="FUN_14000A000")
+   Tool: decompile_function(name="FUN_14000A000")
    ```
    Note: Look for pointer dereferences and field accesses.
 
@@ -117,7 +117,7 @@ This workplan outlines how to capture and organize knowledge about a binary duri
 
 1. **Start with the target function**:
    ```
-   EXECUTE: decompile_function(name="TARGET_FUNCTION")
+   Tool: decompile_function(name="TARGET_FUNCTION")
    ```
 
 2. **Identify all function calls within the target**:
@@ -126,7 +126,7 @@ This workplan outlines how to capture and organize knowledge about a binary duri
 
 3. **For each called function, recursively analyze**:
    ```
-   EXECUTE: decompile_function(name="CALLED_FUNCTION")
+   Tool: decompile_function(name="CALLED_FUNCTION")
    ```
    - Understand its purpose
    - Rename it appropriately

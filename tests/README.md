@@ -21,10 +21,9 @@ All examples are for legitimate security research and educational purposes.
    - Analysis: `decompile_function`, `decompile_function_by_address`, `analyze_function`, etc.
    - Modifications: `rename_function`, `set_decompiler_comment`, `set_function_prototype`, etc.
 
-3. **AI Agent Integration**: The AI agent uses the `EXECUTE: tool_name(param1="value1", param2="value2")` format to trigger tool calls, which are then processed by the `CommandParser` and executed through the `GhidraMCPClient`.
+3. **AI Agent Integration**: DSPy emits typed tool actions, which are normalized, validated, and executed through `GhidraMCPClient`.
 
-4. **Tool Call Pattern**: When the AI mentions a tool call in the form of `EXECUTE: tool_name(params)`, the bridge:
-   - Extracts the command using regex
+4. **Tool Call Pattern**: For each typed tool action, the bridge:
    - Validates the parameters
    - Calls the appropriate method in `GhidraMCPClient`
    - Returns the result to the AI
@@ -48,17 +47,5 @@ This will create `tool_capabilities.md` with detailed API documentation.
 
 ## Using Tools in AI Conversations
 
-To use the tools when interacting with the AI agent, use the following format:
-
-```
-EXECUTE: tool_name(param_name="param_value")
-```
-
-For example:
-
-```
-EXECUTE: list_strings(offset=0, limit=10)
-EXECUTE: decompile_function(name="main")
-```
-
-The AI's response will be augmented with the result of the tool call.
+Ask for the analysis or mutation in natural language. DSPy selects typed tool
+actions, and the resulting evidence is fed back into the next decision.

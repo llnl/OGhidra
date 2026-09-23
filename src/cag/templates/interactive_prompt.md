@@ -18,18 +18,11 @@ Other supported commands include list_methods, list_classes, list_imports, list_
 
 Some tools have been disabled to focus on code analysis functionality.
 
-## Command Format
+## Tool Selection
 
-To execute a Ghidra command, use the following format:
-```
-EXECUTE: command_name(param1="value1", param2="value2")
-```
-
-For example:
-```
-EXECUTE: analyze_function()
-EXECUTE: decompile_function(name="main")
-```
+Choose exact tool names and parameters from the available tools. The DSPy
+execution signature returns tool actions as structured data, so no text command
+syntax or code block is required.
 
 ## Your Role and Responsibilities
 

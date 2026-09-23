@@ -8,12 +8,12 @@ This document contains step-by-step workplans for common Ghidra tasks. These wor
 
 1. **First, check if the function exists**:
    ```
-   EXECUTE: list_functions()
+   Tool: list_functions()
    ```
 
 2. **Decompile the function**:
    ```
-   EXECUTE: decompile_function(name="function_name")
+   Tool: decompile_function(name="function_name")
    ```
    Note: Replace "function_name" with the actual function name.
 
@@ -37,12 +37,12 @@ This document contains step-by-step workplans for common Ghidra tasks. These wor
 
 1. **First, check if the function exists**:
    ```
-   EXECUTE: list_functions()
+   Tool: list_functions()
    ```
 
 2. **Decompile the function to understand its purpose**:
    ```
-   EXECUTE: decompile_function(name="function_name")
+   Tool: decompile_function(name="function_name")
    ```
    Note: Replace "function_name" with the actual function name.
 
@@ -53,7 +53,7 @@ This document contains step-by-step workplans for common Ghidra tasks. These wor
 
 4. **Rename the function**:
    ```
-   EXECUTE: rename_function(old_name="function_name", new_name="descriptive_name")
+   Tool: rename_function(old_name="function_name", new_name="descriptive_name")
    ```
 
 ### Common Errors and Solutions:
@@ -67,13 +67,13 @@ This document contains step-by-step workplans for common Ghidra tasks. These wor
 
 1. **Search for functions by name pattern**:
    ```
-   EXECUTE: search_functions_by_name(query="pattern")
+   Tool: search_functions_by_name(query="pattern")
    ```
    Note: Replace "pattern" with the search term.
 
 2. **For each potential match, decompile and analyze**:
    ```
-   EXECUTE: decompile_function(name="function_name")
+   Tool: decompile_function(name="function_name")
    ```
    Note: Replace "function_name" with each function name from step 1.
 

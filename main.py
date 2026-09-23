@@ -22,14 +22,15 @@ def print_header():
     """Print the application header."""
     width = 70
     header = [
-        "OGhidra - Simplified Three-Phase Architecture",
+        "OGhidra - DSPy Analysis Architecture",
         "------------------------------------------",
         "",
         "1. Planning Phase: Create a plan for addressing the query",
         "2. Tool Calling Phase: Execute tools to gather information",
         "3. Analysis Phase: Analyze results and provide answers",
+        "4. Evaluation Phase: Decide whether to re-plan or finish",
         "",
-        "For more information, see README-ARCHITECTURE.md",
+        "For more information, see docs/dspy-agent-and-plugins.md",
     ]
 
     print("+" + "-" * (width - 2) + "+")
@@ -82,7 +83,7 @@ def run_interactive_mode(bridge: Bridge, config: BridgeConfig):
         limit = 200
 
         while True:
-            functions_result = bridge.ghidra.list_functions(offset=offset, limit=limit) if hasattr(bridge, "ghidra") else []
+            functions_result = bridge.ghidra_client.list_functions(offset=offset, limit=limit) if hasattr(bridge, "ghidra_client") else []
 
             batch, status = _normalize_function_lines(functions_result)
             if isinstance(status, str):
@@ -112,9 +113,9 @@ def run_interactive_mode(bridge: Bridge, config: BridgeConfig):
                 break
             elif user_input.lower() == "health":
                 # Check Ollama and GhidraMCP health
-                # Corrected: Use bridge.ollama and bridge.ghidra
+                # Corrected: Use bridge.ollama and bridge.ghidra_client
                 ollama_health = bridge.ollama.check_health() if hasattr(bridge, "ollama") else False
-                ghidra_health = bridge.ghidra.check_health() if hasattr(bridge, "ghidra") else False
+                ghidra_health = bridge.ghidra_client.check_health() if hasattr(bridge, "ghidra_client") else False
 
                 print("\n=== Health Check ===")
                 print(f"Ollama API: {'OK' if ollama_health else 'NOT OK'}")
@@ -220,10 +221,10 @@ def run_interactive_mode(bridge: Bridge, config: BridgeConfig):
                 print("\n=== Available Ghidra Tools ===")
 
                 try:
-                    # Corrected: Use bridge.ghidra
+                    # Corrected: Use bridge.ghidra_client
                     client = (
-                        bridge.ghidra if hasattr(bridge, "ghidra") else GhidraMCPClient(config.ghidra)
-                    )  # Fallback if bridge.ghidra not init
+                        bridge.ghidra_client if hasattr(bridge, "ghidra_client") else GhidraMCPClient(config.ghidra)
+                    )  # Fallback if bridge.ghidra_client not init
 
                     # Get all public methods (excluding those starting with _ and known non-tools)
                     non_tool_methods = [
@@ -416,9 +417,9 @@ def run_interactive_mode(bridge: Bridge, config: BridgeConfig):
                                             final_value_for_param = value_str_from_pair  # Fallback to string
                                 params[key] = final_value_for_param
 
-                    # Corrected: Use bridge.ghidra
-                    if hasattr(bridge.ghidra, tool_name):
-                        tool_method = getattr(bridge.ghidra, tool_name)
+                    # Corrected: Use bridge.ghidra_client
+                    if hasattr(bridge.ghidra_client, tool_name):
+                        tool_method = getattr(bridge.ghidra_client, tool_name)
 
                         params_for_log = ", ".join([f"{k}={repr(v)}" for k, v in params.items()])
                         bridge.logger.info(f"Executing direct tool call via 'run-tool': {tool_name} with params: {params}")
@@ -603,8 +604,8 @@ Tool Output:
                     params_for_log = f"address={repr(address)}" if address else ""
 
                     raw_tool_result = (
-                        bridge.ghidra.analyze_function(address=address)
-                        if hasattr(bridge, "ghidra")
+                        bridge.ghidra_client.analyze_function(address=address)
+                        if hasattr(bridge, "ghidra_client")
                         else "Ghidra client not available."
                     )
 
@@ -719,6 +720,12 @@ Tool Output:
                         print("No functions found to enumerate.")
                         continue
 
+                    if hasattr(bridge, "prepare_functions_for_analysis"):
+                        valid_functions = bridge.prepare_functions_for_analysis(
+                            valid_functions,
+                            metadata={"source": "interactive_cli", "enumeration_mode": "full_enumeration"},
+                        )
+
                     total_functions = len(valid_functions)
                     print(f"Found {total_functions} functions to enumerate.")
 
@@ -745,7 +752,7 @@ Tool Output:
 
                             # Decompile the function
                             function_decompile_result = (
-                                bridge.ghidra.decompile_function(name=function_name) if hasattr(bridge, "ghidra") else None
+                                bridge.ghidra_client.decompile_function(name=function_name) if hasattr(bridge, "ghidra_client") else None
                             )
                             if not function_decompile_result or (
                                 isinstance(function_decompile_result, str)
@@ -765,8 +772,8 @@ Tool Output:
                                 # Get callers (who calls this function?)
                                 try:
                                     callers_result = (
-                                        bridge.ghidra.get_xrefs_to(address=address)
-                                        if hasattr(bridge.ghidra, "get_xrefs_to")
+                                        bridge.ghidra_client.get_xrefs_to(address=address)
+                                        if hasattr(bridge.ghidra_client, "get_xrefs_to")
                                         else []
                                     )
                                     if isinstance(callers_result, list) and callers_result:
@@ -786,7 +793,7 @@ Tool Output:
                                         # Decompile top 3 callers
                                         for caller_addr in caller_addresses[:3]:
                                             try:
-                                                caller_code = bridge.ghidra.decompile_function_by_address(
+                                                caller_code = bridge.ghidra_client.decompile_function_by_address(
                                                     address=str(caller_addr)
                                                 )
                                                 if caller_code and not caller_code.lower().startswith("error"):
@@ -805,8 +812,8 @@ Tool Output:
                                 # Get callees (what does this function call?)
                                 try:
                                     callees_result = (
-                                        bridge.ghidra.get_xrefs_from(address=address)
-                                        if hasattr(bridge.ghidra, "get_xrefs_from")
+                                        bridge.ghidra_client.get_xrefs_from(address=address)
+                                        if hasattr(bridge.ghidra_client, "get_xrefs_from")
                                         else []
                                     )
                                     if isinstance(callees_result, list) and callees_result:
@@ -826,7 +833,7 @@ Tool Output:
                                         # Decompile top 3 callees
                                         for callee_addr in callee_addresses[:3]:
                                             try:
-                                                callee_code = bridge.ghidra.decompile_function_by_address(
+                                                callee_code = bridge.ghidra_client.decompile_function_by_address(
                                                     address=str(callee_addr)
                                                 )
                                                 if callee_code and not callee_code.lower().startswith("error"):
@@ -875,129 +882,16 @@ Tool Output:
 
                                 contextual_info = "\n".join(sections)
 
-                            # AI Analysis with enhanced prompt (including context) - matching UI format
-                            analysis_query = f"""Analyze the function '{function_name}' and provide a highly descriptive rename suggestion.
+                            function_analysis = bridge.dspy_program.analyze_function(
+                                function_name=function_name,
+                                decompiled_code=str(function_decompile_result),
+                                related_context=contextual_info,
+                            )
+                            function_summary = function_analysis.as_markdown()
+                            suggested_name = function_analysis.suggested_name
 
-## TARGET FUNCTION: {function_name}
-```c
-{function_decompile_result}
-```
-{contextual_info}
-
-Based on the target function's code AND the contextual information about its callers and callees above, analyze the function thoroughly and provide a highly descriptive rename suggestion.
-
-You MUST follow this EXACT format in your response:
-
-**Function Analysis:**
-[Provide comprehensive analysis: What does this function do? Identify specific operations like memory allocation, string manipulation, network operations, file I/O, cryptographic operations, data validation, etc. Examine parameters, return values, called functions, and code patterns. Look for domain-specific functionality.]
-
-**Behavior Summary:**
-[Write a precise 1-4 sentence summary describing the function's primary behavior, data flow, and purpose in the program architecture based on the target function and its relationship with callers/callees]
-
-**Suggested Name:** [descriptiveSpecificFunctionName]
-**Rationale:** [Explain in detail why this name accurately captures the function's specific purpose and distinguishes it from other functions]
-
-ENHANCED NAMING REQUIREMENTS:
-- Be HIGHLY SPECIFIC about the operation (e.g., "parseHttpHeaders" not "parseData", "validateEmailFormat" not "validateInput")
-- Include data type/domain context (e.g., "processNetworkPacket", "decryptUserCredentials", "compressImageBuffer")
-- Use action verbs that describe the EXACT operation: parse, validate, encrypt, decrypt, compress, decompress, serialize, deserialize, allocate, deallocate, transform, convert, extract, insert, remove, update, calculate, generate, verify, authenticate, etc.
-- Use precise nouns: Buffer, Packet, Header, Payload, Token, Credential, Session, Connection, Registry, Configuration, Certificate, Signature, etc.
-- Be domain-aware: If it's crypto operations use crypto terms, if it's network use network terms, if it's file system use file terms
-- Use camelCase format
-- Length: 2-5 words (prioritize clarity over brevity)
-- Avoid generic terms: process, handle, manage, data, function, method, routine, etc.
-
-EXAMPLES of good names:
-- parseJsonConfiguration (not parseData)
-- validateTlsCertificate (not validateInput)
-- encryptAesPayload (not encryptData)
-- allocateMemoryBuffer (not allocateMemory)
-- extractRegistryKeys (not extractData)
-- calculateChecksumValue (not calculateValue)
-
-CRITICAL: You MUST include all four sections with the exact headers shown above. Focus on making the suggested name as specific and descriptive as possible."""
-
-                            ai_response = bridge.ollama.generate(prompt=analysis_query) if hasattr(bridge, "ollama") else None
-
-                            if ai_response and ai_response.strip():
-                                function_summary = ai_response.strip()
+                            if function_summary:
                                 print("  ✓ AI analysis complete")
-
-                                # Extract suggested name from AI response (same logic as UI)
-                                suggested_name = None
-                                lines = ai_response.split("\n")
-
-                                # Look for "Suggested Name:" pattern
-                                for line in lines:
-                                    line_stripped = line.strip()
-                                    if "Suggested Name:" in line_stripped or "suggested name:" in line_stripped.lower():
-                                        name_part = (
-                                            line_stripped.split(":", 1)[1].strip() if ":" in line_stripped else line_stripped
-                                        )
-                                        name_part = name_part.replace("**", "").replace("*", "").strip()
-                                        import re
-
-                                        name_match = re.search(
-                                            r"\b([a-z][a-zA-Z0-9_]*[a-zA-Z0-9]|[a-z][a-zA-Z0-9]*)\b", name_part
-                                        )
-                                        if name_match:
-                                            suggested_name = name_match.group(1)
-                                            break
-
-                                # Fallback extraction logic (look for camelCase names in response)
-                                if not suggested_name:
-                                    import re
-
-                                    camel_case_matches = re.findall(r"\b([a-z][a-zA-Z0-9]*[A-Z][a-zA-Z0-9]*)\b", ai_response)
-                                    excluded_words = {
-                                        "function",
-                                        "name",
-                                        "suggest",
-                                        "analysis",
-                                        "code",
-                                        "parameter",
-                                        "value",
-                                        "data",
-                                        "result",
-                                        "return",
-                                        "call",
-                                        "method",
-                                        "functionName",
-                                        "newFunctionName",
-                                        "descriptiveFunctionName",
-                                    }
-
-                                    for match in camel_case_matches:
-                                        if match:
-                                            match_str = match.group()
-                                            if (
-                                                len(match_str) > 4
-                                                and match_str.lower() not in excluded_words
-                                                and not match_str.startswith("FUN_")
-                                                and not any(
-                                                    word in match_str.lower() for word in ["function", "name", "example"]
-                                                )
-                                            ):
-                                                suggested_name = match_str
-                                                break
-
-                                        # If still no match, look for any reasonable identifier
-                                        if not suggested_name:
-                                            simple_matches = re.findall(r"\b([a-z][a-zA-Z0-9_]*)\b", ai_response)
-                                            for match in simple_matches:
-                                                if match:
-                                                    match_str = match.group()
-                                                    if (
-                                                        len(match_str) > 6
-                                                        and match_str.lower() not in excluded_words
-                                                        and not match_str.startswith("FUN_")
-                                                        and not any(
-                                                            word in match_str.lower()
-                                                            for word in ["function", "name", "example", "analysis", "response"]
-                                                        )
-                                                    ):
-                                                        suggested_name = match_str
-                                                        break
 
                                 # Check if function has generic name
                                 is_generic_name = function_name.startswith(("FUN_", "sub_", "loc_", "unk_", "j_"))
@@ -1024,7 +918,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                                             )
                                         else:
                                             # Fallback to direct ghidra call
-                                            rename_result = bridge.ghidra.rename_function_by_address(
+                                            rename_result = bridge.ghidra_client.rename_function_by_address(
                                                 function_address=address,
                                                 new_name=suggested_name,
                                             )
@@ -1108,7 +1002,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
                                 from src.bridge import Bridge
 
                                 # Test Ollama embeddings availability
-                                test_embeddings = Bridge.get_ollama_embeddings(["test"])
+                                test_embeddings = Bridge.get_embeddings(["test"])
                                 if not test_embeddings:
                                     print("  ⚠ Ollama embedding model (nomic-embed-text) not available.")
                                     print("  Please run: ollama pull nomic-embed-text")
@@ -1128,7 +1022,7 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
 
                                         # Generate embeddings for batch
                                         batch_texts = [func["summary"] for func in batch]
-                                        batch_embeddings_list = Bridge.get_ollama_embeddings(batch_texts)
+                                        batch_embeddings_list = Bridge.get_embeddings(batch_texts)
 
                                         if not batch_embeddings_list:
                                             print(f"    ⚠ Failed to generate embeddings for batch {batch_num + 1}")
@@ -1394,7 +1288,6 @@ def main():
     bridge = Bridge(
         config=config,
         include_capabilities=include_capabilities,
-        max_agent_steps=config.max_steps,
         enable_cag=config.cag_enabled,
     )
 

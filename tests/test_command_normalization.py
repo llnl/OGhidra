@@ -31,7 +31,7 @@ class TestCommandNormalization(unittest.TestCase):
         # Also add a camelCase method for testing that existing camelCase is preserved
         setattr(self.mock_ghidra, "camelCaseMethod", lambda: None)
 
-        self.bridge.ghidra = self.mock_ghidra
+        self.bridge.ghidra_client = self.mock_ghidra
         self.bridge.logger = MagicMock()
         # Expose the _normalize_command_name from Bridge on our mock for testing
         self.bridge._normalize_command_name = Bridge._normalize_command_name.__get__(self.bridge, Bridge)
@@ -104,7 +104,7 @@ class TestCommandNormalization(unittest.TestCase):
         """Test parameter standardization in the command parser."""
         # Test function_address → address conversion
         params = {"function_address": "140001000", "new_name": "initialize_data"}
-        corrected_params = CommandParser._validate_and_transform_params("rename_function_by_address", params.copy())
+        corrected_params = CommandParser.normalize_parameters("rename_function_by_address", params.copy())
 
         # Check that rename_function_by_address's address was converted to function_address
         self.assertIn("function_address", corrected_params)
@@ -113,7 +113,7 @@ class TestCommandNormalization(unittest.TestCase):
 
         # Test camelCase parameter conversion
         params = {"functionAddress": "140001000", "new_name": "initialize_data"}
-        corrected_params = CommandParser._validate_and_transform_params("rename_function_by_address", params.copy())
+        corrected_params = CommandParser.normalize_parameters("rename_function_by_address", params.copy())
 
         # Check that functionAddress was converted to function_address
         self.assertIn("function_address", corrected_params)
@@ -122,37 +122,18 @@ class TestCommandNormalization(unittest.TestCase):
 
         # Test FUN_ prefix removal
         params = {"address": "FUN_140001000", "new_name": "initialize_data"}
-        corrected_params = CommandParser._validate_and_transform_params("rename_function_by_address", params.copy())
+        corrected_params = CommandParser.normalize_parameters("rename_function_by_address", params.copy())
 
         # Check that FUN_ prefix was removed
         self.assertEqual(corrected_params["function_address"], "140001000")
 
         # Test 0x prefix removal
         params = {"address": "0x140001000", "new_name": "initialize_data"}
-        corrected_params = CommandParser._validate_and_transform_params("rename_function_by_address", params.copy())
+        corrected_params = CommandParser.normalize_parameters("rename_function_by_address", params.copy())
 
         # Check that 0x prefix was removed
         self.assertEqual(corrected_params["function_address"], "140001000")
 
-    def test_alternate_format_detection(self):
-        """Test detection of alternate command formats."""
-        # Test tool_execution format
-        response = "tool_execution get_current_function()"
-        commands = CommandParser.extract_commands(response)
-        self.assertEqual(len(commands), 1)
-        self.assertEqual(commands[0][0], "get_current_function")
-
-        # Test JSON format
-        response = '```json\n{"tool": "decompile_function_by_address", "parameters": {"address": "140001000"}}\n```'
-        commands = CommandParser.extract_commands(response)
-        self.assertEqual(len(commands), 1)
-        self.assertEqual(commands[0][0], "decompile_function_by_address")
-
-        # Test regular EXECUTE format
-        response = "EXECUTE: get_current_function()"
-        commands = CommandParser.extract_commands(response)
-        self.assertEqual(len(commands), 1)
-        self.assertEqual(commands[0][0], "get_current_function")
 
 
 if __name__ == "__main__":
