@@ -12,6 +12,7 @@ For more accurate parsing, consider integrating with tree-sitter or clang.
 import logging
 import re
 from pathlib import Path
+from typing import ClassVar
 
 from .extractor import FunctionGroundTruth
 
@@ -27,7 +28,7 @@ class SourceCodeParser:
     """
 
     # Regex patterns for C/C++ parsing
-    PATTERNS = {
+    PATTERNS: ClassVar[dict[str, re.Pattern[str]]] = {
         # Doxygen-style comments: /** ... */ or /// ...
         "doxygen_block": re.compile(r"/\*\*\s*(.*?)\s*\*/", re.DOTALL),
         "doxygen_line": re.compile(r"(?:^|\n)\s*///\s*(.+?)(?=\n(?!\s*///))", re.MULTILINE),
@@ -55,7 +56,7 @@ class SourceCodeParser:
     }
 
     # Keywords that are not function names
-    KEYWORDS = {
+    KEYWORDS: ClassVar[set[str]] = {
         "if",
         "else",
         "while",

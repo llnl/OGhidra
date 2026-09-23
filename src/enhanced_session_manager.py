@@ -115,7 +115,7 @@ class EnhancedSessionManager:
             try:
                 with open(binary_path, "rb") as f:
                     binary_hash = hashlib.sha256(f.read()).hexdigest()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                 logger.warning(f"Could not calculate binary hash: {e}")
 
         # Create session metadata
@@ -237,7 +237,7 @@ class EnhancedSessionManager:
 
             return success
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             logger.error(f"Error saving session: {e}")
             return False
 
@@ -272,7 +272,7 @@ class EnhancedSessionManager:
                 logger.warning(f"Session not found: {session_identifier}")
                 return None
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             logger.error(f"Error loading session {session_identifier}: {e}")
             return None
 
@@ -306,23 +306,19 @@ class EnhancedSessionManager:
                                 # Handle both timestamp and ISO format
                                 try:
                                     if isinstance(created_at, str):
-                                        created_timestamp = datetime.fromisoformat(
-                                            created_at.replace("Z", "+00:00")
-                                        ).timestamp()
+                                        created_timestamp = datetime.fromisoformat(created_at).timestamp()
                                     else:
                                         created_timestamp = created_at or 0
-                                except Exception as e:
+                                except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                                     logger.warning(f"Failed to get the timestamp while listing the sessions: {e}")
                                     created_timestamp = 0
 
                                 try:
                                     if isinstance(last_modified, str):
-                                        modified_timestamp = datetime.fromisoformat(
-                                            last_modified.replace("Z", "+00:00")
-                                        ).timestamp()
+                                        modified_timestamp = datetime.fromisoformat(last_modified).timestamp()
                                     else:
                                         modified_timestamp = last_modified or 0
-                                except Exception as e:
+                                except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                                     logger.warning(f"Failed to get the timestamp while listing the sessions: {e}")
                                     modified_timestamp = 0
 
@@ -338,13 +334,13 @@ class EnhancedSessionManager:
                                         "tags": metadata.get("tags", []),
                                     }
                                 )
-                        except Exception as e:
+                        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                             logger.warning(f"Error reading session {session_id}: {e}")
 
             # Sort by last modified (newest first)
             sessions.sort(key=lambda x: x.get("last_modified", 0), reverse=True)
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             logger.error(f"Error listing sessions: {e}")
 
         return sessions
@@ -387,7 +383,7 @@ class EnhancedSessionManager:
             logger.info(f"Deleted session: {session_identifier}")
             return True
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             logger.error(f"Error deleting session {session_identifier}: {e}")
             return False
 
@@ -426,7 +422,7 @@ class EnhancedSessionManager:
             logger.info(f"Exported session {session_identifier} to {export_path}")
             return True
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             logger.error(f"Error exporting session {session_identifier}: {e}")
             return False
 
@@ -467,7 +463,7 @@ class EnhancedSessionManager:
             logger.info(f"Imported session as {session_name} (ID: {session_id})")
             return session_id
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             logger.error(f"Error importing session from {import_path}: {e}")
             return None
 
@@ -502,7 +498,7 @@ class EnhancedSessionManager:
 
             return True
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             logger.error(f"Error saving session data: {e}")
             return False
 
@@ -516,7 +512,7 @@ class EnhancedSessionManager:
             with open(session_file, "r", encoding="utf-8") as f:
                 return json.load(f)
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             logger.error(f"Error loading session data: {e}")
             return None
 
@@ -564,12 +560,12 @@ class EnhancedSessionManager:
                 logger.info(f"Small session ({file_size:.1f}MB), using regular loader")
                 return self.load_session(session_identifier)
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             logger.error(f"Error in streaming load for {session_identifier}: {e}")
             logger.info("Falling back to regular session loading")
             try:
                 return self.load_session(session_identifier)
-            except Exception as e2:
+            except Exception as e2:  # noqa: BLE001 intentional defensive recovery boundary
                 logger.error(f"Regular loading also failed: {e2}")
                 return None
 
@@ -580,7 +576,7 @@ class EnhancedSessionManager:
             logger.info("Using chunked loading for function streaming")
             yield from self._stream_functions_chunked(session_identifier)
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             logger.error(f"Error streaming functions: {e}")
             # No further fallback - chunked loading should always work
 
@@ -599,13 +595,12 @@ class EnhancedSessionManager:
 
             for i in range(0, len(items), chunk_size):
                 chunk = items[i : i + chunk_size]
-                for address, func_data in chunk:
-                    yield address, func_data
+                yield from chunk
 
                 # Small delay to prevent UI freezing
                 time.sleep(0.001)
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             logger.error(f"Error in chunked loading: {e}")
 
     def _stream_rag_vectors(self, session_identifier: str) -> Iterator[dict[str, Any]]:
@@ -629,7 +624,7 @@ class EnhancedSessionManager:
                         yield vector_data
                         time.sleep(0.001)  # Prevent UI freezing
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             logger.error(f"Error streaming RAG vectors: {e}")
 
     def _load_session_metadata(self, session_identifier: str) -> dict[str, Any] | None:
@@ -653,7 +648,7 @@ class EnhancedSessionManager:
                 }
             return None
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             logger.error(f"Error loading session metadata: {e}")
             return None
 

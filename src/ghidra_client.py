@@ -295,7 +295,7 @@ class AbstractGhidraClient(ABC):
     def read_bytes(self, address: str, length: int = 16, format: str = "hex") -> str:
         """Read raw bytes from memory."""
 
-    def analyze_function(self, address: str = None) -> str:
+    def analyze_function(self, address: str | None = None) -> str:
         """
         Analyze a function, including its decompiled code and all functions it calls.
         If no address is provided, uses the current function.
@@ -419,7 +419,7 @@ class AbstractGhidraClient(ABC):
 
                 logger.info(f"AI analysis generated for function at {address}")
 
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                 logger.warning(f"AI analysis failed for function at {address}: {e}. Falling back to raw code.")
                 # Fallback to raw code if AI analysis fails
                 result = [f"=== ANALYSIS OF FUNCTION AT {address} ===", "", decompiled_code, ""]
@@ -440,7 +440,7 @@ class AbstractGhidraClient(ABC):
                         result.append(func_code[:500])  # Truncate individual functions
                         result.append("...")
                         result.append("")
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                     logger.debug(f"Could not decompile referenced function {func_name}: {e}")
 
         return "\n".join(result)
@@ -635,7 +635,7 @@ class AbstractGhidraClient(ABC):
                     data = base64.b64decode(raw_result.strip())
                     if len(data) < pointer_size:
                         continue
-                except Exception:
+                except Exception:  # noqa: BLE001, S112 intentional defensive recovery boundary
                     continue
 
                 # Scan for consecutive function pointers
@@ -644,7 +644,7 @@ class AbstractGhidraClient(ABC):
                 )
                 tables.extend(tables_in_chunk)
 
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                 logger.debug(f"Error scanning at 0x{current_addr:x}: {e}")
                 continue
 
@@ -789,7 +789,7 @@ class GhidraMCPClient(AbstractGhidraClient):
             else:
                 self.default_port = 8080
                 self.current_instance_port = 8080
-        except Exception:
+        except Exception:  # noqa: BLE001 intentional defensive recovery boundary
             self.default_port = 8080
             self.current_instance_port = 8080
 
@@ -825,7 +825,7 @@ class GhidraMCPClient(AbstractGhidraClient):
                     self._update_instance_info(self.current_instance_port)
             else:
                 logger.warning(f"Failed to connect to GhidraMCP API: {response}")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             logger.warning(f"Error detecting API: {e!s}")
 
     def _get_base_url(self) -> str:
@@ -870,7 +870,7 @@ class GhidraMCPClient(AbstractGhidraClient):
                         data=data.encode("utf-8"),
                         timeout=self.config.timeout,
                     )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 intentional defensive recovery boundary
             error_msg = f"Request failed: {exc}"
             logger.error(error_msg)
             return error_msg
@@ -905,7 +905,7 @@ class GhidraMCPClient(AbstractGhidraClient):
         try:
             response = self._http_get_lines("methods", {"offset": 0, "limit": 1})
             return bool(response) and not response[0].startswith(("Error", "Request failed"))
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             logger.error(f"GhidraMCP server health check failed: {e!s}")
             return False
 
@@ -919,7 +919,7 @@ class GhidraMCPClient(AbstractGhidraClient):
         try:
             response = self._http_get_lines("methods", {"offset": 0, "limit": 1})
             return bool(response) and not response[0].startswith(("Error", "Request failed"))
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             logger.error(f"GhidraMCP health check failed: {e!s}")
             return False
 
@@ -1075,11 +1075,11 @@ class GhidraMCPClient(AbstractGhidraClient):
                 if resp.status_code == 200:
                     self._update_instance_info(port, url)
                     count += 1
-            except Exception:
+            except Exception:  # noqa: BLE001, S112 intentional defensive recovery boundary
                 continue
         return count
 
-    def _update_instance_info(self, port: int, url: str = None):
+    def _update_instance_info(self, port: int, url: str | None = None):
         """Update information for a specific instance."""
         if not url:
             # If we don't know the URL, assume localhost if it was default
@@ -1111,7 +1111,7 @@ class GhidraMCPClient(AbstractGhidraClient):
                     ver_data = ver_resp.json()
                     if "result" in ver_data and isinstance(ver_data["result"], dict):
                         info["plugin_version"] = ver_data["result"].get("plugin_version", "unknown")
-        except Exception:
+        except Exception:  # noqa: BLE001, S110 intentional defensive recovery boundary
             pass
 
         self.active_instances[port] = info
@@ -1432,19 +1432,18 @@ class PyGhidraClient(AbstractGhidraClient):
         import re
 
         install_dir = os.environ.get("GHIDRA_INSTALL_DIR")
-        if install_dir and os.name == "posix":
-            # Detect simple Windows path pattern like "C:\\..." or "C:/..."
-            if re.match(r"^[A-Za-z]:[\\/].*", install_dir):
-                drive = install_dir[0].lower()
-                rest = install_dir[2:].lstrip("\\/")
-                translated = f"/mnt/{drive}/{rest.replace('\\', '/')}"
-                logger.info(
-                    "Normalized GHIDRA_INSTALL_DIR from '%s' to '%s' for Linux runtime",
-                    install_dir,
-                    translated,
-                )
-                install_dir = translated
-                os.environ["GHIDRA_INSTALL_DIR"] = translated
+        # Detect simple Windows path pattern like "C:\\..." or "C:/...".
+        if install_dir and os.name == "posix" and re.match(r"^[A-Za-z]:[\\/].*", install_dir):
+            drive = install_dir[0].lower()
+            rest = install_dir[2:].lstrip("\\/")
+            translated = f"/mnt/{drive}/{rest.replace('\\', '/')}"
+            logger.info(
+                "Normalized GHIDRA_INSTALL_DIR from '%s' to '%s' for Linux runtime",
+                install_dir,
+                translated,
+            )
+            install_dir = translated
+            os.environ["GHIDRA_INSTALL_DIR"] = translated
 
         try:
             import pyghidra  # type: ignore[import]
@@ -1491,7 +1490,7 @@ class PyGhidraClient(AbstractGhidraClient):
         # boundary cost of repeatedly calling DataType helpers in a Python loop.
         try:
             from ghidra.program.util import DefinedStringIterator
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 intentional defensive recovery boundary
             self._warn_slow_string_path(
                 "DefinedStringIterator unavailable in this pyGhidra environment; "
                 "list_strings() will use the slower listing scan across the "
@@ -1566,7 +1565,7 @@ class PyGhidraClient(AbstractGhidraClient):
                 if domain_file is not None:
                     self._project = domain_file.getProject()
                     project_path = str(domain_file.getProject().getProjectLocator())
-            except Exception:
+            except Exception:  # noqa: BLE001 intentional defensive recovery boundary
                 self._project = None
 
             logger.info(
@@ -1627,11 +1626,11 @@ class PyGhidraClient(AbstractGhidraClient):
                         name = df.getName()
                         path = df.getPathname()  # e.g. "/MyProgram" or "/folder/MyProgram"
                         discovered.append((str(name), str(path)))
-                    except Exception:
+                    except Exception:  # noqa: BLE001 intentional defensive recovery boundary
                         return
 
                 walk_programs(self._project, _collect, start="/")
-            except Exception:
+            except Exception:  # noqa: BLE001 intentional defensive recovery boundary
                 discovered = []
         else:
             # Fallback: introspect the project object via the Ghidra API
@@ -1648,13 +1647,12 @@ class PyGhidraClient(AbstractGhidraClient):
                                     name = df.getName()
                                     path = df.getPathname()
                                     discovered.append((str(name), str(path)))
-                            except Exception:
+                            except Exception:  # noqa: BLE001, S112 intentional defensive recovery boundary
                                 continue
-                        for sub in folder.getFolders():
-                            stack.append(sub)
-                    except Exception:
+                        stack.extend(folder.getFolders())
+                    except Exception:  # noqa: BLE001, S112 intentional defensive recovery boundary
                         continue
-            except Exception:
+            except Exception:  # noqa: BLE001 intentional defensive recovery boundary
                 discovered = []
 
         # Decide which program to open
@@ -1770,7 +1768,7 @@ class PyGhidraClient(AbstractGhidraClient):
             self._program.getFunctionManager()
             self._ensure_decompiler()
             return True
-        except Exception as exc:  # pragma: no cover - environment-specific
+        except Exception as exc:  # noqa: BLE001 - environment-specific pyGhidra health-check boundary
             logger.error("pyGhidra health_check failed: %s", exc)
             return False
 
@@ -1832,32 +1830,32 @@ class PyGhidraClient(AbstractGhidraClient):
             if domain_file is not None:
                 try:
                     info["name"] = str(domain_file.getName())
-                except Exception:
+                except Exception:  # noqa: BLE001, S110 intentional defensive recovery boundary
                     pass
                 try:
                     info["program_path"] = str(domain_file.getPathname())
-                except Exception:
+                except Exception:  # noqa: BLE001, S110 intentional defensive recovery boundary
                     pass
                 try:
                     project = domain_file.getProject()
                     if project is not None:
                         info["project"] = str(project.getName())
-                except Exception:
+                except Exception:  # noqa: BLE001, S110 intentional defensive recovery boundary
                     pass
-        except Exception:
+        except Exception:  # noqa: BLE001, S110 intentional defensive recovery boundary
             pass
 
         try:
             if info["name"] == "Unknown Binary":
                 info["name"] = str(self._program.getName())
-        except Exception:
+        except Exception:  # noqa: BLE001, S110 intentional defensive recovery boundary
             pass
 
         if info["project"] == "Unknown Project":
             try:
                 if self._project is not None and hasattr(self._project, "getName"):
                     info["project"] = str(self._project.getName())
-            except Exception:
+            except Exception:  # noqa: BLE001, S110 intentional defensive recovery boundary
                 pass
 
         return info
@@ -1918,7 +1916,7 @@ class PyGhidraClient(AbstractGhidraClient):
                     func = func_mgr.getFunctionAt(sym.getAddress())
                     if func is not None:
                         return func
-            except Exception:
+            except Exception:  # noqa: BLE001, S112 intentional defensive recovery boundary
                 continue
 
         try:
@@ -1927,9 +1925,9 @@ class PyGhidraClient(AbstractGhidraClient):
                 try:
                     if str(func.getName()) == name:
                         return func
-                except Exception:
+                except Exception:  # noqa: BLE001, S112 intentional defensive recovery boundary
                     continue
-        except Exception:
+        except Exception:  # noqa: BLE001, S110 intentional defensive recovery boundary
             pass
 
         m = re.search(r"([0-9a-fA-F]{6,})", name)
@@ -1939,7 +1937,7 @@ class PyGhidraClient(AbstractGhidraClient):
                 func = func_mgr.getFunctionAt(addr)
                 if func is not None:
                     return func
-            except Exception:
+            except Exception:  # noqa: BLE001, S110 intentional defensive recovery boundary
                 pass
 
         return None
@@ -1976,7 +1974,7 @@ class PyGhidraClient(AbstractGhidraClient):
             if monitor is not None:
                 try:
                     program.save(description, monitor)
-                except Exception:
+                except Exception:  # noqa: BLE001, S110 intentional defensive recovery boundary
                     pass
             return
 
@@ -1997,7 +1995,7 @@ class PyGhidraClient(AbstractGhidraClient):
                     lines.append(f"{name} at {addr_text}")
                 else:
                     lines.append(name)
-            except Exception:
+            except Exception:  # noqa: BLE001, S112 intentional defensive recovery boundary
                 continue
 
         return self._render_paginated_lines(lines, offset, limit)
@@ -2029,7 +2027,7 @@ class PyGhidraClient(AbstractGhidraClient):
 
         try:
             return iterator_cls.forProgram(program)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 intentional defensive recovery boundary
             self._use_defined_string_iterator = False
             self._warn_slow_string_path(
                 "DefinedStringIterator failed during list_strings(); falling back "
@@ -2049,7 +2047,7 @@ class PyGhidraClient(AbstractGhidraClient):
                 dt_name = str(data.getDataType().getDisplayName()).lower()
                 if "string" in dt_name or "unicode" in dt_name or "char" in dt_name:
                     yield data
-            except Exception:
+            except Exception:  # noqa: BLE001, S112 intentional defensive recovery boundary
                 continue
 
     @staticmethod
@@ -2078,7 +2076,7 @@ class PyGhidraClient(AbstractGhidraClient):
         try:
             offset, limit = self._get_offset_limit(offset, limit)
             return self._list_function_lines(offset=offset, limit=limit, include_addresses=False)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 intentional defensive recovery boundary
             return self._operation_error_lines("list_methods", exc)
 
     def list_classes(self, offset: int = 0, limit: int = 100) -> list[str]:
@@ -2097,7 +2095,7 @@ class PyGhidraClient(AbstractGhidraClient):
             if df is None:
                 return f"Error: Decompilation failed for function '{name}'"
             return self._render_paginated_text(df.getC(), offset, limit)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 intentional defensive recovery boundary
             return self._operation_error("decompile_function(name)", exc)
 
     def rename_function(self, old_name: str, new_name: str) -> str:
@@ -2117,7 +2115,7 @@ class PyGhidraClient(AbstractGhidraClient):
                     if sym.getSymbolType().toString() == "FUNCTION":
                         target_func = func_mgr.getFunctionAt(sym.getAddress())
                         break
-                except Exception:
+                except Exception:  # noqa: BLE001, S112 intentional defensive recovery boundary
                     continue
 
             if target_func is None:
@@ -2126,7 +2124,7 @@ class PyGhidraClient(AbstractGhidraClient):
             desc = f"rename_function: {old_name} -> {new_name}"
             self._run_program_transaction(desc, lambda: target_func.setName(new_name, SourceType.USER_DEFINED))
             return f"Renamed function '{old_name}' to '{new_name}'"
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 intentional defensive recovery boundary
             return self._operation_error("renameFunction", exc)
 
     def rename_data(self, address: str, new_name: str) -> str:
@@ -2150,7 +2148,7 @@ class PyGhidraClient(AbstractGhidraClient):
             desc = f"rename_data: {address} -> {new_name}"
             self._run_program_transaction(desc, action)
             return f"Renamed data at {address} to '{new_name}'"
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 intentional defensive recovery boundary
             return self._operation_error("renameData", exc)
 
     def list_segments(self, offset: int = 0, limit: int = 100) -> list[str]:
@@ -2175,10 +2173,10 @@ class PyGhidraClient(AbstractGhidraClient):
                     start = blk.getStart().getOffset()
                     end = blk.getEnd().getOffset()
                     lines.append(f"{name}: {start:x} - {end:x}")
-                except Exception:
+                except Exception:  # noqa: BLE001, S112 intentional defensive recovery boundary
                     continue
             return self._render_paginated_lines(lines, offset, limit)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 intentional defensive recovery boundary
             return self._operation_error_lines("list_segments", exc)
 
     def list_imports(self, offset: int = 0, limit: int = 100) -> list[str]:
@@ -2220,10 +2218,10 @@ class PyGhidraClient(AbstractGhidraClient):
                             line += "]"
 
                     lines.append(line)
-                except Exception:
+                except Exception:  # noqa: BLE001, S112 intentional defensive recovery boundary
                     continue
             return self._render_paginated_lines(lines, offset, limit)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 intentional defensive recovery boundary
             return self._operation_error_lines("list_imports", exc)
 
     def list_exports(self, offset: int = 0, limit: int = 100) -> list[str]:
@@ -2246,11 +2244,11 @@ class PyGhidraClient(AbstractGhidraClient):
                 try:
                     if hasattr(sym, "isExternalEntryPoint") and sym.isExternalEntryPoint():
                         lines.append(f"{sym.getName()} -> {sym.getAddress()}")
-                except Exception:
+                except Exception:  # noqa: BLE001, S112 intentional defensive recovery boundary
                     continue
 
             return self._render_paginated_lines(lines, offset, limit)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 intentional defensive recovery boundary
             return self._operation_error_lines("list_exports", exc)
 
     def list_namespaces(self, offset: int = 0, limit: int = 100) -> list[str]:
@@ -2268,16 +2266,16 @@ class PyGhidraClient(AbstractGhidraClient):
                     is_global = False
                     try:
                         is_global = bool(namespace.isGlobal())
-                    except Exception:
+                    except Exception:  # noqa: BLE001 intentional defensive recovery boundary
                         is_global = str(namespace.getName()) == "Global"
 
                     if not is_global:
                         names.add(str(namespace.getName()))
-                except Exception:
+                except Exception:  # noqa: BLE001, S112 intentional defensive recovery boundary
                     continue
 
             return self._render_paginated_lines(sorted(names), offset, limit)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 intentional defensive recovery boundary
             return self._operation_error_lines("list_namespaces", exc)
 
     def list_data_items(self, offset: int = 0, limit: int = 100) -> list[str]:
@@ -2305,10 +2303,10 @@ class PyGhidraClient(AbstractGhidraClient):
                         else str(data.getValue())
                     )
                     lines.append(f"{data.getAddress()}: {label or '(unnamed)'} = {value_repr}")
-                except Exception:
+                except Exception:  # noqa: BLE001, S112 intentional defensive recovery boundary
                     continue
             return self._render_paginated_lines(lines, offset, limit)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 intentional defensive recovery boundary
             return self._operation_error_lines("list_data_items", exc)
 
     def list_strings(self, offset: int = 0, limit: int = 100, filter: str | None = None) -> list[str]:
@@ -2343,7 +2341,7 @@ class PyGhidraClient(AbstractGhidraClient):
                     addr = self._string_entry_address(entry)
                     strings.append(f"{addr}: {value}")
             return self._render_paginated_lines(strings, offset, limit)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 intentional defensive recovery boundary
             return self._operation_error_lines("list_strings", exc)
 
     def search_functions_by_name(self, query: str, offset: int = 0, limit: int = 100) -> list[str]:
@@ -2360,12 +2358,12 @@ class PyGhidraClient(AbstractGhidraClient):
                     name = str(func.getName())
                     if query.lower() in name.lower():
                         matches.append(f"{name} @ {func.getEntryPoint()}")
-                except Exception:
+                except Exception:  # noqa: BLE001, S112 intentional defensive recovery boundary
                     continue
 
             matches.sort()
             return self._render_paginated_lines(matches, offset, limit)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 intentional defensive recovery boundary
             return self._operation_error_lines("search_functions", exc)
 
     def rename_variable(self, function_name: str, old_name: str, new_name: str) -> str:
@@ -2381,7 +2379,7 @@ class PyGhidraClient(AbstractGhidraClient):
 
             try:
                 vars_iter = func.getAllVariables()
-            except Exception:
+            except Exception:  # noqa: BLE001 intentional defensive recovery boundary
                 vars_iter = list(func.getParameters()) + list(func.getLocalVariables())
 
             target = None
@@ -2390,7 +2388,7 @@ class PyGhidraClient(AbstractGhidraClient):
                     if var.getName() == old_name:
                         target = var
                         break
-                except Exception:
+                except Exception:  # noqa: BLE001, S112 intentional defensive recovery boundary
                     continue
 
             if target is None:
@@ -2399,7 +2397,7 @@ class PyGhidraClient(AbstractGhidraClient):
             desc = f"rename_variable: {function_name}.{old_name} -> {new_name}"
             self._run_program_transaction(desc, lambda: target.setName(new_name, SourceType.USER_DEFINED))
             return f"Renamed variable '{old_name}' to '{new_name}' in function '{function_name}'"
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 intentional defensive recovery boundary
             return self._operation_error("renameVariable", exc)
 
     def get_function_by_address(self, address: str) -> str:
@@ -2421,7 +2419,7 @@ class PyGhidraClient(AbstractGhidraClient):
                 f"Body: {func.getBody().getMinAddress()} - "
                 f"{func.getBody().getMaxAddress()}"
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 intentional defensive recovery boundary
             return self._operation_error("get_function_by_address", exc)
 
     def get_current_address(self) -> str:
@@ -2451,7 +2449,7 @@ class PyGhidraClient(AbstractGhidraClient):
                 limit = max_functions_limit
 
             return self._list_function_lines(offset=offset, limit=limit, include_addresses=True)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 intentional defensive recovery boundary
             return self._operation_error_lines("list_functions", exc)
 
     def decompile_function_by_address(self, address: str, offset: int = 0, limit: int = 500) -> str:
@@ -2471,7 +2469,7 @@ class PyGhidraClient(AbstractGhidraClient):
             if df is None:
                 return f"Error: Decompilation failed for {address}"
             return self._render_paginated_text(df.getC(), offset, limit)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 intentional defensive recovery boundary
             return self._operation_error("decompile_function", exc)
 
     def disassemble_function(self, address: str) -> list[str]:
@@ -2494,10 +2492,10 @@ class PyGhidraClient(AbstractGhidraClient):
                     comment_suffix = f" ; {comment}" if comment else ""
                     instr = cu.toString()
                     lines.append(f"{cu.getAddress()}: {instr}{comment_suffix}")
-                except Exception:
+                except Exception:  # noqa: BLE001, S112 intentional defensive recovery boundary
                     continue
             return lines
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 intentional defensive recovery boundary
             return self._operation_error_lines("disassemble_function", exc)
 
     def set_decompiler_comment(self, address: str, comment: str) -> str:
@@ -2517,7 +2515,7 @@ class PyGhidraClient(AbstractGhidraClient):
             desc = f"set_decompiler_comment at {address}"
             self._run_program_transaction(desc, lambda: code_unit.setComment(CodeUnit.PRE_COMMENT, comment))
             return f"Set decompiler comment at {address}"
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 intentional defensive recovery boundary
             return self._operation_error("set_decompiler_comment", exc)
 
     def set_disassembly_comment(self, address: str, comment: str) -> str:
@@ -2537,7 +2535,7 @@ class PyGhidraClient(AbstractGhidraClient):
             desc = f"set_disassembly_comment at {address}"
             self._run_program_transaction(desc, lambda: code_unit.setComment(CodeUnit.EOL_COMMENT, comment))
             return f"Set disassembly comment at {address}"
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 intentional defensive recovery boundary
             return self._operation_error("set_disassembly_comment", exc)
 
     def rename_function_by_address(self, function_address: str, new_name: str) -> str:
@@ -2555,7 +2553,7 @@ class PyGhidraClient(AbstractGhidraClient):
             desc = f"rename_function_by_address: {function_address} -> {new_name}"
             self._run_program_transaction(desc, lambda: func.setName(new_name, SourceType.USER_DEFINED))
             return f"Renamed function at {function_address} to '{new_name}'"
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 intentional defensive recovery boundary
             return self._operation_error("rename_function_by_address", exc)
 
     def set_function_prototype(self, function_address: str, prototype: str) -> str:
@@ -2595,13 +2593,15 @@ class PyGhidraClient(AbstractGhidraClient):
 
             def action() -> None:
                 func.setReturnType(ret_type, SourceType.USER_DEFINED)
-                from ghidra.app.services import FunctionUpdateType  # type: ignore[import]
+                from ghidra.app.services import (
+                    FunctionUpdateType,  # type: ignore[import]
+                )
 
                 func.replaceParameters(params, FunctionUpdateType.DYNAMIC_STORAGE_ALL_PARAMS, True)
 
             self._run_program_transaction(desc, action)
             return f"Set prototype for function at {function_address} to '{prototype}'"
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 intentional defensive recovery boundary
             return self._operation_error("set_function_prototype", exc)
 
     def set_local_variable_type(self, function_address: str, variable_name: str, new_type: str) -> str:
@@ -2630,7 +2630,7 @@ class PyGhidraClient(AbstractGhidraClient):
 
             try:
                 vars_iter = func.getAllVariables()
-            except Exception:
+            except Exception:  # noqa: BLE001 intentional defensive recovery boundary
                 vars_iter = list(func.getParameters()) + list(func.getLocalVariables())
 
             target = None
@@ -2639,7 +2639,7 @@ class PyGhidraClient(AbstractGhidraClient):
                     if var.getName() == variable_name:
                         target = var
                         break
-                except Exception:
+                except Exception:  # noqa: BLE001, S112 intentional defensive recovery boundary
                     continue
 
             if target is None:
@@ -2651,7 +2651,7 @@ class PyGhidraClient(AbstractGhidraClient):
                 lambda: target.setDataType(desired_dt, SourceType.USER_DEFINED),
             )
             return f"Set type of variable '{variable_name}' in function at {function_address} to '{new_type}'"
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 intentional defensive recovery boundary
             return self._operation_error("set_local_variable_type", exc)
 
     def get_xrefs_to(self, address: str, offset: int = 0, limit: int = 100):
@@ -2673,10 +2673,10 @@ class PyGhidraClient(AbstractGhidraClient):
                     from_func = func_mgr.getFunctionContaining(from_addr)
                     func_info = f" in {from_func.getName()}" if from_func else ""
                     lines.append(f"From {from_addr}{func_info} [{ref_type}]")
-                except Exception:
+                except Exception:  # noqa: BLE001, S112 intentional defensive recovery boundary
                     continue
             return self._render_paginated_lines(lines, offset, limit)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 intentional defensive recovery boundary
             return self._operation_error_lines("get_xrefs_to", exc)
 
     def get_xrefs_from(self, address: str, offset: int = 0, limit: int = 100):
@@ -2706,10 +2706,10 @@ class PyGhidraClient(AbstractGhidraClient):
                             label = data.getLabel() or getattr(data, "getPathName", lambda: "")()
                             target_info = f" to data {label}"
                     lines.append(f"To {to_addr}{target_info} [{ref_type}]")
-                except Exception:
+                except Exception:  # noqa: BLE001, S112 intentional defensive recovery boundary
                     continue
             return self._render_paginated_lines(lines, offset, limit)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 intentional defensive recovery boundary
             return self._operation_error_lines("get_xrefs_from", exc)
 
     def get_function_xrefs(self, name: str, offset: int = 0, limit: int = 100):
@@ -2739,7 +2739,7 @@ class PyGhidraClient(AbstractGhidraClient):
                         if sym.getName() == name:
                             target_address = sym.getAddress()
                             break
-                    except Exception:
+                    except Exception:  # noqa: BLE001, S112 intentional defensive recovery boundary
                         continue
 
             if target_address is None:
@@ -2751,7 +2751,7 @@ class PyGhidraClient(AbstractGhidraClient):
                     try:
                         target_address = sym.getAddress()
                         break
-                    except Exception:
+                    except Exception:  # noqa: BLE001, S112 intentional defensive recovery boundary
                         continue
 
             if target_address is None:
@@ -2765,11 +2765,11 @@ class PyGhidraClient(AbstractGhidraClient):
                     from_func = func_mgr.getFunctionContaining(from_addr)
                     func_info = f" in {from_func.getName()}" if from_func else ""
                     lines.append(f"From {from_addr}{func_info} [{ref_type}]")
-                except Exception:
+                except Exception:  # noqa: BLE001, S112 intentional defensive recovery boundary
                     continue
 
             return self._render_paginated_lines(lines, offset, limit)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 intentional defensive recovery boundary
             return self._operation_error_lines("get_function_xrefs", exc)
 
     def read_bytes(self, address: str, length: int = 16, format: str = "hex") -> str:
@@ -2779,7 +2779,7 @@ class PyGhidraClient(AbstractGhidraClient):
 
         try:
             length = int(length or 16)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 intentional defensive recovery boundary
             return f"Request failed: {exc}"
 
         if length <= 0 or length > 4096:
@@ -2808,7 +2808,7 @@ class PyGhidraClient(AbstractGhidraClient):
                 chunk = raw_bytes[chunk_offset : chunk_offset + bytes_per_line]
                 try:
                     line_addr = str(addr.add(chunk_offset))
-                except Exception:
+                except Exception:  # noqa: BLE001 intentional defensive recovery boundary
                     line_addr = f"{int(norm_addr, 16) + chunk_offset:x}"
 
                 hex_bytes = " ".join(f"{byte:02X}" for byte in chunk)
@@ -2818,5 +2818,5 @@ class PyGhidraClient(AbstractGhidraClient):
                 lines.append(f"{line_addr}: {hex_bytes} |{ascii_repr}|")
 
             return "\n".join(lines)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 intentional defensive recovery boundary
             return self._operation_error("read_bytes", exc)

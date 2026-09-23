@@ -10,7 +10,7 @@ Date: 2026-02-19
 
 import logging
 import re
-from typing import Any
+from typing import Any, ClassVar
 
 logger = logging.getLogger("ollama-ghidra-bridge.metadata_extractor")
 
@@ -28,49 +28,52 @@ class FunctionMetadataExtractor:
     """
 
     # Operation detection patterns
-    CRYPTO_PATTERNS = [
+    CRYPTO_PATTERNS: ClassVar[list[str]] = [
         r"\b(encrypt|decrypt|cipher|hash|md5|sha\d+|aes|des|rsa|crypto|random|nonce|iv)\b",
         r"\bCrypt\w+",
         r"\b(key|salt|hmac)\b",
     ]
 
-    NETWORK_PATTERNS = [
+    NETWORK_PATTERNS: ClassVar[list[str]] = [
         r"\b(socket|connect|send|recv|bind|listen|accept|http|tcp|udp|ip|dns)\b",
         r"\b(WSA|getaddrinfo|inet_|htons|ntohs)\b",
         r"\b(url|uri|request|response|packet)\b",
     ]
 
-    FILE_IO_PATTERNS = [
+    FILE_IO_PATTERNS: ClassVar[list[str]] = [
         r"\b(fopen|fclose|fread|fwrite|fseek|ftell|file|FILE)\b",
         r"\b(open|close|read|write|lseek)\b",
         r"\b(CreateFile|ReadFile|WriteFile|CloseHandle)\b",
         r"\b(path|directory|folder)\b",
     ]
 
-    MEMORY_PATTERNS = [
+    MEMORY_PATTERNS: ClassVar[list[str]] = [
         r"\b(malloc|calloc|realloc|free|new|delete)\b",
         r"\b(memcpy|memset|memmove|memcmp)\b",
         r"\b(HeapAlloc|HeapFree|VirtualAlloc|VirtualFree)\b",
         r"\b(buffer|alloc)\b",
     ]
 
-    STRING_PATTERNS = [
+    STRING_PATTERNS: ClassVar[list[str]] = [
         r"\b(str(cpy|cat|cmp|len|chr|str|tok|dup|n\w+))\b",
         r"\b(sprintf|snprintf|printf|scanf)\b",
         r"\b(wcs\w+|_tcs\w+)\b",
         r"\b(string|text|char\s*\*)\b",
     ]
 
-    VALIDATION_PATTERNS = [
+    VALIDATION_PATTERNS: ClassVar[list[str]] = [
         r"\bif\s*\([^)]*(<|>|==|!=|<=|>=)",
         r"\b(validate|check|verify|assert|ensure)\b",
         r"\breturn\s+(NULL|0|-1|FALSE)",
         r"\b(bounds|range|limit|max|min)\b",
     ]
 
-    REGISTRY_PATTERNS = [r"\b(Reg(OpenKey|QueryValue|SetValue|CreateKey|DeleteKey|CloseKey))\b", r"\b(HKEY_|registry)\b"]
+    REGISTRY_PATTERNS: ClassVar[list[str]] = [
+        r"\b(Reg(OpenKey|QueryValue|SetValue|CreateKey|DeleteKey|CloseKey))\b",
+        r"\b(HKEY_|registry)\b",
+    ]
 
-    PROCESS_PATTERNS = [
+    PROCESS_PATTERNS: ClassVar[list[str]] = [
         r"\b(CreateProcess|OpenProcess|TerminateProcess|process)\b",
         r"\b(thread|CreateThread|_beginthread)\b",
         r"\b(mutex|semaphore|event|critical_section)\b",
@@ -108,7 +111,7 @@ class FunctionMetadataExtractor:
 
             return metadata
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             self.logger.error(f"Error extracting metadata: {e}")
             return self._get_default_metadata()
 
@@ -199,7 +202,7 @@ class FunctionMetadataExtractor:
 
         return {
             "primary_domain": primary_domain,
-            "operations": sorted(list(operations)),
+            "operations": sorted(operations),
             "security_relevant": self._is_security_relevant(operations),
         }
 
@@ -343,7 +346,7 @@ class FunctionMetadataExtractor:
             criticality = "medium"
 
         return {
-            "indicators": sorted(list(indicators)),
+            "indicators": sorted(indicators),
             "risks": risks,
             "criticality": criticality,
         }

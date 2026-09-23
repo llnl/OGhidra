@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 OGhidra UI Module
 -----------------
@@ -36,7 +35,7 @@ class OGhidraUI:
         # Allow Bridge to access UI state (e.g., analyzed functions tree) for prompt enrichment.
         try:
             self.bridge._ui_instance = self
-        except Exception:
+        except Exception:  # noqa: BLE001, S110 intentional defensive recovery boundary
             pass
 
         # Use ttkbootstrap Window for modern dark theme with rounded corners
@@ -156,7 +155,7 @@ class OGhidraUI:
                 self.query_panel.renamed_functions_panel = self.renamed_functions_panel
                 if hasattr(self.query_panel, "_on_grep_layer_change"):
                     self.query_panel._on_grep_layer_change()
-        except Exception:
+        except Exception:  # noqa: BLE001, S110 intentional defensive recovery boundary
             pass
 
         # Hidden components (memory panel - accessed via Tools > System Info menu)
@@ -234,7 +233,7 @@ class OGhidraUI:
             try:
                 # Update memory info every 30 seconds
                 self.memory_panel._update_memory_info()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                 logger.error(f"Error in health monitoring: {e}")
 
             # Schedule next update
@@ -261,7 +260,7 @@ class OGhidraUI:
             if not hasattr(self, "session_manager"):
                 try:
                     self.session_manager = EnhancedSessionManager()
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                     messagebox.showerror("Initialization Error", f"Could not initialize session manager: {e}")
                     return
 
@@ -278,7 +277,7 @@ class OGhidraUI:
                 x = (session_dialog.winfo_screenwidth() // 2) - (350)
                 y = (session_dialog.winfo_screenheight() // 2) - (300)
                 session_dialog.geometry(f"700x600+{x}+{y}")
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                 logger.warning(f"Could not center dialog: {e}")
 
             main_frame = ttk.Frame(session_dialog, padding=20)
@@ -321,7 +320,7 @@ class OGhidraUI:
                         functions_count = len(self.renamed_functions_panel.function_summaries)
                     elif hasattr(self.bridge, "function_summaries"):
                         functions_count = len(self.bridge.function_summaries)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                 logger.warning(f"Could not get functions count: {e}")
 
             ttk.Label(info_frame, text=f"• Analyzed Functions: {functions_count}").pack(anchor="w")
@@ -329,21 +328,25 @@ class OGhidraUI:
             # RAG vectors count
             rag_count = 0
             try:
-                if hasattr(self.bridge, "cag_manager") and self.bridge.cag_manager:
-                    if hasattr(self.bridge.cag_manager, "vector_store") and self.bridge.cag_manager.vector_store:
-                        if hasattr(self.bridge.cag_manager.vector_store, "embeddings"):
-                            embeddings = self.bridge.cag_manager.vector_store.embeddings
-                            if embeddings is not None:
-                                # Handle numpy arrays properly
-                                try:
-                                    rag_count = len(embeddings)
-                                except (TypeError, ValueError):
-                                    # Handle case where embeddings might be a numpy array
-                                    if hasattr(embeddings, "shape"):
-                                        rag_count = embeddings.shape[0] if len(embeddings.shape) > 0 else 0
+                if (
+                    hasattr(self.bridge, "cag_manager")
+                    and self.bridge.cag_manager
+                    and hasattr(self.bridge.cag_manager, "vector_store")
+                    and self.bridge.cag_manager.vector_store
+                    and hasattr(self.bridge.cag_manager.vector_store, "embeddings")
+                ):
+                    embeddings = self.bridge.cag_manager.vector_store.embeddings
+                    if embeddings is not None:
+                        # Handle numpy arrays properly
+                        try:
+                            rag_count = len(embeddings)
+                        except (TypeError, ValueError):
+                            # Handle case where embeddings might be a numpy array
+                            if hasattr(embeddings, "shape"):
+                                rag_count = embeddings.shape[0] if len(embeddings.shape) > 0 else 0
                 else:
                     rag_count = 0
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                 logger.warning(f"Could not get RAG count: {e}")
                 rag_count = 0
 
@@ -370,7 +373,7 @@ class OGhidraUI:
                         self.session_manager.create_session(
                             session_name=session_name, description=description if description else None
                         )
-                    except Exception as e:
+                    except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                         messagebox.showerror("Session Creation Error", f"Could not create session: {e}")
                         return
 
@@ -388,18 +391,21 @@ class OGhidraUI:
                                 }
 
                         # Also try to get data from the renamed functions panel
-                        if hasattr(self, "renamed_functions_panel") and self.renamed_functions_panel:
-                            if hasattr(self.renamed_functions_panel, "function_summaries"):
-                                for key, summary in self.renamed_functions_panel.function_summaries.items():
-                                    if key not in analyzed_functions:
-                                        analyzed_functions[key] = {
-                                            "address": key,
-                                            "old_name": "Unknown",
-                                            "new_name": "Unknown",
-                                            "behavior_summary": summary,
-                                            "timestamp": time.time(),
-                                        }
-                    except Exception as e:
+                        if (
+                            hasattr(self, "renamed_functions_panel")
+                            and self.renamed_functions_panel
+                            and hasattr(self.renamed_functions_panel, "function_summaries")
+                        ):
+                            for key, summary in self.renamed_functions_panel.function_summaries.items():
+                                if key not in analyzed_functions:
+                                    analyzed_functions[key] = {
+                                        "address": key,
+                                        "old_name": "Unknown",
+                                        "new_name": "Unknown",
+                                        "behavior_summary": summary,
+                                        "timestamp": time.time(),
+                                    }
+                    except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                         logger.warning(f"Could not collect analyzed functions: {e}")
 
                     # Refinement: rebuild analyzed_functions entries with accurate address/old/new names and standard key 'behavior_summary'
@@ -432,7 +438,7 @@ class OGhidraUI:
                         for rec in analyzed_functions.values():
                             if "summary" in rec and "behavior_summary" not in rec:
                                 rec["behavior_summary"] = rec.pop("summary")
-                    except Exception as refine_err:
+                    except Exception as refine_err:  # noqa: BLE001 intentional defensive recovery boundary
                         logger.warning(f"Analyzed functions refinement failed: {refine_err}")
 
                     # FINAL DEDUPLICATION: remove non-address keys when a canonical address entry exists for the same new_name
@@ -458,7 +464,7 @@ class OGhidraUI:
                             rec = analyzed_functions.get(key, {})
                             if rec.get("new_name") in canonical_new_names:
                                 analyzed_functions.pop(key, None)
-                    except Exception as dedup_err:
+                    except Exception as dedup_err:  # noqa: BLE001 intentional defensive recovery boundary
                         logger.debug(f"Final deduplication step failed: {dedup_err}")
 
                     # SAFETY FILTER: remove incomplete function records
@@ -470,17 +476,21 @@ class OGhidraUI:
                             summary_empty = not rec.get("behavior_summary", "").strip()
                             if (old_unknown and new_unknown) or summary_empty:
                                 analyzed_functions.pop(addr, None)
-                    except Exception as filter_err:
+                    except Exception as filter_err:  # noqa: BLE001 intentional defensive recovery boundary
                         logger.debug(f"Safety filter failed: {filter_err}")
 
                     # Collect RAG vectors
                     rag_vectors = []
                     try:
-                        if hasattr(self.bridge, "cag_manager") and self.bridge.cag_manager:
-                            if hasattr(self.bridge.cag_manager, "vector_store") and self.bridge.cag_manager.vector_store:
-                                if hasattr(self.bridge.cag_manager.vector_store, "documents"):
-                                    rag_vectors = self.bridge.cag_manager.vector_store.documents or []
-                    except Exception as e:
+                        if (
+                            hasattr(self.bridge, "cag_manager")
+                            and self.bridge.cag_manager
+                            and hasattr(self.bridge.cag_manager, "vector_store")
+                            and self.bridge.cag_manager.vector_store
+                            and hasattr(self.bridge.cag_manager.vector_store, "documents")
+                        ):
+                            rag_vectors = self.bridge.cag_manager.vector_store.documents or []
+                    except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                         logger.warning(f"Could not collect RAG vectors: {e}")
 
                     # Save session data
@@ -504,10 +514,10 @@ class OGhidraUI:
                             )
                         else:
                             messagebox.showerror("Error", "Failed to save session. Check logs for details.")
-                    except Exception as e:
+                    except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                         messagebox.showerror("Save Error", f"Error saving session: {e}")
 
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                     messagebox.showerror("Error", f"Failed to save session: {e}")
                     import traceback
 
@@ -522,7 +532,7 @@ class OGhidraUI:
             # Wait for dialog
             session_dialog.wait_window()
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             messagebox.showerror("Error", f"Failed to open save dialog: {e}")
             import traceback
 
@@ -604,7 +614,7 @@ class OGhidraUI:
                         "", "end", values=(session["name"], functions_count, created_str, modified_str)
                     )
                     session_items[item_id] = session
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                     logger.warning(f"Error displaying session {session.get('name', 'Unknown')}: {e}")
                     # Try with fallback values
                     try:
@@ -619,7 +629,7 @@ class OGhidraUI:
                             ),
                         )
                         session_items[item_id] = session
-                    except Exception as e2:
+                    except Exception as e2:  # noqa: BLE001 intentional defensive recovery boundary
                         logger.error(f"Failed to display session even with fallbacks: {e2}")
 
             # Show message if no sessions loaded
@@ -657,7 +667,7 @@ class OGhidraUI:
                     load_dialog.destroy()
                     self._start_session_load(session)
 
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                     # Clear session loading flag on error
                     if hasattr(self, "memory_panel"):
                         self.memory_panel.set_session_loading(False)
@@ -675,7 +685,7 @@ class OGhidraUI:
             # Wait for dialog
             load_dialog.wait_window()
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             messagebox.showerror("Error", f"Failed to open load dialog: {e}")
             import traceback
 
@@ -807,13 +817,13 @@ class OGhidraUI:
                                 loaded += 1
                                 if loaded % 50 == 0:
                                     ui_thread.run_on_ui(lambda n=loaded: stats_var.set(f"Functions loaded: {n}"))
-                            except Exception as e:
+                            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                                 logger.debug(f"Could not restore function {address}: {e}")
                     panel.set_streaming_mode(False)
                 elif panel:
                     analyzed = session_data.get("analyzed_functions", {})
                     unique = self._dedupe_analyzed_functions(analyzed, panel)
-                    ui_thread.run_on_ui(lambda t=len(unique): status_var.set(f"Restoring {t} functions..."))
+                    ui_thread.run_on_ui(lambda t=len(unique): status_var.set(f"Restoring {t} functions..."))  # noqa: B008 intentional callback capture
                     for addr, fd in unique.items():
                         if cancel_requested.is_set():
                             break
@@ -827,7 +837,7 @@ class OGhidraUI:
                             loaded += 1
                             if loaded % 50 == 0:
                                 ui_thread.run_on_ui(lambda n=loaded: stats_var.set(f"Functions loaded: {n}"))
-                        except Exception as e:
+                        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                             logger.warning(f"Could not restore function {addr}: {e}")
 
                 if cancel_requested.is_set():
@@ -840,7 +850,7 @@ class OGhidraUI:
                 if rag_vectors:
                     msg += f"• {len(rag_vectors)} RAG vectors available (use 'Load Vectors' button)\n"
                 finish("Success", msg)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                 import traceback
 
                 logger.error(f"Session load error: {e}\n{traceback.format_exc()}")
@@ -858,7 +868,7 @@ class OGhidraUI:
             try:
                 ollama_health = self.bridge.ollama.check_health()
                 results.append(f"Ollama API: {'OK ✅' if ollama_health else 'NOT OK ❌'}")
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                 results.append(f"Ollama API: ERROR - {e}")
 
             # Check Ghidra backend (HTTP MCP server or pyGhidra)
@@ -872,7 +882,7 @@ class OGhidraUI:
                     label = "GhidraMCP API"
 
                 results.append(f"{label}: {'OK ✅' if ghidra_health else 'NOT OK ❌'}")
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                 backend = getattr(self.config.ghidra, "backend", "http")
                 label = "PyGhidra API" if backend == "pyghidra" else "GhidraMCP API"
                 results.append(f"{label}: ERROR - {e}")
@@ -881,7 +891,7 @@ class OGhidraUI:
             try:
                 cag_enabled = getattr(self.bridge, "enable_cag", False)
                 results.append(f"CAG System: {'Enabled ✅' if cag_enabled else 'Disabled ❌'}")
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                 results.append(f"CAG System: ERROR - {e}")
 
             # Show results (marshal the modal onto the Tk main thread)
@@ -939,7 +949,7 @@ class OGhidraUI:
                 if vector_store and hasattr(vector_store, "embeddings") and vector_store.embeddings is not None:
                     try:
                         count = len(vector_store.embeddings)
-                    except Exception as e:
+                    except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                         logger.warning(f"Failed to get the vector count from the vector store embeddings : {e}")
             return count
 
@@ -1027,7 +1037,7 @@ class OGhidraUI:
                 stats_text.insert(1.0, "\n".join(stats))
             except ImportError:
                 stats_text.insert(1.0, "Install psutil for detailed memory stats:\npip install psutil")
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                 stats_text.insert(1.0, f"Error getting stats: {e}")
 
         refresh_stats()
@@ -1063,7 +1073,7 @@ class OGhidraUI:
                     "Server configuration has been updated and reloaded.\n\n"
                     "You can now use the new provider/settings immediately.",
                 )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             messagebox.showerror("Configuration Error", f"Failed to configure servers: {e}")
 
     def _clear_all_data(self):
@@ -1103,7 +1113,7 @@ class OGhidraUI:
                 self.memory_panel._update_memory_info()
 
                 messagebox.showinfo("Success", "All data cleared.")
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                 messagebox.showerror("Error", f"Failed to clear data: {e}")
 
     # ========== Analysis Menu Handlers ==========
@@ -1184,9 +1194,9 @@ Features:
                 if hasattr(self.bridge, "ghidra_client") and self.bridge.ghidra_client:
                     try:
                         self.bridge.ghidra_client.close()
-                    except Exception as e:
+                    except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                         logger.error(f"Error closing Ghidra client on quit: {e}")
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                 logger.error(f"Error saving session on quit: {e}")
 
             self.root.quit()
@@ -1210,7 +1220,7 @@ def launch_ui(bridge: Bridge, config: BridgeConfig):
     except ImportError as e:
         print(f"Error: Unable to import tkinter. GUI mode not available: {e}")
         return False
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
         logger.error(f"Error launching UI: {e}")
         print(f"Error launching UI: {e}")
         return False

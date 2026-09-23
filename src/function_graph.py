@@ -250,7 +250,7 @@ class FunctionGraph:
         Returns:
             List of (address, centrality_score) tuples
         """
-        centralities = [(addr, self.calculate_centrality(addr)) for addr in self.nodes.keys()]
+        centralities = [(addr, self.calculate_centrality(addr)) for addr in self.nodes]
         centralities.sort(key=lambda x: x[1], reverse=True)
         return centralities[:top_k]
 

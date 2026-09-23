@@ -63,7 +63,7 @@ class QueryInputPanel:
                         self.task_mode_var.set(mode)
                     else:
                         self.task_mode_var.set("purpose_id")
-        except Exception:
+        except Exception:  # noqa: BLE001, S110 intentional defensive recovery boundary
             pass
 
         self.task_mode_check = ttk.Checkbutton(
@@ -103,7 +103,7 @@ class QueryInputPanel:
         try:
             if hasattr(self.bridge, "grep_layer_enabled"):
                 self.grep_enabled_var.set(bool(self.bridge.grep_layer_enabled))
-        except Exception:
+        except Exception:  # noqa: BLE001, S110 intentional defensive recovery boundary
             pass
 
         self.grep_check = ttk.Checkbutton(
@@ -196,7 +196,7 @@ class QueryInputPanel:
                         enabled = bool(self.task_mode_enabled_var.get())
                         mode = str(self.task_mode_var.get())
                         self.bridge.set_task_mode(enabled=enabled, mode=mode)
-                except Exception:
+                except Exception:  # noqa: BLE001, S110 intentional defensive recovery boundary
                     pass
 
                 result = self.bridge.process_query(query)
@@ -207,7 +207,7 @@ class QueryInputPanel:
                 # Final stage update
                 self.workflow_diagram.set_current_stage(None)
 
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                 error_msg = f"Error processing query: {e}"
                 logger.error(error_msg)
                 self.response_panel.add_response("Error", error_msg)
@@ -229,7 +229,7 @@ class QueryInputPanel:
         try:
             if hasattr(self.bridge, "set_task_mode"):
                 self.bridge.set_task_mode(enabled=enabled, mode=mode)
-        except Exception:
+        except Exception:  # noqa: BLE001, S110 intentional defensive recovery boundary
             pass
 
     def _on_grep_layer_change(self):
@@ -249,7 +249,7 @@ class QueryInputPanel:
                 elif hasattr(self.renamed_functions_panel, "function_summaries"):
                     summary_count = len(self.renamed_functions_panel.function_summaries)
                     has_summaries = summary_count > 0
-        except Exception:
+        except Exception:  # noqa: BLE001, S110 intentional defensive recovery boundary
             pass
 
         # Update status label
@@ -273,7 +273,7 @@ class QueryInputPanel:
                 self.bridge.grep_layer_enabled = enabled
 
             logger.info(f"Grep layer {'enabled' if enabled else 'disabled'} ({summary_count} functions available)")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             logger.error(f"Error setting grep layer: {e}")
 
     def _clear_query(self):
@@ -341,7 +341,7 @@ class QueryInputPanel:
                     break
 
                 time.sleep(0.1)  # Check every 100ms
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                 logger.error(f"Error monitoring workflow stage: {e}")
                 break
 

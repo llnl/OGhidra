@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Focused regression tests for recent security hardening changes.
 """

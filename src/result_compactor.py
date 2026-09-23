@@ -137,7 +137,7 @@ class ResultCompactor:
         # Common shapes: {"result": [...]} or {"items": [...]} etc.
         for k in ("items", "imports", "functions"):
             if k in obj and isinstance(obj.get(k), list):
-                head = {"keys": sorted(list(obj.keys()))}
+                head = {"keys": sorted(obj.keys())}
                 compact_list = self._compact_list(tool_name, obj.get(k) or [])
                 return self._cap_chars(json.dumps(head, indent=2) + "\n" + compact_list)
 

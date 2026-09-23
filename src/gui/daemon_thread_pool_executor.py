@@ -21,10 +21,7 @@ class DaemonThreadPoolExecutor(ThreadPoolExecutor):
 
         num_threads = len(self._threads)  # type: ignore[attr-defined]
         if num_threads < self._max_workers:  # type: ignore[attr-defined]
-            thread_name = "%s_%d" % (
-                self._thread_name_prefix or self,  # type: ignore[attr-defined]
-                num_threads,
-            )
+            thread_name = f"{self._thread_name_prefix or self}_{num_threads}"  # type: ignore[attr-defined]
             t = threading.Thread(
                 name=thread_name,
                 target=thread_executor._worker,

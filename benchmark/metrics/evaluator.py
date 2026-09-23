@@ -158,7 +158,7 @@ class SemanticEvaluator:
 
                 self.metrics["llm_judge"] = LLMJudgeMetric(ollama_client=self._ollama_client)
                 logger.info("LLM-as-Judge metric loaded")
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                 logger.warning(f"LLM-as-Judge not available: {e}")
 
         self._initialized = True
@@ -191,7 +191,7 @@ class SemanticEvaluator:
         for name, metric in self.metrics.items():
             try:
                 scores[name] = metric.score(generated, reference)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                 logger.error(f"Error computing {name}: {e}")
                 scores[name] = None
 
@@ -235,7 +235,7 @@ class SemanticEvaluator:
         for name, metric in self.metrics.items():
             try:
                 all_scores[name] = metric.batch_score(generated, references)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                 logger.error(f"Error in batch {name}: {e}")
                 all_scores[name] = [None] * n
 

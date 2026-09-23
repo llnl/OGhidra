@@ -149,7 +149,7 @@ class AIResponsePanel:
                         f.write("=" * 60 + "\n")
                         f.write(f"{entry['content']}\n\n")
                 messagebox.showinfo("Success", f"Responses saved to {filename}")
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                 messagebox.showerror("Error", f"Failed to save file: {e}")
 
     def _export_json(self):
@@ -169,7 +169,7 @@ class AIResponsePanel:
                 with open(filename, "w", encoding="utf-8") as f:
                     json.dump(self.response_history, f, indent=2, ensure_ascii=False)
                 messagebox.showinfo("Success", f"Responses exported to {filename}")
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                 messagebox.showerror("Error", f"Failed to export file: {e}")
 
     def _on_generate_report(self):

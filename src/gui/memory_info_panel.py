@@ -97,13 +97,16 @@ class MemoryInfoPanel:
             # Check for actual vector store data (only if not session loading)
             if hasattr(self.bridge, "memory_manager") and self.bridge.memory_manager:
                 mm = self.bridge.memory_manager
-                if hasattr(mm, "vector_store") and mm.vector_store:
-                    if (
+                if (
+                    hasattr(mm, "vector_store")
+                    and mm.vector_store
+                    and (
                         hasattr(mm.vector_store, "vectors")
                         and mm.vector_store.vectors is not None
                         and hasattr(mm.vector_store.vectors, "shape")
-                    ):
-                        vector_count = mm.vector_store.vectors.shape[0]
+                    )
+                ):
+                    vector_count = mm.vector_store.vectors.shape[0]
 
             # Also check CAG manager for vector store (only if already initialized)
             if hasattr(self.bridge, "cag_manager") and self.bridge.cag_manager:
@@ -138,7 +141,7 @@ class MemoryInfoPanel:
             self.memory_text.delete(1.0, tk.END)
             self.memory_text.insert(1.0, stats_text)
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             logger.error(f"Error updating memory info: {e}")
             self.memory_text.delete(1.0, tk.END)
             self.memory_text.insert(1.0, f"Error updating memory info: {e}")
@@ -163,7 +166,7 @@ class MemoryInfoPanel:
                     self.bridge.cag_manager = CAGManager(self.bridge.config)
                     self.bridge.memory_manager = getattr(self.bridge.cag_manager, "memory_manager", None)
                     logger.info("CAG Manager reinitialized")
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                     logger.error(f"Failed to reinitialize CAG Manager: {e}")
                     messagebox.showerror(
                         "CAG Error",
@@ -173,15 +176,14 @@ class MemoryInfoPanel:
                     return
 
             # If disabling CAG, clean up
-            elif not new_state:
-                if hasattr(self.bridge, "cag_manager") and self.bridge.cag_manager:
-                    # Save session before disabling
-                    try:
-                        self.bridge.cag_manager.save_session()
-                    except Exception as e:
-                        logger.warning(f"Failed to save session for the CAG manager: {e}")
-                    self.bridge.cag_manager = None
-                    self.bridge.memory_manager = None
+            elif not new_state and hasattr(self.bridge, "cag_manager") and self.bridge.cag_manager:
+                # Save session before disabling
+                try:
+                    self.bridge.cag_manager.save_session()
+                except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
+                    logger.warning(f"Failed to save session for the CAG manager: {e}")
+                self.bridge.cag_manager = None
+                self.bridge.memory_manager = None
 
             # Refresh display
             self._update_memory_info()
@@ -189,7 +191,7 @@ class MemoryInfoPanel:
             status = "enabled" if new_state else "disabled"
             messagebox.showinfo("CAG System", f"Cache-Augmented Generation system has been {status}.")
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             logger.error(f"Error toggling CAG: {e}")
             messagebox.showerror("Error", f"Failed to toggle CAG system: {e}")
             # Revert checkbox
@@ -259,7 +261,7 @@ class MemoryInfoPanel:
             else:
                 messagebox.showinfo("RAG System", f"RAG system {status}.")
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             logger.error(f"Error toggling RAG: {e}")
             messagebox.showerror("Error", f"Failed to toggle RAG system: {e}")
             # Revert checkbox
@@ -271,7 +273,7 @@ class MemoryInfoPanel:
         def refresh():
             try:
                 self._update_memory_info()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                 logger.error(f"Error in auto-refresh: {e}")
             # Schedule next refresh in 30 seconds
             self.frame.after(30000, refresh)
@@ -346,7 +348,7 @@ class MemoryInfoPanel:
                         stats.append(f"Hit Rate: {cache_info.get('hit_rate', '0.0%')}")
                         stats.append(f"Cached Items: {cache_info.get('cache_size', 0)}")
                         stats.append(f"Total Requests: {cache_info.get('total_requests', 0)}")
-                    except Exception as e:
+                    except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                         stats.append("")
                         stats.append("=== Performance Cache ===")
                         stats.append(f"Cache Stats Error: {e}")
@@ -368,7 +370,7 @@ class MemoryInfoPanel:
                 stats.append(f"Max Steps: {getattr(self.bridge, 'max_goal_steps', 0)}")
                 stats.append(f"Achieved: {'Yes' if getattr(self.bridge, 'goal_achieved', False) else 'No'}")
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             stats.append(f"Error gathering stats: {e}")
 
         return "\n".join(stats) if stats else "No memory statistics available"

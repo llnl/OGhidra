@@ -5,7 +5,7 @@ Command parser module for extracting and executing GhidraMCP commands from AI re
 import json
 import logging
 import re
-from typing import Any
+from typing import Any, ClassVar
 
 logger = logging.getLogger("ollama-ghidra-bridge.parser")
 
@@ -19,7 +19,7 @@ class CommandParser:
     COMMAND_PATTERN = r"EXECUTE:\s*([\w_]+)\((.*?)\)"
 
     # This pattern will attempt to capture tool_execution and other incorrect formats
-    ALTERNATE_FORMATS = [
+    ALTERNATE_FORMATS: ClassVar[list[tuple[str, str]]] = [
         (r"```tool_execution\s*([\w_]+)\((.*?)\)\s*```", "tool_execution with code blocks"),
         (r"tool_execution\s*([\w_]+)\((.*?)\)", "tool_execution without code blocks"),
         (r"```tool_code\s*([\w_]+)\((.*?)\)\s*```", "tool_code markdown blocks"),
@@ -28,7 +28,7 @@ class CommandParser:
     ]
 
     # Define the required parameters for each command
-    REQUIRED_PARAMETERS = {
+    REQUIRED_PARAMETERS: ClassVar[dict[str, list[str]]] = {
         "decompile_function": ["name"],
         "decompile_function_by_address": ["address"],
         "disassemble_function": ["address"],
@@ -44,7 +44,7 @@ class CommandParser:
     }
 
     # List of all supported commands for validation purposes
-    ALL_SUPPORTED_COMMANDS = [
+    ALL_SUPPORTED_COMMANDS: ClassVar[list[str]] = [
         "decompile_function",
         "decompile_function_by_address",
         "rename_function",
@@ -156,12 +156,11 @@ class CommandParser:
                 start_idx = execute_line_indices[i]
                 end_idx = execute_line_indices[i + 1]
                 between_text = "\n".join(lines[start_idx + 1 : end_idx]).strip()
-                if between_text and not between_text.startswith("EXECUTE:"):
-                    # Check if it's substantial prose (not just blank lines or short connectors)
-                    if len(between_text) > 30:
-                        has_mixed_text = True
-                        format_violations.append(f"Explanatory text between commands: '{between_text[:50]}...'")
-                        break
+                # Check if it's substantial prose (not just blank lines or short connectors).
+                if between_text and not between_text.startswith("EXECUTE:") and len(between_text) > 30:
+                    has_mixed_text = True
+                    format_violations.append(f"Explanatory text between commands: '{between_text[:50]}...'")
+                    break
 
         # Find all command occurrences in the response using the correct format
         matches = re.finditer(CommandParser.COMMAND_PATTERN, cleaned_response, re.MULTILINE)
@@ -352,7 +351,7 @@ class CommandParser:
             if param_name in validated_params:
                 addr = str(validated_params[param_name])
                 # If it starts with "0x", remove it
-                if addr.startswith("0x") or addr.startswith("0X"):
+                if addr.startswith(("0x", "0X")):
                     validated_params[param_name] = addr[2:]
                     logger.info(f"Transformed address from '{addr}' to '{addr[2:]}'")
 
@@ -411,7 +410,7 @@ class CommandParser:
                 # Support negative integers too
                 if re.fullmatch(r"-?\d+", v):
                     return int(v)
-            except Exception:
+            except Exception:  # noqa: BLE001, S110 intentional defensive recovery boundary
                 pass
             return v
 

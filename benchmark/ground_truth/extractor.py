@@ -150,7 +150,7 @@ class GroundTruthExtractor:
         optimization_level: str = "O2",
         compiler: str = "gcc",
         compiler_version: str = "unknown",
-        file_patterns: list[str] = None,
+        file_patterns: list[str] | None = None,
     ) -> GroundTruthDataset:
         """
         Extract ground truth from a source code project.
@@ -193,7 +193,7 @@ class GroundTruthExtractor:
             try:
                 functions = parser.parse_file(str(source_file), str(source_path))
                 all_functions.extend(functions)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                 logger.warning(f"Failed to parse {source_file}: {e}")
 
         logger.info(f"Extracted {len(all_functions)} functions from source")
@@ -204,7 +204,7 @@ class GroundTruthExtractor:
             for func in all_functions:
                 try:
                     func.llm_source_summary = generator.generate_summary(func)
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                     logger.warning(f"Failed to generate summary for {func.function_name}: {e}")
 
         # Set binary info if provided

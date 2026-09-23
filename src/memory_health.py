@@ -56,7 +56,7 @@ class MemoryHealthCheck:
             try:
                 result["storage_size"] = os.path.getsize(config.storage_path)
                 result["storage_size_human"] = self._format_bytes(result["storage_size"])
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                 logger.error(f"Error checking storage file size: {e}")
 
         # Check if CAG is enabled

@@ -14,7 +14,7 @@ Integration Points:
 import logging
 import re
 from collections import defaultdict
-from typing import Any
+from typing import Any, ClassVar
 
 from src.models.memory import ExecutionGate, ExecutionSignal, ToolExecution
 
@@ -34,7 +34,7 @@ class ExecutionGatekeeper:
     """
 
     # Tools that modify state and may need user approval
-    HIGH_RISK_TOOLS = {
+    HIGH_RISK_TOOLS: ClassVar[set[str]] = {
         "rename_function",
         "rename_function_by_address",
     }
@@ -42,7 +42,7 @@ class ExecutionGatekeeper:
     # Investigation tools that should be exempt from doom-loop detection
     # These are read-only tools that analysts legitimately need to call many times
     # with different parameters during deep analysis
-    INVESTIGATION_TOOLS = {
+    INVESTIGATION_TOOLS: ClassVar[set[str]] = {
         "get_xrefs_to",
         "get_xrefs_from",
         "get_function_xrefs",
@@ -58,7 +58,7 @@ class ExecutionGatekeeper:
 
     # Patterns that indicate critical artifacts worth pausing for.
     # These are checked against stringified tool results.
-    CRITICAL_ARTIFACT_PATTERNS = [
+    CRITICAL_ARTIFACT_PATTERNS: ClassVar[list[tuple[str, str]]] = [
         # Privilege escalation indicators
         (r"SeTakeOwnershipPrivilege", "Privilege escalation: SeTakeOwnershipPrivilege"),
         (r"SeDebugPrivilege", "Privilege escalation: SeDebugPrivilege"),
@@ -151,32 +151,31 @@ class ExecutionGatekeeper:
             return ExecutionSignal.PAUSE
 
         # --- Repetition / doom-loop check ---
-        if self.gate_on_repetition:
-            # Skip doom-loop detection for investigation tools (xrefs, decompile, etc.)
-            # These tools are meant to be called many times with different addresses/parameters
-            # during legitimate deep analysis
-            if cmd_name not in self.INVESTIGATION_TOOLS:
-                param_sig = str(sorted(cmd_params.items())) if cmd_params else ""
-                cmd_signature = f"{cmd_name}:{param_sig}"
-                self._repetition_tracker[cmd_signature] += 1
+        # Skip doom-loop detection for investigation tools (xrefs, decompile, etc.).
+        # These tools are meant to be called many times with different addresses/parameters
+        # during legitimate deep analysis.
+        if self.gate_on_repetition and cmd_name not in self.INVESTIGATION_TOOLS:
+            param_sig = str(sorted(cmd_params.items())) if cmd_params else ""
+            cmd_signature = f"{cmd_name}:{param_sig}"
+            self._repetition_tracker[cmd_signature] += 1
 
-                if self._repetition_tracker[cmd_signature] >= self.repetition_threshold:
-                    self._last_gate = ExecutionGate(
-                        reason=(
-                            f"Doom-loop detected: '{cmd_name}' called {self._repetition_tracker[cmd_signature]} times "
-                            f"with identical parameters (threshold={self.repetition_threshold})"
-                        ),
-                        signal=ExecutionSignal.PAUSE,
-                        trigger="repetition",
-                        context={
-                            "tool": cmd_name,
-                            "params": cmd_params,
-                            "call_count": self._repetition_tracker[cmd_signature],
-                            "threshold": self.repetition_threshold,
-                        },
-                    )
-                    self.logger.warning(f"🚧 GATE [repetition]: {self._last_gate.reason}")
-                    return ExecutionSignal.PAUSE
+            if self._repetition_tracker[cmd_signature] >= self.repetition_threshold:
+                self._last_gate = ExecutionGate(
+                    reason=(
+                        f"Doom-loop detected: '{cmd_name}' called {self._repetition_tracker[cmd_signature]} times "
+                        f"with identical parameters (threshold={self.repetition_threshold})"
+                    ),
+                    signal=ExecutionSignal.PAUSE,
+                    trigger="repetition",
+                    context={
+                        "tool": cmd_name,
+                        "params": cmd_params,
+                        "call_count": self._repetition_tracker[cmd_signature],
+                        "threshold": self.repetition_threshold,
+                    },
+                )
+                self.logger.warning(f"🚧 GATE [repetition]: {self._last_gate.reason}")
+                return ExecutionSignal.PAUSE
 
         return ExecutionSignal.CONTINUE
 

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 GhidraMCP API Client
 This module provides a client interface for the GhidraMCP API.
@@ -45,7 +44,7 @@ class GhidraMCPClient:
             file_path = os.path.join("ghidra_knowledge_cache", "function_signatures.json")
             with open(file_path, "r") as f:
                 return json.load(f)["function_signatures"]
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             logger.error(f"Error loading function signatures: {e}")
             return {}
 
@@ -118,7 +117,7 @@ class GhidraMCPClient:
             response = self._get_request("methods")
             functions = response.text.strip().split("\n")
             return functions
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             logger.error(f"Error listing functions: {e}")
             return []
 
@@ -135,7 +134,7 @@ class GhidraMCPClient:
         try:
             response = self._get_request(f"method/{name}")
             return response.text
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             logger.error(f"Error decompiling function {name}: {e}")
             return f"// Error decompiling function: {e}"
 
@@ -152,7 +151,7 @@ class GhidraMCPClient:
         try:
             response = self._get_request(f"address/{address}")
             return response.text
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             logger.error(f"Error decompiling function at address {address}: {e}")
             return f"// Error decompiling function at address {address}: {e}"
 
@@ -176,7 +175,7 @@ class GhidraMCPClient:
             except json.JSONDecodeError as e:
                 logger.info(f"Failed to parse response as JSON: {e}")
                 return response.text
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             logger.error(f"Error renaming function {old_name} to {new_name}: {e}")
             return f"Error: {e}"
 
@@ -200,7 +199,7 @@ class GhidraMCPClient:
             except json.JSONDecodeError as e:
                 logger.info(f"Failed to parse response as JSON: {e}")
                 return response.text
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             logger.error(f"Error renaming function at address {function_address} to {new_name}: {e}")
             return f"Error: {e}"
 
@@ -224,7 +223,7 @@ class GhidraMCPClient:
                 # If the response isn't JSON, try parsing it as text
                 logger.info(f"Failed to parse response as JSON: {e}")
                 return response.text.strip().split("\n")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             logger.error(f"Error listing imports: {e}")
             return []
 
@@ -243,9 +242,9 @@ class GhidraMCPClient:
             response = self._get_request("exports", {"offset": offset, "limit": limit})
             try:
                 return response.json()
-            except Exception:
+            except requests.exceptions.JSONDecodeError:
                 return response.text.strip().split("\n")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             logger.error(f"Error listing exports: {e}")
             return []
 
@@ -269,9 +268,9 @@ class GhidraMCPClient:
             response = self._get_request("xrefs_to", {"address": norm_addr, "offset": offset, "limit": limit})
             try:
                 return response.json()
-            except Exception:
+            except requests.exceptions.JSONDecodeError:
                 return response.text.strip().split("\n")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             logger.error(f"Error getting xrefs_to for {address}: {e}")
             return []
 
@@ -282,9 +281,9 @@ class GhidraMCPClient:
             response = self._get_request("xrefs_from", {"address": norm_addr, "offset": offset, "limit": limit})
             try:
                 return response.json()
-            except Exception:
+            except requests.exceptions.JSONDecodeError:
                 return response.text.strip().split("\n")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             logger.error(f"Error getting xrefs_from for {address}: {e}")
             return []
 
@@ -300,9 +299,9 @@ class GhidraMCPClient:
             response = self._get_request("function_xrefs", {"name": name, "offset": offset, "limit": limit})
             try:
                 return response.json()
-            except Exception:
+            except requests.exceptions.JSONDecodeError:
                 return response.text.strip().split("\n")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             logger.error(f"Error getting function_xrefs for {name}: {e}")
             return []
 
@@ -321,9 +320,9 @@ class GhidraMCPClient:
             response = self._get_request("strings", params)
             try:
                 return response.json()
-            except Exception:
+            except Exception:  # noqa: BLE001 intentional defensive recovery boundary
                 return response.text.strip().split("\n")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             logger.error(f"Error listing strings: {e}")
             return []
 
@@ -348,7 +347,7 @@ class GhidraMCPClient:
                 logger.info("Re-attempting parsing as plain text.")
 
                 return response.text.strip().split("\n")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             logger.error(f"Error listing segments: {e}")
             return []
 
@@ -374,7 +373,7 @@ class GhidraMCPClient:
                 logger.info(f"Failed to parse function search response as JSON: {e}")
                 logger.info("Re-attempting parsing as plain text.")
                 return response.text.strip().split("\n")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             logger.error(f"Error searching functions by name: {e}")
             return []
 
@@ -395,7 +394,7 @@ class GhidraMCPClient:
                 logger.info(f"Failed to parse current function response as JSON: {e}")
                 logger.info("Re-attempting parsing as plain text.")
                 return response.text
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             logger.error(f"Error getting current function: {e}")
             return f"Error: {e}"
 
@@ -416,7 +415,7 @@ class GhidraMCPClient:
                 logger.info(f"Failed to parse current address response as JSON: {e}")
                 logger.info("Re-attempting parsing as plain text.")
                 return response.text
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             logger.error(f"Error getting current address: {e}")
             return f"Error: {e}"
 
@@ -434,7 +433,7 @@ class GhidraMCPClient:
         try:
             response = self._get_request(f"bytes/{address}/{length}")
             return response.text
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             logger.error(f"Error getting bytes at address {address}: {e}")
             return f"Error: {e}"
 
@@ -448,7 +447,7 @@ class GhidraMCPClient:
         try:
             response = self._get_request("labels")
             return response.text.strip().split("\n")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             logger.error(f"Error getting labels: {e}")
             return []
 
@@ -462,7 +461,7 @@ class GhidraMCPClient:
         try:
             response = self._get_request("structures")
             return response.text
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             logger.error(f"Error getting structures: {e}")
             return f"Error: {e}"
 
@@ -506,5 +505,5 @@ if __name__ == "__main__":
         structures = client.get_structures()
         print(structures[:500] + "..." if len(structures) > 500 else structures)
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
         print(f"Error: {e}")

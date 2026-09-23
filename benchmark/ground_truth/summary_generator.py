@@ -166,7 +166,7 @@ class SourceSummaryGenerator:
                 summary = self.generate_summary(func)
                 func.llm_source_summary = summary
                 results.append((func, summary))
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                 logger.warning(f"Skipping {func.function_name}: {e}")
                 results.append((func, None))
 

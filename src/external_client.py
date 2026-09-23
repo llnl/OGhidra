@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 External Generic Client for OGhidra
 -----------------------------------
@@ -316,7 +315,7 @@ class ExternalClient:
                 try:
                     error_body = e.response.text
                     error_detail = f"{e!s} | Response: {error_body[:1000]}"
-                except Exception as inner_exception:
+                except Exception as inner_exception:  # noqa: BLE001 intentional defensive recovery boundary
                     self.logger.warning(f"Failed to get the error detail while parsing exception {e}: {inner_exception}")
 
             self.logger.error(f"Error calling External API (Google): {error_detail}")
@@ -342,14 +341,17 @@ class ExternalClient:
         model = self.model_map.get(phase) if phase else None
 
         # Defensive Check: Validate model against provider
-        if self.provider == "google":
-            if model and not (model.lower().startswith("gemini") or model.lower().startswith("learnlm")):
-                self.logger.warning(f"Ignoring invalid model '{model}' for Google provider. Using default.")
-                model = None
+        if (
+            self.provider == "google"
+            and model
+            and not (model.lower().startswith("gemini") or model.lower().startswith("learnlm"))
+        ):
+            self.logger.warning(f"Ignoring invalid model '{model}' for Google provider. Using default.")
+            model = None
 
         return self.generate(prompt=prompt, model=model, system_prompt=system_prompt, phase=phase)
 
-    def embed(self, text: str, model: str = None) -> list[float]:
+    def embed(self, text: str, model: str | None = None) -> list[float]:
         """
         Generate embeddings.
         """
@@ -384,7 +386,7 @@ class ExternalClient:
 
                 if emb:
                     chunk_embeddings.append(emb)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                 self.logger.error(f"Failed to embed chunk: {e}")
 
         if not chunk_embeddings:
@@ -443,6 +445,6 @@ class ExternalClient:
                 # Try a lightweight call or just return True if API key valid format
                 return bool(self.api_key)
             return True
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             self.logger.warning(f"Failed external client health check: {e}")
             return False

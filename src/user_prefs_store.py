@@ -20,7 +20,7 @@ def load_user_prefs(path: str = DEFAULT_PREFS_PATH) -> dict[str, Any]:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
         return data if isinstance(data, dict) else {}
-    except Exception:
+    except (OSError, json.JSONDecodeError):
         return {}
 
 
@@ -29,5 +29,5 @@ def save_user_prefs(prefs: dict[str, Any], path: str = DEFAULT_PREFS_PATH) -> No
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             json.dump(prefs, f, indent=2, ensure_ascii=False)
-    except Exception:
+    except (OSError, TypeError):
         return

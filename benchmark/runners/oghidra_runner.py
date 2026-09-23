@@ -142,7 +142,7 @@ class OGhidraRunner:
                             context_parts.append(f"### Caller at {caller_addr}:\n```c\n{truncated}\n```")
                             total_chars += len(truncated)
                     except Exception:
-                        pass
+                        logger.exception("Issue getting caller")
 
             # Get callees
             callees = self.bridge.ghidra.get_xrefs_from(address=address)
@@ -158,9 +158,9 @@ class OGhidraRunner:
                             context_parts.append(f"### Callee at {callee_addr}:\n```c\n{truncated}\n```")
                             total_chars += len(truncated)
                     except Exception:
-                        pass
+                        logger.exception("Issue getting callee")
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             logger.warning(f"Failed to gather context for {address}: {e}")
 
         return "\n\n".join(context_parts), total_chars
@@ -258,7 +258,7 @@ Based on the function's code and context, provide:
             try:
                 result = self.analyze_function(addr, name)
                 results.append(result)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                 logger.warning(f"Failed to analyze {addr}: {e}")
 
             if progress_callback:

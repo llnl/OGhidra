@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Test script for the scan_function_pointer_tables smart tool.
 
@@ -67,7 +66,7 @@ def main():
         else:
             print("    OK: No function pointer tables detected (this may be normal for some binaries)")
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
         print(f"    FAILED: Error during scan: {e}")
         import traceback
 
@@ -82,7 +81,7 @@ def main():
         tables_custom = client.scan_function_pointer_tables(min_table_entries=2, pointer_size=8, max_scan_size=16384)
         print(f"    OK: Found {len(tables_custom)} table(s) with looser criteria")
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
         print(f"    FAILED: Error during custom scan: {e}")
         import traceback
 
@@ -101,7 +100,7 @@ def main():
                 print(f"    Sample: {bytes_result[:80]}...")
             else:
                 print(f"    WARNING: read_bytes returned: {bytes_result}")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             print(f"    WARNING: read_bytes failed: {e}")
 
     print("\n" + "=" * 60)

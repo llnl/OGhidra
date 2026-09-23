@@ -9,7 +9,7 @@ Date: 2026-02-19
 """
 
 import logging
-from typing import Any
+from typing import Any, ClassVar
 
 logger = logging.getLogger("ollama-ghidra-bridge.intelligent_context")
 
@@ -25,7 +25,7 @@ class IntelligentContextBuilder:
     """
 
     # Intent classification keywords
-    INTENT_KEYWORDS = {
+    INTENT_KEYWORDS: ClassVar[dict[str, list[str]]] = {
         "data_flow": [
             "input",
             "output",
@@ -125,7 +125,7 @@ class IntelligentContextBuilder:
             else:
                 return self._build_general_context(func_data, max_tokens)
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             self.logger.error(f"Error building intelligent context: {e}")
             return f"Context for function at {function_addr}"
 

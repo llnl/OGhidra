@@ -46,7 +46,7 @@ class AnalysisDumper:
     usage and helps identify optimization opportunities.
     """
 
-    def __init__(self, logs_dir: str = None):
+    def __init__(self, logs_dir: str | None = None):
         """
         Initialize the analysis dumper.
 
@@ -181,7 +181,7 @@ class AnalysisDumper:
             "total_steps": self.current_step,
         }
 
-    def save(self, filename: str = None) -> str:
+    def save(self, filename: str | None = None) -> str:
         """
         Save the dump to a markdown file.
 

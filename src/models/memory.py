@@ -13,7 +13,7 @@ Using Pydantic ensures data validation, clear structure, and easier maintenance.
 
 from datetime import datetime
 from enum import Enum
-from typing import Any
+from typing import Any, ClassVar
 
 from pydantic import BaseModel, Field, validator
 
@@ -310,7 +310,7 @@ class ExecutionPhaseResults(BaseModel):
 
             if context_manager:
                 # Use context manager for intelligent formatting
-                display_content, cached = context_manager.process_result(
+                display_content, _cached = context_manager.process_result(
                     tool_name=exec_result.tool_name, parameters=exec_result.parameters, result=result_text, goal=self.goal
                 )
                 sections.append(f"Result:\n{display_content}\n")
@@ -480,17 +480,19 @@ class SessionMemory(BaseModel):
     knowledge_base: list[KnowledgeArtifact] = Field(default_factory=list)  # New Knowledge Base
     user_preferences: dict[str, Any] = Field(default_factory=dict)
 
-    def add_message(self, role: MessageRole, content: str, metadata: dict[str, Any] = None):
+    def add_message(self, role: MessageRole, content: str, metadata: dict[str, Any] | None = None):
         """Add a message to the conversation history."""
         self.messages.append(ConversationMessage(role=role, content=content, metadata=metadata or {}))
 
-    def add_tool_execution(self, tool_name: str, parameters: dict[str, Any], result: str, success: bool, reasoning: str = None):
+    def add_tool_execution(
+        self, tool_name: str, parameters: dict[str, Any], result: str, success: bool, reasoning: str | None = None
+    ):
         """Record a tool execution."""
         self.tool_executions.append(
             ToolExecution(tool_name=tool_name, parameters=parameters, result=result, success=success, reasoning=reasoning)
         )
 
-    def add_knowledge(self, key: str, value: str, category: str = "general", tags: list[str] = None):
+    def add_knowledge(self, key: str, value: str, category: str = "general", tags: list[str] | None = None):
         """Add a persistent knowledge artifact."""
         self.knowledge_base.append(KnowledgeArtifact(key=key, value=value, category=category, tags=tags or []))
 
@@ -551,4 +553,4 @@ class SessionMemory(BaseModel):
         )
 
     class Config:
-        json_encoders = {datetime: lambda v: v.isoformat(), set: lambda v: list(v)}
+        json_encoders: ClassVar = {datetime: lambda v: v.isoformat(), set: lambda v: list(v)}

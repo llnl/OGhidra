@@ -219,7 +219,7 @@ class SessionCompactor:
                 compacted_chars=compacted_chars,
                 summary=summary,
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             logger.error(f"LLM compaction failed: {e}, falling back to prune")
             return self.prune(exec_results)
 
@@ -245,7 +245,7 @@ class SessionCompactor:
             if isinstance(response, dict):
                 return response.get("message", {}).get("content", str(response))
             return str(response)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             logger.error(f"LLM summary call failed: {e}")
             # Fallback: create a structured summary without LLM
             return self._fallback_summary(prompt)

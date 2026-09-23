@@ -140,7 +140,7 @@ class LLMJudgeMetric(BaseMetric):
             # Parse JSON from response
             return self._parse_response(response)
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             logger.error(f"LLM-as-Judge evaluation failed: {e}")
             return {
                 "semantic_accuracy": 0,

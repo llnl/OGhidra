@@ -104,7 +104,7 @@ def test_read_bytes_raw_format():
         print(f"\n[PASS] Successfully decoded {len(decoded)} bytes from base64")
         print(f"Raw bytes (hex): {decoded.hex()}")
         return True
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
         print(f"\n[FAIL] Could not decode base64: {e}")
         return False
 

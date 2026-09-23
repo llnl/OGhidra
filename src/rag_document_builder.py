@@ -99,7 +99,7 @@ class RAGDocumentBuilder:
 
             return document
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             self.logger.error(f"Error building RAG document: {e}")
             return self._build_fallback_document(func_data)
 
@@ -137,7 +137,7 @@ class RAGDocumentBuilder:
 
             return documents
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             self.logger.error(f"Error building multi-vector documents: {e}")
             # Fallback to single primary document
             return [self.build_primary_document(func_data)]
@@ -595,7 +595,7 @@ Returns: `{signature.get("return_type", "unknown")}`
         for pattern in patterns:
             tags.add(pattern)
 
-        return sorted(list(tags))
+        return sorted(tags)
 
     def _build_fallback_document(self, func_data: dict) -> dict[str, Any]:
         """Build a minimal fallback document if main build fails."""
