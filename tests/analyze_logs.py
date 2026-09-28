@@ -1,6 +1,6 @@
 import json
-import os
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -19,7 +19,6 @@ for line in lines:
             generates.append(data)
     except Exception as e:
         logger.warning(f"Failed to parse the json data: {e}\nSkipping line...")
-        pass
 
 # Print last 10 generate calls with key stats
 for g in generates[-10:]:

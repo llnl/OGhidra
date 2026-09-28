@@ -1,12 +1,12 @@
-import tkinter as tk
-from tkinter import ttk, messagebox
-import os
-from ..config import BridgeConfig
-from ..api_health import build_health_request, health_error_detail, post_health_request
-from .ui_thread import run_on_ui
-import threading
-
 import logging
+import os
+import threading
+import tkinter as tk
+from tkinter import messagebox, ttk
+
+from ..api_health import build_health_request, health_error_detail, post_health_request
+from ..config import BridgeConfig
+from .ui_thread import run_on_ui
 
 logger = logging.getLogger(__name__)
 
@@ -316,7 +316,7 @@ class ServerConfigDialog:
                         else:
                             results.append(f"External API: [ERROR] HTTP {response.status_code}")
                 except Exception as e:
-                    results.append(f"External API: [ERROR] {str(e)}")
+                    results.append(f"External API: [ERROR] {e!s}")
             elif provider == "custom_api":
                 # Test Custom API
                 try:
@@ -345,7 +345,7 @@ class ServerConfigDialog:
                             results.append(f"Custom API: [ERROR] HTTP {response.status_code}")
                             results.append(f"Error: {health_error_detail(response)}")
                 except Exception as e:
-                    results.append(f"Custom API: [ERROR] {str(e)}")
+                    results.append(f"Custom API: [ERROR] {e!s}")
             else:
                 # Test Ollama
                 try:
@@ -394,7 +394,7 @@ class ServerConfigDialog:
                     else:
                         results.append(f"Ollama: [ERROR] HTTP {response.status_code}")
                 except Exception as e:
-                    results.append(f"Ollama: [ERROR] {str(e)}")
+                    results.append(f"Ollama: [ERROR] {e!s}")
 
             backend = getattr(self.config.ghidra, "backend", "http")
 
@@ -411,7 +411,7 @@ class ServerConfigDialog:
                     finally:
                         client.close()
                 except Exception as e:
-                    results.append(f"pyGhidra: [ERROR] {str(e)}")
+                    results.append(f"pyGhidra: [ERROR] {e!s}")
             else:
                 try:
                     import requests
@@ -426,7 +426,7 @@ class ServerConfigDialog:
                     else:
                         results.append(f"GhidraMCP: [ERROR] HTTP {response.status_code}")
                 except Exception as e:
-                    results.append(f"GhidraMCP: [ERROR] {str(e)}")
+                    results.append(f"GhidraMCP: [ERROR] {e!s}")
 
             # Test GhidraMCP
             try:
@@ -438,7 +438,7 @@ class ServerConfigDialog:
                 else:
                     results.append(f"GhidraMCP: [ERROR] HTTP {response.status_code}")
             except Exception as e:
-                results.append(f"GhidraMCP: [ERROR] {str(e)}")
+                results.append(f"GhidraMCP: [ERROR] {e!s}")
 
             # Show results (marshal the modal onto the Tk main thread)
             run_on_ui(lambda: messagebox.showinfo("Connection Test", "\n".join(results)))
@@ -503,7 +503,7 @@ class ServerConfigDialog:
             self.dialog.destroy()
 
         except Exception as e:
-            messagebox.showerror("Invalid Configuration", f"Error in configuration:\n{str(e)}")
+            messagebox.showerror("Invalid Configuration", f"Error in configuration:\n{e!s}")
 
     def _update_env_file(self, updates: dict):
         """Update or insert keys in the .env file."""
@@ -512,8 +512,7 @@ class ServerConfigDialog:
             if not os.path.exists(env_path):
                 # If .env does not exist, create it with the updates
                 with open(env_path, "w", encoding="utf-8") as f:
-                    for k, v in updates.items():
-                        f.write(f"{k}={v}\n")
+                    f.writelines(f"{k}={v}\n" for k, v in updates.items())
                 return
             # Read all lines
             with open(env_path, "r", encoding="utf-8") as f:

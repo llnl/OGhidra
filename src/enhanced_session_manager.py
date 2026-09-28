@@ -3,14 +3,15 @@ Enhanced Session Management System for OGhidra
 Handles comprehensive session saving/loading including analyzed functions, RAG vectors, and UI state.
 """
 
-import os
-import json
-import time
-import logging
-from datetime import datetime
-from typing import Dict, List, Optional, Any, Tuple, Iterator, Callable
-from dataclasses import dataclass, asdict
 import hashlib
+import json
+import logging
+import os
+import time
+from collections.abc import Callable, Iterator
+from dataclasses import asdict, dataclass
+from datetime import datetime
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -29,9 +30,9 @@ class FunctionAnalysis:
     new_name: str
     behavior_summary: str
     analysis_timestamp: float
-    function_hash: Optional[str] = None  # For deduplication
-    ai_confidence: Optional[float] = None
-    processing_time: Optional[float] = None
+    function_hash: str | None = None  # For deduplication
+    ai_confidence: float | None = None
+    processing_time: float | None = None
 
 
 @dataclass
@@ -40,14 +41,14 @@ class SessionMetadata:
 
     session_name: str
     session_id: str
-    binary_path: Optional[str]
-    binary_hash: Optional[str]
+    binary_path: str | None
+    binary_hash: str | None
     created_at: datetime
     last_modified: datetime
     total_functions: int
     analyzed_functions_count: int
-    session_description: Optional[str] = None
-    tags: Optional[List[str]] = None
+    session_description: str | None = None
+    tags: list[str] | None = None
 
 
 @dataclass
@@ -55,8 +56,8 @@ class UIState:
     """UI state information."""
 
     analyzed_functions_panel_expanded: bool = True
-    last_selected_function: Optional[str] = None
-    filter_settings: Optional[Dict[str, Any]] = None
+    last_selected_function: str | None = None
+    filter_settings: dict[str, Any] | None = None
 
     def __post_init__(self):
         if self.filter_settings is None:
@@ -77,8 +78,8 @@ class EnhancedSessionManager:
             sessions_dir: Directory to store session data
         """
         self.sessions_dir = sessions_dir
-        self.current_session_id: Optional[str] = None
-        self.current_session_data: Optional[Dict[str, Any]] = None
+        self.current_session_id: str | None = None
+        self.current_session_data: dict[str, Any] | None = None
 
         # Ensure sessions directory exists
         os.makedirs(sessions_dir, exist_ok=True)
@@ -88,7 +89,7 @@ class EnhancedSessionManager:
 
         logger.info(f"Enhanced Session Manager initialized with directory: {sessions_dir}")
 
-    def create_session(self, session_name: str, binary_path: Optional[str] = None, description: Optional[str] = None) -> str:
+    def create_session(self, session_name: str, binary_path: str | None = None, description: str | None = None) -> str:
         """
         Create a new analysis session.
 
@@ -156,10 +157,10 @@ class EnhancedSessionManager:
 
     def save_current_session(
         self,
-        analyzed_functions: Dict[str, Any],
-        rag_vectors: Optional[List[Any]] = None,
-        ui_state: Optional[Dict[str, Any]] = None,
-        performance_stats: Optional[Dict[str, Any]] = None,
+        analyzed_functions: dict[str, Any],
+        rag_vectors: list[Any] | None = None,
+        ui_state: dict[str, Any] | None = None,
+        performance_stats: dict[str, Any] | None = None,
     ) -> bool:
         """
         Save the current session with all analysis data.
@@ -240,7 +241,7 @@ class EnhancedSessionManager:
             logger.error(f"Error saving session: {e}")
             return False
 
-    def load_session(self, session_identifier: str) -> Optional[Dict[str, Any]]:
+    def load_session(self, session_identifier: str) -> dict[str, Any] | None:
         """
         Load a session by name or ID.
 
@@ -275,7 +276,7 @@ class EnhancedSessionManager:
             logger.error(f"Error loading session {session_identifier}: {e}")
             return None
 
-    def list_sessions(self) -> List[Dict[str, Any]]:
+    def list_sessions(self) -> list[dict[str, Any]]:
         """
         List all available sessions.
 
@@ -429,7 +430,7 @@ class EnhancedSessionManager:
             logger.error(f"Error exporting session {session_identifier}: {e}")
             return False
 
-    def import_session(self, import_path: str, new_session_name: Optional[str] = None) -> Optional[str]:
+    def import_session(self, import_path: str, new_session_name: str | None = None) -> str | None:
         """
         Import a session from a file.
 
@@ -470,7 +471,7 @@ class EnhancedSessionManager:
             logger.error(f"Error importing session from {import_path}: {e}")
             return None
 
-    def get_current_session_info(self) -> Optional[Dict[str, Any]]:
+    def get_current_session_info(self) -> dict[str, Any] | None:
         """
         Get information about the current session.
 
@@ -488,7 +489,7 @@ class EnhancedSessionManager:
             "last_modified": self.current_session_data["metadata"]["last_modified"],
         }
 
-    def _save_session_data(self, session_id: str, session_data: Dict[str, Any]) -> bool:
+    def _save_session_data(self, session_id: str, session_data: dict[str, Any]) -> bool:
         """Save session data to disk."""
         try:
             session_path = os.path.join(self.sessions_dir, session_id)
@@ -505,7 +506,7 @@ class EnhancedSessionManager:
             logger.error(f"Error saving session data: {e}")
             return False
 
-    def _load_session_data(self, session_id: str) -> Optional[Dict[str, Any]]:
+    def _load_session_data(self, session_id: str) -> dict[str, Any] | None:
         """Load session data from disk."""
         try:
             session_file = os.path.join(self.sessions_dir, session_id, "session.json")
@@ -520,8 +521,8 @@ class EnhancedSessionManager:
             return None
 
     def load_session_streaming(
-        self, session_identifier: str, progress_callback: Optional[Callable] = None
-    ) -> Optional[Dict[str, Any]]:
+        self, session_identifier: str, progress_callback: Callable | None = None
+    ) -> dict[str, Any] | None:
         """
         Load session with streaming support for large files.
 
@@ -572,7 +573,7 @@ class EnhancedSessionManager:
                 logger.error(f"Regular loading also failed: {e2}")
                 return None
 
-    def _stream_functions(self, session_identifier: str) -> Iterator[Tuple[str, Dict[str, Any]]]:
+    def _stream_functions(self, session_identifier: str) -> Iterator[tuple[str, dict[str, Any]]]:
         """Stream functions from large session file."""
         try:
             # Use chunked loading as primary method (more reliable than ijson)
@@ -583,7 +584,7 @@ class EnhancedSessionManager:
             logger.error(f"Error streaming functions: {e}")
             # No further fallback - chunked loading should always work
 
-    def _stream_functions_chunked(self, session_identifier: str) -> Iterator[Tuple[str, Dict[str, Any]]]:
+    def _stream_functions_chunked(self, session_identifier: str) -> Iterator[tuple[str, dict[str, Any]]]:
         """Fallback chunked loading for systems without ijson."""
         try:
             session_data = self._load_session_data(session_identifier)
@@ -607,7 +608,7 @@ class EnhancedSessionManager:
         except Exception as e:
             logger.error(f"Error in chunked loading: {e}")
 
-    def _stream_rag_vectors(self, session_identifier: str) -> Iterator[Dict[str, Any]]:
+    def _stream_rag_vectors(self, session_identifier: str) -> Iterator[dict[str, Any]]:
         """Stream RAG vectors from large session file."""
         try:
             session_file = self._get_session_file_path(session_identifier)
@@ -631,7 +632,7 @@ class EnhancedSessionManager:
         except Exception as e:
             logger.error(f"Error streaming RAG vectors: {e}")
 
-    def _load_session_metadata(self, session_identifier: str) -> Optional[Dict[str, Any]]:
+    def _load_session_metadata(self, session_identifier: str) -> dict[str, Any] | None:
         """Load only session metadata without functions/vectors."""
         try:
             session_file = self._get_session_file_path(session_identifier)

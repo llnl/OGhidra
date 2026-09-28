@@ -13,14 +13,14 @@ Usage:
     python tests/test_scan_function_pointer_tables.py
 """
 
-import sys
 import os
+import sys
 
 # Add the project root to the path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.ghidra_client import GhidraMCPClient
 from src.config import GhidraMCPConfig
+from src.ghidra_client import GhidraMCPClient
 
 
 def main():
