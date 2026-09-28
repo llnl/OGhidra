@@ -1,7 +1,7 @@
-import weakref
 import concurrent.futures.thread as thread_executor
-from concurrent.futures import ThreadPoolExecutor
 import threading
+import weakref
+from concurrent.futures import ThreadPoolExecutor
 
 
 class DaemonThreadPoolExecutor(ThreadPoolExecutor):

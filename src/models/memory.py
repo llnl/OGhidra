@@ -11,10 +11,11 @@ This module provides structured, type-safe models for managing:
 Using Pydantic ensures data validation, clear structure, and easier maintenance.
 """
 
-from typing import List, Dict, Optional, Any, Set
-from pydantic import BaseModel, Field, validator
 from datetime import datetime
 from enum import Enum
+from typing import Any
+
+from pydantic import BaseModel, Field, validator
 
 
 class MessageRole(str, Enum):
@@ -35,8 +36,8 @@ class ConversationMessage(BaseModel):
 
     role: MessageRole
     content: str
-    timestamp: Optional[datetime] = Field(default_factory=datetime.now)
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    timestamp: datetime | None = Field(default_factory=datetime.now)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
     class Config:
         # Don't use use_enum_values - keep as enum for type safety
@@ -69,11 +70,11 @@ class ToolExecution(BaseModel):
     """Record of a tool execution."""
 
     tool_name: str
-    parameters: Dict[str, Any] = Field(default_factory=dict)
-    result: Optional[str] = None
+    parameters: dict[str, Any] = Field(default_factory=dict)
+    result: str | None = None
     success: bool = True
-    error: Optional[str] = None
-    reasoning: Optional[str] = None
+    error: str | None = None
+    reasoning: str | None = None
     timestamp: datetime = Field(default_factory=datetime.now)
 
     def format_for_prompt(self) -> str:
@@ -91,18 +92,18 @@ class ToolExecution(BaseModel):
 class AnalysisState(BaseModel):
     """Current state of the analysis session."""
 
-    functions_decompiled: Set[str] = Field(default_factory=set)
-    functions_renamed: Dict[str, str] = Field(default_factory=dict)  # old_name -> new_name
-    functions_analyzed: Set[str] = Field(default_factory=set)
-    comments_added: Dict[str, str] = Field(default_factory=dict)  # address -> comment
-    cached_results: Dict[str, Any] = Field(default_factory=dict)
-    pattern_detections: Dict[str, List[str]] = Field(default_factory=dict)  # address -> pattern names (HIGH severity)
+    functions_decompiled: set[str] = Field(default_factory=set)
+    functions_renamed: dict[str, str] = Field(default_factory=dict)  # old_name -> new_name
+    functions_analyzed: set[str] = Field(default_factory=set)
+    comments_added: dict[str, str] = Field(default_factory=dict)  # address -> comment
+    cached_results: dict[str, Any] = Field(default_factory=dict)
+    pattern_detections: dict[str, list[str]] = Field(default_factory=dict)  # address -> pattern names (HIGH severity)
 
     class Config:
         # Allow sets in Pydantic model
         arbitrary_types_allowed = True
 
-    def format_for_prompt(self) -> Optional[str]:
+    def format_for_prompt(self) -> str | None:
         """Format analysis state for inclusion in a prompt."""
         if not any(
             [
@@ -134,11 +135,11 @@ class AnalysisState(BaseModel):
 class CAGContext(BaseModel):
     """Context-Aware Generation context."""
 
-    workplans: List[str] = Field(default_factory=list)
-    relevant_memories: List[str] = Field(default_factory=list)
-    phase_guidance: Optional[str] = None
+    workplans: list[str] = Field(default_factory=list)
+    relevant_memories: list[str] = Field(default_factory=list)
+    phase_guidance: str | None = None
 
-    def format_for_prompt(self) -> Optional[str]:
+    def format_for_prompt(self) -> str | None:
         """Format CAG context for inclusion in a prompt."""
         if not any([self.workplans, self.relevant_memories, self.phase_guidance]):
             return None
@@ -182,13 +183,13 @@ class StructuredPrompt(BaseModel):
     6. Conversation History (past interactions) ← ALWAYS LAST
     """
 
-    goal: Optional[str] = None
-    analysis_state: Optional[AnalysisState] = None
-    current_plan: Optional[str] = None
-    cag_context: Optional[CAGContext] = None
-    tool_results: List[ToolExecution] = Field(default_factory=list)
-    conversation_history: List[ConversationMessage] = Field(default_factory=list)
-    phase_specific_instructions: Optional[str] = None
+    goal: str | None = None
+    analysis_state: AnalysisState | None = None
+    current_plan: str | None = None
+    cag_context: CAGContext | None = None
+    tool_results: list[ToolExecution] = Field(default_factory=list)
+    conversation_history: list[ConversationMessage] = Field(default_factory=list)
+    phase_specific_instructions: str | None = None
 
     def build_user_prompt(self, max_history_items: int = 10) -> str:
         """
@@ -270,16 +271,16 @@ class ExecutionPhaseResults(BaseModel):
     """
 
     goal: str
-    plan: Optional[str] = None
-    tool_executions: List[ToolExecution] = Field(default_factory=list)
+    plan: str | None = None
+    tool_executions: list[ToolExecution] = Field(default_factory=list)
     started_at: datetime = Field(default_factory=datetime.now)
-    completed_at: Optional[datetime] = None
+    completed_at: datetime | None = None
     investigation_complete: bool = False
     total_steps: int = 0
-    gates_triggered: List["ExecutionGate"] = Field(default_factory=list)
-    pending_question: Optional[Any] = None  # UserQuestion from user_question.py
-    analysis_dump: Optional[str] = None
-    compaction_summary: Optional[str] = None  # LLM-generated context summary
+    gates_triggered: list["ExecutionGate"] = Field(default_factory=list)
+    pending_question: Any | None = None  # UserQuestion from user_question.py
+    analysis_dump: str | None = None
+    compaction_summary: str | None = None  # LLM-generated context summary
 
     def add_execution(self, tool_exec: ToolExecution):
         """Add a tool execution result."""
@@ -341,7 +342,7 @@ class KnowledgeArtifact(BaseModel):
     key: str
     value: str
     category: str = "general"
-    tags: List[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
     timestamp: datetime = Field(default_factory=datetime.now)
 
     def format_for_prompt(self) -> str:
@@ -353,7 +354,7 @@ class RankedResult(BaseModel):
     """A tool execution result with relevance scoring for hybrid context management."""
 
     tool_name: str
-    parameters: Dict[str, Any] = Field(default_factory=dict)
+    parameters: dict[str, Any] = Field(default_factory=dict)
     result: str
     relevance_score: float = 0.0
     category: str = "other"  # 'decompilation', 'strings', 'imports', 'xrefs', etc.
@@ -371,7 +372,7 @@ class CorrelationHint(BaseModel):
     """Cross-tool correlation hint based on shared addresses or patterns."""
 
     address: str
-    mentions: List[str] = Field(default_factory=list)  # ["strings: 'admin'", "xref: FUN_X"]
+    mentions: list[str] = Field(default_factory=list)  # ["strings: 'admin'", "xref: FUN_X"]
     significance: str = "MEDIUM"  # 'HIGH', 'MEDIUM', 'LOW'
 
     def format_for_prompt(self) -> str:
@@ -391,16 +392,16 @@ class CycleConclusions(BaseModel):
 
     cycle_number: int
     binary_purpose: str = ""
-    key_findings: List[Dict[str, Any]] = Field(default_factory=list)
+    key_findings: list[dict[str, Any]] = Field(default_factory=list)
     # Format: [{"address": "0x...", "finding": "...", "confidence": "HIGH/MEDIUM/LOW"}]
 
-    investigation_gaps: List[str] = Field(default_factory=list)
+    investigation_gaps: list[str] = Field(default_factory=list)
     # What still needs investigation
 
-    recommended_next_steps: List[str] = Field(default_factory=list)
+    recommended_next_steps: list[str] = Field(default_factory=list)
     # Specific tools/actions for next cycle
 
-    correlation_insights: List[str] = Field(default_factory=list)
+    correlation_insights: list[str] = Field(default_factory=list)
     # Cross-tool patterns discovered
 
     tools_executed: int = 0
@@ -460,8 +461,8 @@ class ExecutionGate(BaseModel):
     reason: str
     signal: ExecutionSignal = ExecutionSignal.PAUSE
     trigger: str = "unknown"  # "artifact", "repetition", "high_risk", "clarification"
-    context: Dict[str, Any] = Field(default_factory=dict)
-    user_feedback: Optional[str] = None
+    context: dict[str, Any] = Field(default_factory=dict)
+    user_feedback: str | None = None
     timestamp: datetime = Field(default_factory=datetime.now)
 
 
@@ -472,24 +473,24 @@ ExecutionPhaseResults.model_rebuild()
 class SessionMemory(BaseModel):
     """Complete session memory including conversation and state."""
 
-    messages: List[ConversationMessage] = Field(default_factory=list)
-    tool_executions: List[ToolExecution] = Field(default_factory=list)
+    messages: list[ConversationMessage] = Field(default_factory=list)
+    tool_executions: list[ToolExecution] = Field(default_factory=list)
     analysis_state: AnalysisState = Field(default_factory=AnalysisState)
     start_time: datetime = Field(default_factory=datetime.now)
-    knowledge_base: List[KnowledgeArtifact] = Field(default_factory=list)  # New Knowledge Base
-    user_preferences: Dict[str, Any] = Field(default_factory=dict)
+    knowledge_base: list[KnowledgeArtifact] = Field(default_factory=list)  # New Knowledge Base
+    user_preferences: dict[str, Any] = Field(default_factory=dict)
 
-    def add_message(self, role: MessageRole, content: str, metadata: Dict[str, Any] = None):
+    def add_message(self, role: MessageRole, content: str, metadata: dict[str, Any] = None):
         """Add a message to the conversation history."""
         self.messages.append(ConversationMessage(role=role, content=content, metadata=metadata or {}))
 
-    def add_tool_execution(self, tool_name: str, parameters: Dict[str, Any], result: str, success: bool, reasoning: str = None):
+    def add_tool_execution(self, tool_name: str, parameters: dict[str, Any], result: str, success: bool, reasoning: str = None):
         """Record a tool execution."""
         self.tool_executions.append(
             ToolExecution(tool_name=tool_name, parameters=parameters, result=result, success=success, reasoning=reasoning)
         )
 
-    def add_knowledge(self, key: str, value: str, category: str = "general", tags: List[str] = None):
+    def add_knowledge(self, key: str, value: str, category: str = "general", tags: list[str] = None):
         """Add a persistent knowledge artifact."""
         self.knowledge_base.append(KnowledgeArtifact(key=key, value=value, category=category, tags=tags or []))
 
@@ -516,29 +517,27 @@ class SessionMemory(BaseModel):
         items = [k.format_for_prompt() for k in self.knowledge_base]
         return section + "\n".join(items)
 
-    def get_recent_messages(
-        self, limit: int = 10, role_filter: Optional[List[MessageRole]] = None
-    ) -> List[ConversationMessage]:
+    def get_recent_messages(self, limit: int = 10, role_filter: list[MessageRole] | None = None) -> list[ConversationMessage]:
         """Get recent messages, optionally filtered by role."""
         messages = self.messages
         if role_filter:
             messages = [m for m in messages if m.role in role_filter]
         return messages[-limit:]
 
-    def get_recent_tool_executions(self, limit: int = 5) -> List[ToolExecution]:
+    def get_recent_tool_executions(self, limit: int = 5) -> list[ToolExecution]:
         """Get recent tool executions."""
         return self.tool_executions[-limit:]
 
-    def get_all_tool_executions(self) -> List[ToolExecution]:
+    def get_all_tool_executions(self) -> list[ToolExecution]:
         """Get all tool executions in the session."""
         return self.tool_executions
 
     def build_structured_prompt(
         self,
         goal: str,
-        current_plan: Optional[str] = None,
-        cag_context: Optional[CAGContext] = None,
-        phase_instructions: Optional[str] = None,
+        current_plan: str | None = None,
+        cag_context: CAGContext | None = None,
+        phase_instructions: str | None = None,
     ) -> StructuredPrompt:
         """Build a structured prompt from the current session state."""
         return StructuredPrompt(

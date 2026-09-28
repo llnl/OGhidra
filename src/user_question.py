@@ -13,9 +13,10 @@ The execution loop parses this, emits the question to the UI,
 and pauses until the user answers.
 """
 
-import re
 import logging
-from typing import Optional, List, Dict, Any
+import re
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -33,9 +34,9 @@ class UserQuestion(BaseModel):
 
     question: str
     header: str = ""
-    options: List[str] = Field(default_factory=list)
+    options: list[str] = Field(default_factory=list)
     allow_custom: bool = True
-    context: Dict[str, Any] = Field(default_factory=dict)
+    context: dict[str, Any] = Field(default_factory=dict)
 
     def format_for_display(self) -> str:
         """Format question for terminal/log display."""
@@ -64,10 +65,10 @@ class QuestionHandler:
     """
 
     def __init__(self):
-        self._pending: Optional[UserQuestion] = None
-        self._answer: Optional[str] = None
+        self._pending: UserQuestion | None = None
+        self._answer: str | None = None
 
-    def parse_from_response(self, response: str) -> Optional[UserQuestion]:
+    def parse_from_response(self, response: str) -> UserQuestion | None:
         """Parse ASK_USER: directive from an LLM response.
 
         Expected format:
@@ -109,7 +110,7 @@ class QuestionHandler:
         return question
 
     @property
-    def pending_question(self) -> Optional[UserQuestion]:
+    def pending_question(self) -> UserQuestion | None:
         """Currently pending question (waiting for answer)."""
         return self._pending
 
@@ -118,7 +119,7 @@ class QuestionHandler:
         self._answer = answer
         logger.info(f"User answered: {answer[:100]}")
 
-    def consume_answer(self) -> Optional[str]:
+    def consume_answer(self) -> str | None:
         """Return and clear the pending answer.
 
         Returns None if no answer has been provided yet.
