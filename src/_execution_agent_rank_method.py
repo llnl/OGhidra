@@ -1,5 +1,5 @@
-from typing import Any
 import json
+from typing import Any
 
 
 # Helper method for execution-phase ranking
@@ -95,6 +95,6 @@ Output ONLY valid JSON matching the input structure. No markdown. No explanation
 
         return filtered_result
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
         self.logger.warning(f"[WARN] Ranking failed for {tool_name}: {e}. Using original result.")
         return result

@@ -11,12 +11,12 @@ Integration Points:
     - UI: _ui_gate_callback for surfacing gate events to the user
 """
 
-import re
 import logging
-from typing import Optional, List, Dict, Any
+import re
 from collections import defaultdict
+from typing import Any, ClassVar
 
-from src.models.memory import ExecutionSignal, ExecutionGate, ToolExecution
+from src.models.memory import ExecutionGate, ExecutionSignal, ToolExecution
 
 
 class ExecutionGatekeeper:
@@ -34,7 +34,7 @@ class ExecutionGatekeeper:
     """
 
     # Tools that modify state and may need user approval
-    HIGH_RISK_TOOLS = {
+    HIGH_RISK_TOOLS: ClassVar[set[str]] = {
         "rename_function",
         "rename_function_by_address",
     }
@@ -42,7 +42,7 @@ class ExecutionGatekeeper:
     # Investigation tools that should be exempt from doom-loop detection
     # These are read-only tools that analysts legitimately need to call many times
     # with different parameters during deep analysis
-    INVESTIGATION_TOOLS = {
+    INVESTIGATION_TOOLS: ClassVar[set[str]] = {
         "get_xrefs_to",
         "get_xrefs_from",
         "get_function_xrefs",
@@ -58,7 +58,7 @@ class ExecutionGatekeeper:
 
     # Patterns that indicate critical artifacts worth pausing for.
     # These are checked against stringified tool results.
-    CRITICAL_ARTIFACT_PATTERNS = [
+    CRITICAL_ARTIFACT_PATTERNS: ClassVar[list[tuple[str, str]]] = [
         # Privilege escalation indicators
         (r"SeTakeOwnershipPrivilege", "Privilege escalation: SeTakeOwnershipPrivilege"),
         (r"SeDebugPrivilege", "Privilege escalation: SeDebugPrivilege"),
@@ -100,9 +100,9 @@ class ExecutionGatekeeper:
         self.auto_resume_timeout = getattr(config, "gate_auto_resume_timeout", 0)
 
         # Internal state
-        self._repetition_tracker: Dict[str, int] = defaultdict(int)
-        self._last_gate: Optional[ExecutionGate] = None
-        self._pending_feedback: Optional[str] = None
+        self._repetition_tracker: dict[str, int] = defaultdict(int)
+        self._last_gate: ExecutionGate | None = None
+        self._pending_feedback: str | None = None
 
         # Compile patterns once
         self._compiled_patterns = [
@@ -116,7 +116,7 @@ class ExecutionGatekeeper:
         )
 
     def check_before_execution(
-        self, cmd_name: str, cmd_params: Dict[str, Any], exec_history: List[ToolExecution]
+        self, cmd_name: str, cmd_params: dict[str, Any], exec_history: list[ToolExecution]
     ) -> ExecutionSignal:
         """Check BEFORE a tool runs. Returns signal controlling loop flow.
 
@@ -151,37 +151,36 @@ class ExecutionGatekeeper:
             return ExecutionSignal.PAUSE
 
         # --- Repetition / doom-loop check ---
-        if self.gate_on_repetition:
-            # Skip doom-loop detection for investigation tools (xrefs, decompile, etc.)
-            # These tools are meant to be called many times with different addresses/parameters
-            # during legitimate deep analysis
-            if cmd_name not in self.INVESTIGATION_TOOLS:
-                param_sig = str(sorted(cmd_params.items())) if cmd_params else ""
-                cmd_signature = f"{cmd_name}:{param_sig}"
-                self._repetition_tracker[cmd_signature] += 1
+        # Skip doom-loop detection for investigation tools (xrefs, decompile, etc.).
+        # These tools are meant to be called many times with different addresses/parameters
+        # during legitimate deep analysis.
+        if self.gate_on_repetition and cmd_name not in self.INVESTIGATION_TOOLS:
+            param_sig = str(sorted(cmd_params.items())) if cmd_params else ""
+            cmd_signature = f"{cmd_name}:{param_sig}"
+            self._repetition_tracker[cmd_signature] += 1
 
-                if self._repetition_tracker[cmd_signature] >= self.repetition_threshold:
-                    self._last_gate = ExecutionGate(
-                        reason=(
-                            f"Doom-loop detected: '{cmd_name}' called {self._repetition_tracker[cmd_signature]} times "
-                            f"with identical parameters (threshold={self.repetition_threshold})"
-                        ),
-                        signal=ExecutionSignal.PAUSE,
-                        trigger="repetition",
-                        context={
-                            "tool": cmd_name,
-                            "params": cmd_params,
-                            "call_count": self._repetition_tracker[cmd_signature],
-                            "threshold": self.repetition_threshold,
-                        },
-                    )
-                    self.logger.warning(f"🚧 GATE [repetition]: {self._last_gate.reason}")
-                    return ExecutionSignal.PAUSE
+            if self._repetition_tracker[cmd_signature] >= self.repetition_threshold:
+                self._last_gate = ExecutionGate(
+                    reason=(
+                        f"Doom-loop detected: '{cmd_name}' called {self._repetition_tracker[cmd_signature]} times "
+                        f"with identical parameters (threshold={self.repetition_threshold})"
+                    ),
+                    signal=ExecutionSignal.PAUSE,
+                    trigger="repetition",
+                    context={
+                        "tool": cmd_name,
+                        "params": cmd_params,
+                        "call_count": self._repetition_tracker[cmd_signature],
+                        "threshold": self.repetition_threshold,
+                    },
+                )
+                self.logger.warning(f"🚧 GATE [repetition]: {self._last_gate.reason}")
+                return ExecutionSignal.PAUSE
 
         return ExecutionSignal.CONTINUE
 
     def check_after_execution(
-        self, cmd_name: str, result: str, exec_history: List[ToolExecution], session=None
+        self, cmd_name: str, result: str, exec_history: list[ToolExecution], session=None
     ) -> ExecutionSignal:
         """Check AFTER a tool runs. Returns signal if critical artifact found.
 
@@ -251,8 +250,8 @@ class ExecutionGatekeeper:
         return ExecutionSignal.CONTINUE
 
     def _extract_artifacts_from_findings(
-        self, result_text: str, matched_artifacts: List[Dict[str, Any]]
-    ) -> List[Dict[str, str]]:
+        self, result_text: str, matched_artifacts: list[dict[str, Any]]
+    ) -> list[dict[str, str]]:
         """Extract structured artifacts from tool results based on matched patterns.
 
         Converts raw security findings into structured knowledge artifacts
@@ -319,7 +318,7 @@ class ExecutionGatekeeper:
 
         return artifacts
 
-    def get_gate_reason(self) -> Optional[ExecutionGate]:
+    def get_gate_reason(self) -> ExecutionGate | None:
         """Return the most recent gate event, or None if no gate was triggered."""
         return self._last_gate
 
@@ -335,7 +334,7 @@ class ExecutionGatekeeper:
         self._pending_feedback = feedback
         self.logger.info(f"User feedback injected: {feedback[:100]}...")
 
-    def consume_feedback(self) -> Optional[str]:
+    def consume_feedback(self) -> str | None:
         """Consume and return pending user feedback (if any).
 
         Returns:

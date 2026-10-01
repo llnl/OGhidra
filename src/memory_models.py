@@ -4,7 +4,7 @@ Data structures for session memory and tool call tracking.
 
 import datetime
 import uuid
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -13,10 +13,10 @@ class ToolCallRecord(BaseModel):
     """Represents a single tool call made during a session."""
 
     tool_name: str = Field(min_length=1, description="Tool name cannot be empty")
-    parameters: Dict[str, Any]
+    parameters: dict[str, Any]
     timestamp: datetime.datetime = Field(default_factory=datetime.datetime.utcnow)
-    status: Optional[Literal["success", "error"]] = None
-    result_preview: Optional[str] = Field(default=None, max_length=1000, description="Brief summary of the tool's output")
+    status: Literal["success", "error"] | None = None
+    result_preview: str | None = Field(default=None, max_length=1000, description="Brief summary of the tool's output")
 
     @field_validator("tool_name")
     def validate_tool_name(cls, v):
@@ -36,18 +36,18 @@ class SessionRecord(BaseModel):
 
     session_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     start_time: datetime.datetime = Field(default_factory=datetime.datetime.utcnow)
-    end_time: Optional[datetime.datetime] = None
+    end_time: datetime.datetime | None = None
 
     user_task_description: str = Field(
         min_length=1, max_length=2000, description="The core task, problem, or question from the user"
     )
 
-    tool_calls: List[ToolCallRecord] = Field(default_factory=list)
+    tool_calls: list[ToolCallRecord] = Field(default_factory=list)
 
     outcome: Literal["success", "failure", "partial_success", "in_progress", "aborted"] = "in_progress"
-    outcome_reason: Optional[str] = Field(default=None, max_length=500, description="Brief explanation for the outcome")
+    outcome_reason: str | None = Field(default=None, max_length=500, description="Brief explanation for the outcome")
 
-    session_summary: Optional[str] = Field(
+    session_summary: str | None = Field(
         default=None, max_length=2000, description="LLM-generated summary of key findings or solution"
     )
 
@@ -71,7 +71,7 @@ class SessionRecord(BaseModel):
         return v
 
     @property
-    def duration(self) -> Optional[datetime.timedelta]:
+    def duration(self) -> datetime.timedelta | None:
         """Calculate session duration."""
         if self.end_time and self.start_time:
             return self.end_time - self.start_time

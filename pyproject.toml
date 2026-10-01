@@ -44,3 +44,6 @@ packages = ["src"]
 
 [tool.ruff]
 line-length = 128
+
+[tool.ruff.lint]
+ignore = ["DTZ003", "DTZ005", "DTZ006"]

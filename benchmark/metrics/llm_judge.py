@@ -10,7 +10,7 @@ when using structured evaluation criteria.
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from .evaluator import BaseMetric
 
@@ -83,7 +83,7 @@ class LLMJudgeMetric(BaseMetric):
     def __init__(
         self,
         ollama_client: Any,
-        model: Optional[str] = None,
+        model: str | None = None,
         temperature: float = 0.1,
     ):
         """
@@ -118,7 +118,7 @@ class LLMJudgeMetric(BaseMetric):
         detailed = self.detailed_score(candidate, reference)
         return detailed.get("overall_score", 0.0) / 5.0  # Normalize to 0-1
 
-    def detailed_score(self, candidate: str, reference: str) -> Dict[str, Any]:
+    def detailed_score(self, candidate: str, reference: str) -> dict[str, Any]:
         """
         Get detailed LLM judgment with all criteria scores.
 
@@ -140,7 +140,7 @@ class LLMJudgeMetric(BaseMetric):
             # Parse JSON from response
             return self._parse_response(response)
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             logger.error(f"LLM-as-Judge evaluation failed: {e}")
             return {
                 "semantic_accuracy": 0,
@@ -152,7 +152,7 @@ class LLMJudgeMetric(BaseMetric):
                 "error": str(e),
             }
 
-    def _parse_response(self, response: str) -> Dict[str, Any]:
+    def _parse_response(self, response: str) -> dict[str, Any]:
         """Parse LLM response to extract scores."""
         import json
         import re
@@ -195,7 +195,7 @@ class LLMJudgeMetric(BaseMetric):
             "raw_response": response[:500],
         }
 
-    def batch_score(self, candidates: List[str], references: List[str]) -> List[float]:
+    def batch_score(self, candidates: list[str], references: list[str]) -> list[float]:
         """
         Score multiple pairs (sequentially - LLM calls are not easily batched).
 

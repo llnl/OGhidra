@@ -10,7 +10,7 @@ from .benchmark_runner import BenchmarkConfig, BenchmarkRunner
 from .oghidra_runner import OGhidraRunner
 
 __all__ = [
-    "BenchmarkRunner",
     "BenchmarkConfig",
+    "BenchmarkRunner",
     "OGhidraRunner",
 ]

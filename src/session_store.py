@@ -5,7 +5,6 @@ Session history storage and retrieval.
 import datetime
 import json
 import os
-from typing import List, Optional
 
 from .memory_models import SessionRecord
 
@@ -27,7 +26,7 @@ class SessionHistoryStore:
             f.write(record.model_dump_json())
             f.write("\n")
 
-    def load_all_sessions(self) -> List[SessionRecord]:
+    def load_all_sessions(self) -> list[SessionRecord]:
         """Loads all session records from the storage file."""
         if not os.path.exists(self.storage_path):
             return []
@@ -41,11 +40,11 @@ class SessionHistoryStore:
                         records.append(SessionRecord.model_validate(data))
                     except json.JSONDecodeError as e:
                         print(f"Warning: Skipping malformed JSON line {line_number} in '{self.storage_path}': {e}")
-                    except Exception as e:
+                    except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                         print(f"Warning: Skipping record on line {line_number} due to data conversion error: {e}")
         return records
 
-    def get_session_by_id(self, session_id: str) -> Optional[SessionRecord]:
+    def get_session_by_id(self, session_id: str) -> SessionRecord | None:
         """Retrieves a specific session by its ID."""
         for session in self.load_all_sessions():
             if session.session_id == session_id:

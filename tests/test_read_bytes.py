@@ -21,8 +21,8 @@ import warnings
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
 
-from src.config import GhidraMCPConfig  # noqa: E402
-from src.ghidra_client import GhidraMCPClient  # noqa: E402
+from src.config import GhidraMCPConfig
+from src.ghidra_client import GhidraMCPClient
 
 
 def test_read_bytes_hex_format():
@@ -104,7 +104,7 @@ def test_read_bytes_raw_format():
         print(f"\n[PASS] Successfully decoded {len(decoded)} bytes from base64")
         print(f"Raw bytes (hex): {decoded.hex()}")
         return True
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
         print(f"\n[FAIL] Could not decode base64: {e}")
         return False
 

@@ -5,7 +5,7 @@ Command parser module for extracting and executing GhidraMCP commands from AI re
 import json
 import logging
 import re
-from typing import Dict, Any, List, Tuple, Optional
+from typing import Any, ClassVar
 
 logger = logging.getLogger("ollama-ghidra-bridge.parser")
 
@@ -19,7 +19,7 @@ class CommandParser:
     COMMAND_PATTERN = r"EXECUTE:\s*([\w_]+)\((.*?)\)"
 
     # This pattern will attempt to capture tool_execution and other incorrect formats
-    ALTERNATE_FORMATS = [
+    ALTERNATE_FORMATS: ClassVar[list[tuple[str, str]]] = [
         (r"```tool_execution\s*([\w_]+)\((.*?)\)\s*```", "tool_execution with code blocks"),
         (r"tool_execution\s*([\w_]+)\((.*?)\)", "tool_execution without code blocks"),
         (r"```tool_code\s*([\w_]+)\((.*?)\)\s*```", "tool_code markdown blocks"),
@@ -28,7 +28,7 @@ class CommandParser:
     ]
 
     # Define the required parameters for each command
-    REQUIRED_PARAMETERS = {
+    REQUIRED_PARAMETERS: ClassVar[dict[str, list[str]]] = {
         "decompile_function": ["name"],
         "decompile_function_by_address": ["address"],
         "disassemble_function": ["address"],
@@ -44,7 +44,7 @@ class CommandParser:
     }
 
     # List of all supported commands for validation purposes
-    ALL_SUPPORTED_COMMANDS = [
+    ALL_SUPPORTED_COMMANDS: ClassVar[list[str]] = [
         "decompile_function",
         "decompile_function_by_address",
         "rename_function",
@@ -86,7 +86,7 @@ class CommandParser:
     ]
 
     @staticmethod
-    def validate_command_parameters(command_name: str, params: Dict[str, Any]) -> Tuple[bool, str]:
+    def validate_command_parameters(command_name: str, params: dict[str, Any]) -> tuple[bool, str]:
         """
         Validate that a command has all required parameters.
 
@@ -111,7 +111,7 @@ class CommandParser:
         return True, ""
 
     @staticmethod
-    def extract_commands(response: str) -> List[Tuple[str, Dict[str, Any]]]:
+    def extract_commands(response: str) -> list[tuple[str, dict[str, Any]]]:
         """
         Extract commands and their parameters from an AI response.
         Handles malformed responses gracefully and provides feedback.
@@ -156,12 +156,11 @@ class CommandParser:
                 start_idx = execute_line_indices[i]
                 end_idx = execute_line_indices[i + 1]
                 between_text = "\n".join(lines[start_idx + 1 : end_idx]).strip()
-                if between_text and not between_text.startswith("EXECUTE:"):
-                    # Check if it's substantial prose (not just blank lines or short connectors)
-                    if len(between_text) > 30:
-                        has_mixed_text = True
-                        format_violations.append(f"Explanatory text between commands: '{between_text[:50]}...'")
-                        break
+                # Check if it's substantial prose (not just blank lines or short connectors).
+                if between_text and not between_text.startswith("EXECUTE:") and len(between_text) > 30:
+                    has_mixed_text = True
+                    format_violations.append(f"Explanatory text between commands: '{between_text[:50]}...'")
+                    break
 
         # Find all command occurrences in the response using the correct format
         matches = re.finditer(CommandParser.COMMAND_PATTERN, cleaned_response, re.MULTILINE)
@@ -245,7 +244,7 @@ class CommandParser:
         return commands
 
     @staticmethod
-    def _validate_and_transform_params(command_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
+    def _validate_and_transform_params(command_name: str, params: dict[str, Any]) -> dict[str, Any]:
         """
         Validate and potentially transform parameters for specific commands.
         This helps catch common errors before they reach the GhidraMCP client.
@@ -269,7 +268,7 @@ class CommandParser:
             "xref_lookup": None,  # handled dynamically below
         }
 
-        if command_name in alias_mapping and alias_mapping[command_name]:
+        if alias_mapping.get(command_name):
             # Simple alias mapping (string_search -> list_strings)
             command_name = alias_mapping[command_name]
             logger.info(f"Alias command mapped to '{command_name}'")
@@ -352,14 +351,14 @@ class CommandParser:
             if param_name in validated_params:
                 addr = str(validated_params[param_name])
                 # If it starts with "0x", remove it
-                if addr.startswith("0x") or addr.startswith("0X"):
+                if addr.startswith(("0x", "0X")):
                     validated_params[param_name] = addr[2:]
                     logger.info(f"Transformed address from '{addr}' to '{addr[2:]}'")
 
         return validated_params
 
     @staticmethod
-    def _parse_parameters(params_text: str) -> Dict[str, Any]:
+    def _parse_parameters(params_text: str) -> dict[str, Any]:
         """
         Parse parameters from the parameter text string.
 
@@ -369,7 +368,7 @@ class CommandParser:
         Returns:
             Dictionary of parameter names to values
         """
-        params: Dict[str, Any] = {}
+        params: dict[str, Any] = {}
 
         if not params_text:
             return params
@@ -411,7 +410,7 @@ class CommandParser:
                 # Support negative integers too
                 if re.fullmatch(r"-?\d+", v):
                     return int(v)
-            except Exception:
+            except Exception:  # noqa: BLE001, S110 intentional defensive recovery boundary
                 pass
             return v
 
@@ -433,7 +432,7 @@ class CommandParser:
         return params
 
     @staticmethod
-    def format_command_results(command: str, params: Dict[str, str], result: Dict[str, Any]) -> str:
+    def format_command_results(command: str, params: dict[str, str], result: dict[str, Any]) -> str:
         """
         Format the results of a command execution.
 
@@ -485,7 +484,7 @@ class CommandParser:
         return clean_text.strip()
 
     @staticmethod
-    def get_enhanced_error_message(command_name: str, params: Dict[str, str], error: str) -> str:
+    def get_enhanced_error_message(command_name: str, params: dict[str, str], error: str) -> str:
         """
         Generate an enhanced error message with specific guidance based on the command and error.
 
@@ -536,7 +535,7 @@ class CommandParser:
         # Check for common parameter name errors
         common_param_errors = {"address": "function_address (in rename_function_by_address)"}
 
-        for param_name in params.keys():
+        for param_name in params:
             if param_name in common_param_errors:
                 return (
                     f"ERROR: Parameter '{param_name}' may be incorrect. "
@@ -547,7 +546,7 @@ class CommandParser:
         return enhanced_error
 
     @staticmethod
-    def generate_format_feedback(response: str, commands: List[Tuple[str, Dict[str, Any]]]) -> Optional[str]:
+    def generate_format_feedback(response: str, commands: list[tuple[str, dict[str, Any]]]) -> str | None:
         """
         Generate feedback message when format violations are detected.
         This can be returned to the LLM to help it improve.

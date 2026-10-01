@@ -5,12 +5,12 @@ This module implements the main manager for Cache-Augmented Generation
 that integrates with the Bridge class.
 """
 
-import os
 import logging
-from typing import Dict, Any, Optional, List, Tuple
+import os
+from typing import Any
 
-from .vector_store import create_vector_store_from_docs
 from .malware_patterns import analyze_all_patterns, list_all_patterns
+from .vector_store import create_vector_store_from_docs
 
 logger = logging.getLogger("ollama-ghidra-bridge.cag.manager")
 
@@ -45,7 +45,7 @@ class CAGManager:
 
             self.memory_manager = MemoryManager(config)
         except ImportError:
-            logging.warning("MemoryManager not available")
+            logger.warning("MemoryManager not available")
 
         # Flag to control vector store usage for prompts (can be disabled via UI)
         self.use_vector_store_for_prompts = True
@@ -61,9 +61,9 @@ class CAGManager:
         self._bridge_ref = None
 
         if self._ollama_available:
-            logging.info("CAG Manager initialized with Ollama embeddings available")
+            logger.info("CAG Manager initialized with Ollama embeddings available")
         else:
-            logging.warning("CAG Manager initialized - Ollama embeddings not available. Vector features disabled.")
+            logger.warning("CAG Manager initialized - Ollama embeddings not available. Vector features disabled.")
 
     @property
     def vector_store(self):
@@ -72,12 +72,12 @@ class CAGManager:
             if self._ollama_available:
                 self._vector_store = self._initialize_vector_store()
             else:
-                logging.debug("Skipping vector store initialization - Ollama not available")
+                logger.debug("Skipping vector store initialization - Ollama not available")
                 self._vector_store = None
             self._vector_store_initialized = True
         return self._vector_store
 
-    def enhance_prompt(self, query: str, phase: str = None, token_limit: int = 2000) -> str:
+    def enhance_prompt(self, query: str, phase: str | None = None, token_limit: int = 2000) -> str:
         """
         Enhance a prompt with relevant cached information.
 
@@ -124,7 +124,7 @@ class CAGManager:
             try:
                 bridge_ref = getattr(self, "_bridge_ref", None)
                 use_hybrid = bool(getattr(bridge_ref, "grep_layer_enabled", False))
-            except Exception:
+            except Exception:  # noqa: BLE001 intentional defensive recovery boundary
                 use_hybrid = False
 
             knowledge_section = ""
@@ -153,7 +153,7 @@ class CAGManager:
                             total_chars += len(header) + len(doc_text)
 
                         knowledge_section = "\n\n".join(relevant_docs)
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                     logger.debug(f"Hybrid knowledge retrieval failed, falling back to semantic: {e}")
 
             if not knowledge_section:
@@ -187,7 +187,7 @@ class CAGManager:
 
         return ""
 
-    def update_session_from_bridge_context(self, context_history: List[Dict[str, Any]]) -> None:
+    def update_session_from_bridge_context(self, context_history: list[dict[str, Any]]) -> None:
         """
         Update the session context from the Bridge's context history.
 
@@ -279,9 +279,8 @@ class CAGManager:
 
     def save_session(self) -> None:
         """Save the session memory (handled by Bridge/MemoryManager)."""
-        pass
 
-    def find_similar_analysis(self, query: str) -> Optional[str]:
+    def find_similar_analysis(self, query: str) -> str | None:
         """
         Find a similar previous analysis result.
 
@@ -313,7 +312,7 @@ class CAGManager:
 
         return None
 
-    def get_available_sessions(self) -> List[str]:
+    def get_available_sessions(self) -> list[str]:
         """
         Get a list of available session IDs (handled by MemoryManager).
 
@@ -336,7 +335,7 @@ class CAGManager:
         """
         return False
 
-    def get_debug_info(self) -> Dict[str, Any]:
+    def get_debug_info(self) -> dict[str, Any]:
         """
         Get debug information about the CAG manager.
 
@@ -350,8 +349,8 @@ class CAGManager:
             try:
                 cache_stats = self._bridge_ref.get_cache_stats()
                 info["cache_stats"] = cache_stats
-            except Exception as e:
-                logging.debug(f"Could not get cache stats: {e}")
+            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
+                logger.debug(f"Could not get cache stats: {e}")
                 info["cache_stats"] = "unavailable"
 
         # Report vector store info regardless of enable_kb setting
@@ -377,8 +376,8 @@ class CAGManager:
                         "vector_count": len(self.vector_store.embeddings),
                         "dimensions": dimensions,
                     }
-                except Exception as e:
-                    logging.warning(f"Error getting vector store dimensions: {e}")
+                except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
+                    logger.warning(f"Error getting vector store dimensions: {e}")
                     info["vector_store"] = {
                         "document_count": len(self.vector_store.documents) if hasattr(self.vector_store, "documents") else 0,
                         "vector_count": len(self.vector_store.embeddings),
@@ -425,34 +424,35 @@ class CAGManager:
             all_docs = existing_docs + cag_docs
 
             if not all_docs:
-                logging.warning("No documents available for vector store")
+                logger.warning("No documents available for vector store")
                 return None
 
             # If we have existing vectors, we need to create vectors for new CAG docs and combine
             if existing_vectors is not None and len(existing_vectors) > 0 and len(cag_docs) > 0:
-                logging.info(f"Combining {len(existing_vectors)} existing vectors with {len(cag_docs)} CAG documents")
+                logger.info(f"Combining {len(existing_vectors)} existing vectors with {len(cag_docs)} CAG documents")
                 return self._create_combined_vector_store(existing_docs, existing_vectors, cag_docs)
             elif existing_vectors is not None and len(existing_vectors) > 0:
                 # Only existing vectors
                 from .vector_store import SimpleVectorStore
 
-                logging.info(f"Loaded vector store with {len(existing_vectors)} existing vectors")
+                logger.info(f"Loaded vector store with {len(existing_vectors)} existing vectors")
                 return SimpleVectorStore(existing_docs, existing_vectors)
             else:
                 # Create new vectors for all documents
                 vector_store = create_vector_store_from_docs(all_docs)
-                logging.info(f"Created new vector store with {len(all_docs)} documents")
+                logger.info(f"Created new vector store with {len(all_docs)} documents")
                 return vector_store
 
-        except Exception as e:
-            logging.error(f"Error initializing vector store: {str(e)}")
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
+            logger.error(f"Error initializing vector store: {e!s}")
             return None
 
     def _load_existing_vector_db(self):
         """Load existing vector database if available."""
         try:
-            from pathlib import Path
             import json
+            from pathlib import Path
+
             import numpy as np
 
             vector_db_path = Path("data/vector_db")
@@ -461,7 +461,7 @@ class CAGManager:
 
             # Check if all required files exist
             if not all(f.exists() for f in [vectors_file, documents_file]):
-                logging.debug("Vector database files not found")
+                logger.debug("Vector database files not found")
                 return [], None
 
             # Load the vector database
@@ -470,11 +470,11 @@ class CAGManager:
             with open(documents_file, "r") as f:
                 documents = json.load(f)
 
-            logging.info(f"Successfully loaded vector database with {len(vectors)} vectors")
+            logger.info(f"Successfully loaded vector database with {len(vectors)} vectors")
             return documents, vectors
 
-        except Exception as e:
-            logging.warning(f"Failed to load existing vector database: {e}")
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
+            logger.warning(f"Failed to load existing vector database: {e}")
             return [], None
 
     def _load_cag_documents(self):
@@ -496,7 +496,7 @@ class CAGManager:
                     content = f.read()
                     docs.append({"text": content, "type": "workplan", "name": os.path.basename(file_path)})
             else:
-                logging.warning(f"Workplan file not found: {full_path}")
+                logger.warning(f"Workplan file not found: {full_path}")
 
         # Load knowledge base if enabled and exists (and not already in main vector DB)
         if self.enable_kb:
@@ -506,9 +506,9 @@ class CAGManager:
                     content = f.read()
                     docs.append({"text": content, "type": "knowledge_base", "name": "knowledge_base.md"})
             else:
-                logging.warning(f"Knowledge base file not found: {kb_path}")
+                logger.warning(f"Knowledge base file not found: {kb_path}")
 
-        logging.info(f"Loaded {len(docs)} CAG-specific documents")
+        logger.info(f"Loaded {len(docs)} CAG-specific documents")
         return docs
 
     def _create_combined_vector_store(self, existing_docs, existing_vectors, cag_docs):
@@ -532,7 +532,7 @@ class CAGManager:
                     cag_embeddings_list = Bridge.get_embeddings(cag_texts)
 
                     if not cag_embeddings_list:
-                        logging.warning("No embedding model available. Using existing vectors only.")
+                        logger.warning("No embedding model available. Using existing vectors only.")
                         from .vector_store import SimpleVectorStore
 
                         return SimpleVectorStore(existing_docs, existing_vectors)
@@ -541,7 +541,7 @@ class CAGManager:
                     cag_vectors = [np.array(emb) for emb in cag_embeddings_list]
 
                 except ImportError:
-                    logging.warning("Bridge not available for embeddings. Using existing vectors only.")
+                    logger.warning("Bridge not available for embeddings. Using existing vectors only.")
                     from .vector_store import SimpleVectorStore
 
                     return SimpleVectorStore(existing_docs, existing_vectors)
@@ -552,21 +552,21 @@ class CAGManager:
 
                 from .vector_store import SimpleVectorStore
 
-                logging.info(
+                logger.info(
                     f"Combined vector store: {len(existing_vectors)} existing + {len(cag_vectors)} CAG = {len(all_vectors)} total vectors"
                 )
                 return SimpleVectorStore(all_docs, all_vectors)
 
             except ImportError:
-                logging.warning("sentence_transformers not available, using existing vectors only")
+                logger.warning("sentence_transformers not available, using existing vectors only")
                 from .vector_store import SimpleVectorStore
 
                 return SimpleVectorStore(existing_docs, existing_vectors)
 
-        except Exception as e:
-            logging.error(f"Error creating combined vector store: {e}")
-            logging.error("This may be due to vector dimension mismatch between different embedding models.")
-            logging.error(
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
+            logger.error(f"Error creating combined vector store: {e}")
+            logger.error("This may be due to vector dimension mismatch between different embedding models.")
+            logger.error(
                 "Ensure all vectors are created using the same embedding model (check OLLAMA_EMBEDDING_MODEL in .env)."
             )
             # Fallback to existing vectors only
@@ -578,20 +578,19 @@ class CAGManager:
         """Check if Ollama server is available for embeddings."""
         try:
             import requests
+
             from src.config import get_config
 
             config = get_config()
             ollama_url = str(config.ollama.base_url)
             response = requests.get(f"{ollama_url}/api/tags", timeout=2)
-            if response.status_code == 200:
-                # Basic server check passed, assume embeddings will work
-                # Don't test actual embeddings during init to avoid circular dependencies
-                return True
-            return False
-        except Exception:
+            # Basic server check passed; don't test actual embeddings during init
+            # to avoid circular dependencies.
+            return response.status_code == 200
+        except Exception:  # noqa: BLE001 intentional defensive recovery boundary
             return False
 
-    def should_skip_command(self, command_name: str, params: Dict[str, Any], context_window: int = 10) -> Tuple[bool, str]:
+    def should_skip_command(self, command_name: str, params: dict[str, Any], context_window: int = 10) -> tuple[bool, str]:
         """
         Determine if a command should be skipped based on recent execution history.
 
@@ -644,7 +643,7 @@ class CAGManager:
 
         return False, ""
 
-    def get_cached_command_result(self, command_name: str, params: Dict[str, Any]) -> Optional[str]:
+    def get_cached_command_result(self, command_name: str, params: dict[str, Any]) -> str | None:
         """
         Get a cached result for a command from the session memory.
 
@@ -680,7 +679,9 @@ class CAGManager:
 
         return None
 
-    def enhance_prompt_with_memory_context(self, query: str, command_name: str = None, params: Dict[str, Any] = None) -> str:
+    def enhance_prompt_with_memory_context(
+        self, query: str, command_name: str | None = None, params: dict[str, Any] | None = None
+    ) -> str:
         """
         Enhance a prompt with relevant memory context to prevent redundant operations.
 
@@ -746,7 +747,7 @@ class CAGManager:
 
         return ""
 
-    def _get_command_specific_guidance(self, command_name: str, params: Dict[str, Any]) -> str:
+    def _get_command_specific_guidance(self, command_name: str, params: dict[str, Any]) -> str:
         """
         Get command-specific guidance based on memory state.
 
@@ -782,7 +783,7 @@ class CAGManager:
             if hasattr(self.session, "analysis_state"):
                 similar_analyses = [
                     q
-                    for q in self.session.analysis_state.cached_results.keys()
+                    for q in self.session.analysis_state.cached_results
                     if any(word in q.lower() for word in ["analyze", "function", "behavior"])
                 ]
 
@@ -792,7 +793,7 @@ class CAGManager:
 
         return "\n".join(guidance) if guidance else ""
 
-    def update_command_execution(self, command_name: str, params: Dict[str, Any], result: str) -> None:
+    def update_command_execution(self, command_name: str, params: dict[str, Any], result: str) -> None:
         """
         Update the session context with a completed command execution.
 
@@ -828,7 +829,7 @@ class CAGManager:
             query = f"analyze_function for {func_identifier}"
             self.update_from_analysis_result(query, str(params), result)
 
-    def _prune_session_for_query(self, query: str, token_limit: int = 4000) -> Dict[str, Any]:
+    def _prune_session_for_query(self, query: str, token_limit: int = 4000) -> dict[str, Any]:
         """
         Prune the session context to fit within token limits while retaining relevant information.
         """
@@ -881,7 +882,7 @@ class CAGManager:
 
         return pruned_cache
 
-    def _format_session_context(self, pruned_cache: Dict[str, Any]) -> str:
+    def _format_session_context(self, pruned_cache: dict[str, Any]) -> str:
         """
         Format the pruned session context as a string for prompt inclusion.
         """
@@ -946,8 +947,8 @@ class CAGManager:
     # ========================================================================
 
     def check_function_for_malware_patterns(
-        self, decompiled_code: str, assembly: Optional[str] = None, function_address: Optional[str] = None
-    ) -> Dict[str, Any]:
+        self, decompiled_code: str, assembly: str | None = None, function_address: str | None = None
+    ) -> dict[str, Any]:
         """
         Check decompiled code against malware pattern library.
 
@@ -1002,11 +1003,11 @@ class CAGManager:
 
             return {"has_matches": True, "matches": matches, "summary": summary}
 
-        except Exception as e:
-            logger.error(f"Error checking malware patterns: {e}", exc_info=True)
+        except Exception:
+            logger.exception("Error checking malware patterns")
             return {"has_matches": False, "matches": [], "summary": ""}
 
-    def _format_pattern_alert(self, all_matches: List[Dict], high_severity: List[Dict], address: Optional[str]) -> str:
+    def _format_pattern_alert(self, all_matches: list[dict], high_severity: list[dict], address: str | None) -> str:
         """
         Format pattern matches as alert text for prompt injection.
 
@@ -1056,7 +1057,7 @@ class CAGManager:
 
         return "\n".join(lines)
 
-    def get_available_patterns(self) -> List[Dict[str, str]]:
+    def get_available_patterns(self) -> list[dict[str, str]]:
         """
         Get list of all available malware patterns.
 
