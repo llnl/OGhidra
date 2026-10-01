@@ -2,6 +2,9 @@
 Configuration module for the Ollama-GhidraMCP Bridge.
 """
 
+from pydantic import BaseModel, Field, field_validator, AnyHttpUrl
+from pydantic_settings import BaseSettings
+from typing import Optional, Dict, Any, List, ClassVar
 import re
 from typing import Any, ClassVar
 
@@ -225,7 +228,7 @@ class OllamaConfig(BaseModel):
         default="standard", description="Review depth: 'basic', 'standard', or 'thorough'", env="REVIEW_THOROUGHNESS"
     )
 
-    @validator("review_thoroughness")
+    @field_validator("review_thoroughness")
     def validate_review_thoroughness(cls, v):
         """Validate review thoroughness level."""
         valid_levels = {"basic", "standard", "thorough"}
@@ -234,14 +237,14 @@ class OllamaConfig(BaseModel):
             raise ValueError(f"review_thoroughness must be one of {valid_levels}")
         return v_lower
 
-    @validator("model")
+    @field_validator("model")
     def validate_model_name(cls, v):
         """Ensure model name follows expected patterns."""
         if not re.match(r"^[a-zA-Z0-9][a-zA-Z0-9_\-:.]*$", v):
             raise ValueError("Model name contains invalid characters. Use only alphanumeric, underscore, dash, colon, and dot.")
         return v
 
-    @validator("model_map")
+    @field_validator("model_map")
     def validate_model_phases(cls, v):
         """Validate that model_map contains valid phase names."""
         valid_phases = {"planning", "execution", "analysis", "evaluation", "review"}
@@ -1403,14 +1406,14 @@ class GhidraMCPConfig(BaseModel):
         env="PYGHIDRA_BINARY",
     )
 
-    @validator("api_path")
+    @field_validator("api_path")
     def validate_api_path(cls, v):
         """Validate API path format."""
         if v and not v.startswith("/"):
             raise ValueError('API path must start with "/" or be empty')
         return v
 
-    @validator("backend")
+    @field_validator("backend")
     def validate_backend(cls, v):
         """Validate Ghidra backend selection."""
         normalized = v.strip().lower()
@@ -1430,7 +1433,7 @@ class SessionHistoryConfig(BaseModel):
     use_vector_embeddings: bool = False
     vector_db_path: str = Field(default="data/vector_db", description="Path to vector database directory")
 
-    @validator("storage_path")
+    @field_validator("storage_path")
     def validate_storage_path(cls, v):
         """Validate storage path format."""
         if not v.strip():
@@ -1439,7 +1442,7 @@ class SessionHistoryConfig(BaseModel):
             raise ValueError("Storage path must end with .jsonl extension")
         return v.strip()
 
-    @validator("vector_db_path")
+    @field_validator("vector_db_path")
     def validate_vector_db_path(cls, v):
         """Validate vector database path."""
         if not v.strip():
@@ -1483,7 +1486,7 @@ class BridgeConfig(BaseSettings):
     # Knowledge Base directory
     knowledge_base_dir: str = Field(default="knowledge_base", description="Knowledge base directory path")
 
-    @validator("log_level")
+    @field_validator("log_level")
     def validate_log_level(cls, v):
         """Validate log level."""
         valid_levels = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
@@ -1492,7 +1495,7 @@ class BridgeConfig(BaseSettings):
             raise ValueError(f"log_level must be one of {valid_levels}")
         return v_upper
 
-    @validator("log_file")
+    @field_validator("log_file")
     def validate_log_file(cls, v):
         """Validate log file path."""
         if not v.strip():
@@ -1501,7 +1504,7 @@ class BridgeConfig(BaseSettings):
             raise ValueError("Log file must have .log extension")
         return v.strip()
 
-    @validator("knowledge_base_dir")
+    @field_validator("knowledge_base_dir")
     def validate_knowledge_base_dir(cls, v):
         """Validate knowledge base directory."""
         if not v.strip():

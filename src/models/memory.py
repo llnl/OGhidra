@@ -11,6 +11,8 @@ This module provides structured, type-safe models for managing:
 Using Pydantic ensures data validation, clear structure, and easier maintenance.
 """
 
+from typing import List, Dict, Optional, Any, Set
+from pydantic import BaseModel, Field, field_validator
 from datetime import datetime
 from enum import Enum
 from typing import Any, ClassVar
@@ -253,7 +255,7 @@ class StructuredPrompt(BaseModel):
 
         return "\n\n".join(sections)
 
-    @validator("conversation_history")
+    @field_validator("conversation_history")
     def validate_history_not_too_long(cls, v):
         """Warn if conversation history is getting very long."""
         if len(v) > 100:
