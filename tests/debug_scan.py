@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """Debug script to investigate why no function pointer tables are found."""
 
-import sys
-import os
 import base64
-import struct
 import logging
+import os
+import struct
+import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.ghidra_client import GhidraMCPClient
 from src.config import GhidraMCPConfig
+from src.ghidra_client import GhidraMCPClient
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -34,7 +34,6 @@ def main():
                 function_map[addr] = name
             except Exception as e:
                 logger.warning(f"An error occured in attempting to extract the address from the function line {line}: {e}")
-                pass
 
     print(f"Parsed {len(function_map)} functions")
     if not function_map:

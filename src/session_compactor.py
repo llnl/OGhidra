@@ -12,7 +12,7 @@ tool results exhaust the context window.
 """
 
 import logging
-from typing import Optional, Tuple
+
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -30,7 +30,7 @@ class CompactionResult(BaseModel):
     original_chars: int
     compacted_chars: int
     results_pruned: int = 0
-    summary: Optional[str] = None  # LLM-generated summary (compact strategy)
+    summary: str | None = None  # LLM-generated summary (compact strategy)
 
 
 class SessionCompactor:
@@ -67,7 +67,7 @@ class SessionCompactor:
             f"SessionCompactor initialized: enabled={self.enabled}, threshold={self.threshold}, budget={self.context_budget}"
         )
 
-    def estimate_context_usage(self, exec_results) -> Tuple[int, float]:
+    def estimate_context_usage(self, exec_results) -> tuple[int, float]:
         """Estimate total context usage from execution results.
 
         Returns:

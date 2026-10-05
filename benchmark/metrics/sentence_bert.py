@@ -9,7 +9,6 @@ Reference: https://www.sbert.net/
 """
 
 import logging
-from typing import List
 
 from .evaluator import BaseMetric
 
@@ -92,7 +91,7 @@ class SentenceBERTMetric(BaseMetric):
 
         return float(similarity[0][0])
 
-    def batch_score(self, candidates: List[str], references: List[str]) -> List[float]:
+    def batch_score(self, candidates: list[str], references: list[str]) -> list[float]:
         """
         Compute cosine similarity for multiple pairs efficiently.
 
@@ -117,7 +116,7 @@ class SentenceBERTMetric(BaseMetric):
 
         return similarities
 
-    def get_embedding(self, text: str) -> List[float]:
+    def get_embedding(self, text: str) -> list[float]:
         """
         Get the embedding vector for a text.
 
@@ -133,7 +132,7 @@ class SentenceBERTMetric(BaseMetric):
         embedding = self._model.encode(text, convert_to_numpy=True)
         return embedding.tolist()
 
-    def batch_get_embeddings(self, texts: List[str]) -> List[List[float]]:
+    def batch_get_embeddings(self, texts: list[str]) -> list[list[float]]:
         """
         Get embedding vectors for multiple texts.
 
