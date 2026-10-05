@@ -1,5 +1,7 @@
 import tkinter as tk
+
 from ttkbootstrap import Style
+
 from .ui_thread import ui_safe
 
 

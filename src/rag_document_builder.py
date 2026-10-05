@@ -9,7 +9,7 @@ Date: 2026-02-19
 """
 
 import logging
-from typing import Dict, List, Any
+from typing import Any
 
 logger = logging.getLogger("ollama-ghidra-bridge.rag_document_builder")
 
@@ -29,7 +29,7 @@ class RAGDocumentBuilder:
         """Initialize the RAG document builder."""
         self.logger = logger
 
-    def build_primary_document(self, func_data: Dict[str, Any]) -> Dict[str, Any]:
+    def build_primary_document(self, func_data: dict[str, Any]) -> dict[str, Any]:
         """
         Create the primary RAG document for a function.
 
@@ -103,7 +103,7 @@ class RAGDocumentBuilder:
             self.logger.error(f"Error building RAG document: {e}")
             return self._build_fallback_document(func_data)
 
-    def build_multi_vector_documents(self, func_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def build_multi_vector_documents(self, func_data: dict[str, Any]) -> list[dict[str, Any]]:
         """
         Create multiple focused vectors per function for semantic chunking.
 
@@ -149,14 +149,14 @@ class RAGDocumentBuilder:
         new_name: str,
         address: str,
         old_name: str,
-        metrics: Dict,
-        categories: Dict,
-        signature: Dict,
-        patterns: List,
-        security: Dict,
-        data_flow: Dict,
-        dependencies: Dict,
-        summary: Dict,
+        metrics: dict,
+        categories: dict,
+        signature: dict,
+        patterns: list,
+        security: dict,
+        data_flow: dict,
+        dependencies: dict,
+        summary: dict,
     ) -> str:
         """Format content with clear hierarchy for LLM consumption."""
 
@@ -193,7 +193,7 @@ class RAGDocumentBuilder:
 
         return "\n\n".join(filter(None, sections))
 
-    def _build_quick_reference(self, categories: Dict, security: Dict, metrics: Dict) -> str:
+    def _build_quick_reference(self, categories: dict, security: dict, metrics: dict) -> str:
         """Build scannable quick reference section."""
         domain = categories.get("primary_domain", "unknown")
         complexity = metrics.get("complexity_tier", "unknown")
@@ -223,7 +223,7 @@ class RAGDocumentBuilder:
 
         return "\n".join(lines)
 
-    def _build_key_operations(self, summary: Dict, categories: Dict) -> str:
+    def _build_key_operations(self, summary: dict, categories: dict) -> str:
         """Build key operations section from AI summary."""
         lines = ["## Key Operations"]
 
@@ -267,7 +267,7 @@ class RAGDocumentBuilder:
 
         return "\n".join(lines)
 
-    def _build_dependencies_section(self, dependencies: Dict) -> str:
+    def _build_dependencies_section(self, dependencies: dict) -> str:
         """Build dependencies section."""
         lines = ["## Dependencies"]
 
@@ -291,7 +291,7 @@ class RAGDocumentBuilder:
 
         return "\n".join(lines)
 
-    def _build_technical_details(self, signature: Dict, metrics: Dict, data_flow: Dict) -> str:
+    def _build_technical_details(self, signature: dict, metrics: dict, data_flow: dict) -> str:
         """Build technical details section."""
         lines = ["## Technical Details"]
 
@@ -327,7 +327,7 @@ class RAGDocumentBuilder:
 
         return "\n".join(lines)
 
-    def _build_context_section(self, summary: Dict) -> str:
+    def _build_context_section(self, summary: dict) -> str:
         """Build context section with behavior summary."""
         lines = ["## Context"]
 
@@ -346,7 +346,7 @@ class RAGDocumentBuilder:
 
         return "\n".join(lines)
 
-    def _build_patterns_section(self, patterns: List[str]) -> str:
+    def _build_patterns_section(self, patterns: list[str]) -> str:
         """Build code patterns section."""
         lines = ["## Code Patterns"]
 
@@ -366,7 +366,7 @@ class RAGDocumentBuilder:
 
         return "\n".join(lines)
 
-    def _build_security_section(self, security: Dict) -> str:
+    def _build_security_section(self, security: dict) -> str:
         """Build security details section."""
         lines = ["## Security Analysis"]
 
@@ -389,7 +389,7 @@ class RAGDocumentBuilder:
 
     # ========== Private Methods: Multi-Vector Documents ==========
 
-    def _build_purpose_vector(self, func_data: Dict) -> Dict[str, Any]:
+    def _build_purpose_vector(self, func_data: dict) -> dict[str, Any]:
         """Build purpose-focused vector (for 'what does this do?' queries)."""
         new_name = func_data.get("new_name", "unknown")
         address = func_data.get("address", "unknown")
@@ -426,7 +426,7 @@ class RAGDocumentBuilder:
             },
         }
 
-    def _build_implementation_vector(self, func_data: Dict) -> Dict[str, Any]:
+    def _build_implementation_vector(self, func_data: dict) -> dict[str, Any]:
         """Build implementation-focused vector (for 'how is this implemented?' queries)."""
         new_name = func_data.get("new_name", "unknown")
         address = func_data.get("address", "unknown")
@@ -461,7 +461,7 @@ Based on complexity and patterns, this function uses a {"complex" if metrics.get
             },
         }
 
-    def _build_dependencies_vector(self, func_data: Dict) -> Dict[str, Any]:
+    def _build_dependencies_vector(self, func_data: dict) -> dict[str, Any]:
         """Build dependencies-focused vector (for 'what does this call?' queries)."""
         new_name = func_data.get("new_name", "unknown")
         address = func_data.get("address", "unknown")
@@ -494,7 +494,7 @@ Based on complexity and patterns, this function uses a {"complex" if metrics.get
             },
         }
 
-    def _build_security_vector(self, func_data: Dict) -> Dict[str, Any]:
+    def _build_security_vector(self, func_data: dict) -> dict[str, Any]:
         """Build security-focused vector (for security analysis queries)."""
         new_name = func_data.get("new_name", "unknown")
         address = func_data.get("address", "unknown")
@@ -528,7 +528,7 @@ Based on complexity and patterns, this function uses a {"complex" if metrics.get
             },
         }
 
-    def _build_dataflow_vector(self, func_data: Dict) -> Dict[str, Any]:
+    def _build_dataflow_vector(self, func_data: dict) -> dict[str, Any]:
         """Build data flow-focused vector (for 'what data does this process?' queries)."""
         new_name = func_data.get("new_name", "unknown")
         address = func_data.get("address", "unknown")
@@ -567,7 +567,7 @@ Returns: `{signature.get("return_type", "unknown")}`
 
     # ========== Helper Methods ==========
 
-    def _generate_semantic_tags(self, func_data: Dict) -> List[str]:
+    def _generate_semantic_tags(self, func_data: dict) -> list[str]:
         """Generate semantic tags for filtering and search."""
         tags = set()
 
@@ -597,7 +597,7 @@ Returns: `{signature.get("return_type", "unknown")}`
 
         return sorted(list(tags))
 
-    def _build_fallback_document(self, func_data: Dict) -> Dict[str, Any]:
+    def _build_fallback_document(self, func_data: dict) -> dict[str, Any]:
         """Build a minimal fallback document if main build fails."""
         address = func_data.get("address", "unknown")
         new_name = func_data.get("new_name", "unknown")

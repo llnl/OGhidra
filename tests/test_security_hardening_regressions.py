@@ -69,7 +69,7 @@ class SecurityHardeningRegressionTests(unittest.TestCase):
             session_id = manager.create_session("example session")
 
         self.assertRegex(session_id, r"^session_\d+_[0-9a-f]{8}$")
-        expected_suffix = hashlib.sha256("example session".encode("utf-8")).hexdigest()[:8]
+        expected_suffix = hashlib.sha256(b"example session").hexdigest()[:8]
         self.assertTrue(session_id.endswith(expected_suffix))
 
     def test_server_dialog_builds_custom_api_request_with_verify_ssl(self):

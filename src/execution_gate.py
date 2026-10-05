@@ -11,12 +11,12 @@ Integration Points:
     - UI: _ui_gate_callback for surfacing gate events to the user
 """
 
-import re
 import logging
-from typing import Optional, List, Dict, Any
+import re
 from collections import defaultdict
+from typing import Any
 
-from src.models.memory import ExecutionSignal, ExecutionGate, ToolExecution
+from src.models.memory import ExecutionGate, ExecutionSignal, ToolExecution
 
 
 class ExecutionGatekeeper:
@@ -100,9 +100,9 @@ class ExecutionGatekeeper:
         self.auto_resume_timeout = getattr(config, "gate_auto_resume_timeout", 0)
 
         # Internal state
-        self._repetition_tracker: Dict[str, int] = defaultdict(int)
-        self._last_gate: Optional[ExecutionGate] = None
-        self._pending_feedback: Optional[str] = None
+        self._repetition_tracker: dict[str, int] = defaultdict(int)
+        self._last_gate: ExecutionGate | None = None
+        self._pending_feedback: str | None = None
 
         # Compile patterns once
         self._compiled_patterns = [
@@ -116,7 +116,7 @@ class ExecutionGatekeeper:
         )
 
     def check_before_execution(
-        self, cmd_name: str, cmd_params: Dict[str, Any], exec_history: List[ToolExecution]
+        self, cmd_name: str, cmd_params: dict[str, Any], exec_history: list[ToolExecution]
     ) -> ExecutionSignal:
         """Check BEFORE a tool runs. Returns signal controlling loop flow.
 
@@ -181,7 +181,7 @@ class ExecutionGatekeeper:
         return ExecutionSignal.CONTINUE
 
     def check_after_execution(
-        self, cmd_name: str, result: str, exec_history: List[ToolExecution], session=None
+        self, cmd_name: str, result: str, exec_history: list[ToolExecution], session=None
     ) -> ExecutionSignal:
         """Check AFTER a tool runs. Returns signal if critical artifact found.
 
@@ -251,8 +251,8 @@ class ExecutionGatekeeper:
         return ExecutionSignal.CONTINUE
 
     def _extract_artifacts_from_findings(
-        self, result_text: str, matched_artifacts: List[Dict[str, Any]]
-    ) -> List[Dict[str, str]]:
+        self, result_text: str, matched_artifacts: list[dict[str, Any]]
+    ) -> list[dict[str, str]]:
         """Extract structured artifacts from tool results based on matched patterns.
 
         Converts raw security findings into structured knowledge artifacts
@@ -319,7 +319,7 @@ class ExecutionGatekeeper:
 
         return artifacts
 
-    def get_gate_reason(self) -> Optional[ExecutionGate]:
+    def get_gate_reason(self) -> ExecutionGate | None:
         """Return the most recent gate event, or None if no gate was triggered."""
         return self._last_gate
 
@@ -335,7 +335,7 @@ class ExecutionGatekeeper:
         self._pending_feedback = feedback
         self.logger.info(f"User feedback injected: {feedback[:100]}...")
 
-    def consume_feedback(self) -> Optional[str]:
+    def consume_feedback(self) -> str | None:
         """Consume and return pending user feedback (if any).
 
         Returns:
