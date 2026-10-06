@@ -1,614 +1,158 @@
-# OGhidra 3 - AI-Powered Reverse Engineering with Ghidra
+# OGhidra workflows — PyGhidra backend
 
-For the version using a Claude-inspired Orchestrator, see https://github.com/llnl/OGhidra/tree/orchestrator
+One product: `rename_current_function(apply=True)`, implemented with DSPy and exposed through MCP. This version uses **clearbluejar/pyghidra-mcp 0.2.7** to launch the Ghidra GUI and serve MCP over Streamable HTTP. LaurieWired's extension and Python bridge are not used.
 
-![Python Version](https://img.shields.io/badge/python-3.12%2B-blue?logo=python)
-![License](https://img.shields.io/badge/license-BSD--3--Clause-green)
-![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)
+PyGhidra supplies Python access to Ghidra APIs. The separate upstream **pyghidra-mcp** project supplies the MCP tools and GUI lifecycle. OGhidra contains neither a copied backend nor its own Ghidra API wrapper.
 
-**OGhidra** bridges Large Language Models with Ghidra's reverse engineering platform, enabling AI-driven binary analysis through natural language. Analyze binaries conversationally, automate complex workflows, and maintain complete privacy with local AI models.
+## Start Ghidra and its MCP server
 
-YouTube Setup Tutorial
+Use a separate environment for the upstream server so its dependencies and the workflow's dependencies can evolve independently. Install Ghidra and the JDK required by your Ghidra release first.
 
-[![OGhidra Introduction](https://img.youtube.com/vi/hBD92FUgR0Y/0.jpg)](https://www.youtube.com/watch?v=hBD92FUgR0Y)
+Windows PowerShell (paths are examples):
 
----
-
-## What is OGhidra?
-
-OGhidra enhances Ghidra with AI capabilities, allowing you to:
-
-- **Natural Language Analysis** - Ask questions about functions, strings, imports in plain English
-- **Automated Workflows** - Rename functions, detect patterns, generate comprehensive reports
-- **Local AI Models** - Complete privacy with models running on your hardware (Ollama)
-- **Cloud AI Support** - Connect to external APIs (OpenAI, Google Gemini, Anthropic Claude)
-- **Malware Detection** - Automatic pattern matching for 12+ evasion and injection techniques
-- **Smart Enumeration** - Build queryable knowledge graphs from binary analysis
-- **Multi-Instance Analysis** - Run multiple Ghidra instances for parallel analysis
-- **DSPy Agent Programs** - Typed, optimizable planning, tool-selection, analysis, and evaluation modules
-- **Analysis Plugins** - Extend phase lifecycles, function ordering, and whole-program RAG indexing
-
-### How It Works
-
-```mermaid
-graph TD
-    A[User Query] --> B[Planning Phase]
-    B --> C{Execution Phase}
-    C -- Tool Calls --> D[Ghidra/LLM]
-    D --> C
-    C --> E[Goal Evaluation]
-    E -- Agentic Loop --> B
-    E --> F[Final Response]
-
-    style E fill:#f9f,stroke:#333,stroke-width:2px
-    style B fill:#bbf,stroke:#333,stroke-width:2px
+```powershell
+python -m venv .venv-ghidra
+.\.venv-ghidra\Scripts\python.exe -m pip install "pyghidra-mcp==0.2.7"
+$env:GHIDRA_INSTALL_DIR = 'C:\tools\ghidra'
+.\.venv-ghidra\Scripts\pyghidra-mcp.exe --gui --transport streamable-http --host 127.0.0.1 --port 8001 --project-path 'C:\projects\research.gpr'
 ```
 
-**Agentic Loop**: OGhidra's DSPy program composes typed planning, execution-decision, evidence-analysis, and goal-evaluation signatures. After each execution cycle, results are reviewed and the agent can gather more information or refine its analysis before providing the final response.
-
----
-
-## Quick Start
-
-### Prerequisites
-
-1. **Python 3.12+** - Check version: `python --version`
-2. **Ghidra 12.0.3** (Recommended) - Download from [Ghidra Releases](https://github.com/NationalSecurityAgency/ghidra/releases)
-   - Plugin build/install path is documented for Ghidra 12.0.3
-   - Tested with: Ghidra 11.0.3, 11.3.2, 12.0.2, 12.0.3
-3. **Java 21** - Required to build the Ghidra 12.0.3 extension: `java -version`
-4. **Ollama** (optional, for local models) - Install from [ollama.com](https://ollama.com/)
-
-### Installation
+On Linux/macOS, activate the backend environment, set `GHIDRA_INSTALL_DIR`, and run:
 
 ```bash
-# Clone repository
-git clone https://github.com/LLNL/OGhidra.git
-cd OGhidra
-
-# Install dependencies (choose one)
-uv sync                          # Using UV (recommended)
-pip install -r requirements.txt  # Using pip
-
-# Configure environment
-cp .env.example .env
-# Edit .env with your settings
+pyghidra-mcp --gui --transport streamable-http --host 127.0.0.1 --port 8001 --project-path /absolute/path/to/research.gpr
 ```
 
-### Setup Ghidra Plugin
+This launches Ghidra. Open the desired program in its CodeBrowser, wait for analysis to finish, and select a location within a function. Keep this process running. Save/close any other Ghidra instance using the same project before starting this one; the backend cannot attach to an independently launched GUI. Ghidra/MCP run in the same JVM here, so changes are live in that GUI.
 
-The OGhidraMCP plugin build steps below target Ghidra 12.0.3 (recommended).
-There's also a YouTube video tutorial: https://www.youtube.com/watch?v=hBD92FUgR0Y
+The MCP endpoint is `http://127.0.0.1:8001/mcp`. This is actual MCP over Streamable HTTP, with no intermediate REST bridge. Port 8001 avoids the example LM service on port 8000.
 
-#### Building the GhidraMCP Extension
+## Configure the workflow
 
-As a developer, you'll need to build the GhidraMCP extension before installing it in Ghidra:
-
-1. **Prerequisites**:
-   - Ghidra 12.0.3 installed
-   - Java 21
-
-2. **Option 1: Using the automated build scripts**:
-   - Windows:
-
-     ```bat
-     # Set the path to your Ghidra installation (will attempt to find last run copy of Ghidra if not set)
-     set GHIDRA_INSTALL_DIR=C:\path\to\ghidra_12.0.3_PUBLIC
-
-     # Run the build script
-     build_ghidra_plugin.bat
-     ```
-
-   - Unix/Linux/Mac:
-
-     ```bash
-     # Set the path to your Ghidra installation (will attempt to find the last run copy of Ghidra if not set)
-     export GHIDRA_INSTALL_DIR=/path/to/ghidra_12.0.3_PUBLIC
-
-     # Run the build script (make it executable first if needed)
-     chmod +x build_ghidra_plugin.sh
-     ./build_ghidra_plugin.sh
-     ```
-
-3. **Option 2: Manual build process**:
-   - Create/update `OGhidraMCP/gradle.properties` with your Ghidra install path:
-
-     ```properties
-     GHIDRA_INSTALL_DIR=/absolute/path/to/ghidra_12.0.3_PUBLIC
-     ```
-
-   - On Unix/Linux/macOS:
-     ```bash
-     cd OGhidraMCP
-     $GHIDRA_INSTALL_DIR/support/gradle/gradlew buildExtension --info
-     ```
-
-   - On Windows:
-     ```bat
-     cd OGhidraMCP
-     "%GHIDRA_INSTALL_DIR%\support\gradle\gradlew.bat" buildExtension --info
-     ```
-
-4. **Locate the built extension**:
-   - The extension zip file is created in `OGhidraMCP/dist/`
-   - The filename will be something like `ghidra_12.0.3_PUBLIC_YYYYMMDD_OGhidraMCP.zip`
-
-#### Installing the GhidraMCP Extension
-
-Once you've successfully built the extension:
-
-1. **Install in Ghidra**:
-   - Open Ghidra -> **File** -> **Install Extensions**
-   - Click **Add Extension** (green plus icon)
-   - Browse to your `OGhidraMCP/dist/` directory
-   - Select the newly built extension zip file (e.g., `ghidra_12.0.3_PUBLIC_YYYYMMDD_OGhidraMCP.zip`)
-   - Restart Ghidra
-
-2. **Enable the plugin**:
-   - Open a Ghidra project
-   - **File** → **Configure** → **Enable Developer**
-   - Enable the `OGhidraMCP` plugin
-   - The server will start on `http://localhost:8080/methods`
-
-   > **YOU NEED TO HAVE CODE BROWSER OPEN**
-
-### Pull AI Models
+Python 3.12 or later, from this project's root:
 
 ```bash
-# For Ollama (local models)
-ollama pull gemma3:27b           		# Good balance (20GB RAM)
-ollama pull nomic-embed-text     		# Embedding model for RAG
-
-# Alternative models
-ollama pull gpt-oss:120b         		# High quality (80GB RAM)
-ollama pull devstral-2:123b 			# High quality (80GB RAM)
-ollama pull devstral-2:123b-cloud       # Cloud Model
+python -m venv .venv
+# Activate .venv using the command for your shell.
+python -m pip install -e '.[test]'
 ```
 
-### Launch OGhidra
+Copy `config.example.yaml` to `config.yaml` and set the actual model name/endpoint. Keep this backend entry:
 
-```bash
-# GUI Mode (recommended)
-uv run main.py --ui
-
-# Interactive CLI
-uv run main.py --interactive
-
-# In interactive CLI, test connection
-health
+```yaml
+mcp_servers:
+  ghidra:
+    transport: streamable-http
+    url: http://127.0.0.1:8001/mcp
+    evidence_tools:
+      - decompile_function
+      - list_xrefs
 ```
 
-If you launched GUI mode, use:
-```bash
-curl http://localhost:8080/methods
-```
-
----
-
-## Configuration
-
-Edit `.env` to configure your AI provider:
-
-### Option 1: Local Models (Ollama)
-
-```env
-LLM_PROVIDER=ollama
-OLLAMA_BASE_URL=http://localhost:11434/
-OLLAMA_MODEL=gemma3:27b
-OLLAMA_EMBEDDING_MODEL=nomic-embed-text
-```
-
-### Option 2: External APIs
-
-```env
-LLM_PROVIDER=external
-EXTERNAL_PROVIDER=google
-EXTERNAL_API_KEY=your-api-key-here
-EXTERNAL_MODEL=gemini-3.1-flash-lite-preview
-EXTERNAL_EMBEDDING_MODEL=gemini-embedding-001
-```
-
-### Option 3: Custom OpenAI-Compatible API
-
-```env
-LLM_PROVIDER=custom_api
-CUSTOM_API_URL=https://api.example.com/v1/chat/completions
-CUSTOM_API_KEY=your-api-key-here
-CUSTOM_API_MODEL=your-model-name
-CUSTOM_API_EMBEDDING_MODEL=your-embedding-model
-```
-
-### Context Management Settings
-
-Adjust based on your model's context window:
-
-```env
-# Context budget in tokens (adjust to your model's limit)
-CONTEXT_BUDGET=100000              # 100K tokens for mid-size models
-                                   # 200K+ for frontier models
-
-# Execution settings
-MAX_EXECUTION_STEPS=5              # Steps per planning cycle
-MAX_AGENTIC_CYCLES=3               # How many plan-execute-review loops
-AGENTIC_LOOP_ENABLED=true          # Enable adaptive replanning
-```
-
----
-
-## Key Features
-
-### 1. Smart Tool Buttons (GUI)
-
-One-click access to common reverse engineering tasks:
-
-| Tool                         | Description                                     |
-| ---------------------------- | ----------------------------------------------- |
-| **Analyze Current Function** | Deep dive into selected function's behavior     |
-| **Rename Current Function**  | AI suggests meaningful names based on analysis  |
-| **Rename All Functions**     | Bulk rename with Smart/Full/Rename-Only options |
-| **Analyze Imports**          | Identify libraries and external dependencies    |
-| **Analyze Strings**          | Find URLs, credentials, configuration data      |
-| **Generate Report**          | Comprehensive security assessment               |
-
-### 2. Task Modes
-
-Set specialized analysis goals:
-
-```python
-# In GUI: Use "Task Mode" dropdown
-# In CLI: set task_mode <mode>
-
-task_mode malware      # Malware analysis with pattern detection
-task_mode vuln         # Vulnerability research focus
-task_mode general      # General reverse engineering
-```
-
-### 3. Malware Pattern Detection
-
-Automatic detection of 12+ malware patterns:
-- **Evasion**: PEB Walking, Dynamic API Resolution, Anti-Debug, Anti-VM
-- **Injection**: Process Injection (Local/Remote)
-- **Persistence**: Registry, File System Hooks
-- **Obfuscation**: String Encoding, API Hashing
-- **Privilege Escalation**: Token manipulation, UAC bypass
-
-Patterns trigger automatic alerts in the AI's context with MITRE ATT&CK mappings.
-
-### 4. Smart Enumeration
-
-Build rich, queryable knowledge from binary analysis:
-
-```
-# Enumerate all functions with AI summaries
-# Choose from:
-- Rename Only: Only process generic function names
-- Smart Enumeration: Focus on security-relevant functions
-- Full Enumeration: Analyze every function in the binary
-```
-
-Features:
-- Structured metadata extraction (LOC, complexity, operations)
-- Semantic search optimization
-- Intent-based context assembly
-- Multi-vector support for precise retrieval
-
-### 5. Session Management
-
-Save and restore analysis sessions:
-
-```python
-# Save progress
-File → Save Session
-
-# Load previous work
-File → Load Session
-
-# Auto-save after bulk operations
-# Sessions include:
-- Analyzed functions with summaries
-- RAG vectors for semantic search
-- Performance statistics
-- UI state
-```
-
----
-
-## Backend Setup
-
-OGhidra supports two backend types:
-
-- **MCP** — Integrates with the GhidraMCP server and requires the Ghidra client to be running during analysis
-- **PyGhidra** — Supports headless analysis without the Ghidra client and removes the server component required by MCP
-
-### Selecting a Backend
-
-Use the following command-line option to choose a backend:
-
-```bash
---ghidra-backend={http,pyghidra}
-```
-
-| Backend Option | Description |
-|----------------|-------------|
-| `http` | Uses the GhidraMCP backend |
-| `pyghidra` | Uses the PyGhidra backend |
-
----
-
-## PyGhidra Configuration
-
-### Using an Existing Ghidra Project
-
-Specify a Ghidra project file (`.gpr`) when launching OGhidra:
-
-```bash
---pyghidra-project=/path/to/project.gpr
-```
-
-PyGhidra requires a valid Ghidra project in order to launch OGhidra.
-
----
-
-### Selecting a Program
-
-Specify which binary inside the Ghidra project should be analyzed:
-
-```bash
---pyghidra-program=<program_name>
-```
-
-example call for selecting a program in a Ghidra project:
-
-```bash
-uv run main.py --ui --ghidra-backend=pyghidra --pyghidra-project=/path/to/project.gpr --pyghidra-program=<program_name>
-```
-
-Requirements:
-
-- The program name must exactly match the name shown in the Ghidra project GUI
-- This option is required when using an existing project
-- Failure to specify a program will prevent OGhidra from launching
-
----
-
-### Launching a Binary Directly
-
-You can also provide a binary path directly:
-
-```bash
---pyghidra-binary=/path/to/binary
-```
-
-When this option is used, PyGhidra automatically:
-
-1. Creates a new Ghidra project (`.gpr`)
-2. Imports the binary
-3. Launches the binary in OGhidra for analysis
-
-example call for launching a binary directly:
-
-uv run main.py --ui --ghidra-backend=pyghidra --pyghidra-binary=/path/to/binary
-
----
-
-## Common Workflows
-
-### Analyze a Suspicious Binary
-
-1. **Load binary in Ghidra** and open in CodeBrowser
-2. **Enable OGhidraMCP plugin** (File → Configure)
-3. **Launch OGhidra**: `uv run main.py --ui`
-4. **Set task mode**: Select "malware" from dropdown
-5. **Run Smart Enumeration**: Click "Rename All Functions" → "Smart Enumeration"
-6. **Ask questions**: "What are the high-risk functions?" or "Show me network communication"
-
-### Generate Security Report
-
-```bash
-# In GUI: Click "Generate Report" button
-# Report includes:
-- Executive Summary
-- Function Inventory (renamed functions with behavior)
-- Security Analysis (high-risk functions, patterns)
-- Import Analysis
-- String Analysis
-- Recommendations
-```
-
-### Investigate Specific Function
-
-1. **Navigate to function in Ghidra**
-2. **Click "Analyze Current Function"**
-3. **Ask follow-up questions**:
-   - "What does this function do?"
-   - "Is this vulnerable to buffer overflow?"
-   - "What other functions call this?"
-
----
-
-## Advanced Features
-
-### RAG (Retrieval-Augmented Generation)
-
-OGhidra uses vector embeddings for semantic search over analyzed functions:
-
-```env
-# Enable in .env
-RESULT_CACHE_ENABLED=true
-TIERED_CONTEXT_ENABLED=true
-```
-
-Benefits:
-- Remember previous analysis across sessions
-- Find similar functions semantically
-- Reduce redundant LLM calls
-
-Bulk function analysis runs a built-in `FunctionRAGPlugin` after all function workers finish. Additional plugins can change function traversal order or insert phases throughout the query lifecycle. See [DSPy agent and plugin development](docs/dspy-agent-and-plugins.md).
-
-
-### Context Optimization
-
-Tiered context compression keeps relevant information:
-
-```env
-CURRENT_LOOP_MAX_CHARS=2000   # Recent: full detail
-PREV_LOOP_MAX_CHARS=400       # Previous: summaries
-OLDER_LOOP_MAX_CHARS=100      # Older: references only
-```
-
-### LLM Logging
-
-Track all AI interactions for debugging:
-
-```env
-LLM_LOGGING_ENABLED=true
-LLM_LOG_FILE=logs/llm_interactions.log
-LLM_LOG_FORMAT=json
-```
-
----
-
-## Troubleshooting
-
-### Ghidra Connection Issues
-
-```bash
-# Verify plugin is loaded
-# Open up codebrowser!
-
-# Check server is running
-curl http://localhost:8080/methods
-```
-
-
-### Ollama Connection Issues
-
-```bash
-# Verify Ollama is running
-ollama list
-
-# Check connectivity
-curl http://localhost:11434/api/tags
-
-# Restart Ollama service
-ollama serve
-```
-
-### Empty Responses / Context Overflow
-
-```env
-# Reduce context budget
-CONTEXT_BUDGET=50000
-
-# Enable compaction
-COMPACTION_ENABLED=true
-COMPACTION_THRESHOLD=0.75
-```
-
-### Slow Performance
-
-1. **Use smaller models**: Switch to `gemma3:9b`
-2. **Reduce parallel workers**: Set `max_workers=2` in bulk operations
-3. **Disable vector embeddings**: `RESULT_CACHE_ENABLED=false`
-4. **Increase request delay**: `CUSTOM_API_REQUEST_DELAY=2.0`
-
----
-
-## Architecture Overview
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                        OGhidra UI                           │
-│                  (GUI / Interactive CLI)                    │
-└────────────────────────┬────────────────────────────────────┘
-                         │
-                         ▼
-┌─────────────────────────────────────────────────────────────┐
-│              DSPy Agent + Bridge (src/agent, bridge.py)     │
-│  ┌────────────────────────────────────────────────────────┐ │
-│  │ • DSPy Modules: Plan → Execute → Analyze → Evaluate    │ │
-│  │ • Plugin Hooks: query, phase, and function lifecycles  │ │
-│  │ • Tool Router: Ghidra client, LLM client, CAG manager  │ │
-│  │ • Context Manager: Budget allocation, compression      │ │
-│  └────────────────────────────────────────────────────────┘ │
-└───────────┬────────────────────────┬────────────────────────┘
-            │                        │
-            ▼                        ▼
-┌───────────────────────┐  ┌─────────────────────────┐
-│   Ghidra Client       │  │   LLM Clients           │
-│ • GhidraMCP Plugin    │  │ • Ollama (local)        │
-│ • Binary operations   │  │ • External APIs         │
-│ • Decompilation       │  │ • Custom endpoints      │
-└───────────────────────┘  └─────────────────────────┘
-            │                        │
-            └────────────┬───────────┘
-                         ▼
-┌─────────────────────────────────────────────────────────────┐
-│               CAG Manager (Knowledge System)                │
-│  ┌────────────────────────────────────────────────────────┐ │
-│  │ • Vector Store: Semantic search over functions         │ │
-│  │ • Pattern Detector: 12+ malware techniques             │ │
-│  │ • Metadata Extractor: Structured function analysis     │ │
-│  │ • Session Store: Persistent analysis state             │ │
-│  └────────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────┘
-```
-
----
-
-## Contributing
-
-We welcome contributions! Areas of interest:
-
-- **New malware patterns** for detection
-- **LLM provider integrations**
-- **UI/UX improvements**
-- **Performance optimizations**
-- **Analysis plugins and DSPy optimizers**
-- **Documentation** and examples
-
-See [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for community guidelines.
-
----
-
-## Citation
-
-If you use OGhidra in your research, please cite:
-
-```bibtex
-@software{oghidra2025,
-  title = {OGhidra: AI-Powered Reverse Engineering with Ghidra},
-  author = {Enoch Wang},
-  year = {2025},
-  url = {https://github.com/LLNL/OGhidra}
+The `lm` section configures DSPy's own model connection; it does not inherit the host client's model. `api_key_env` names an environment variable; remove it for a service that needs no explicit key. All model access goes through `dspy.LM`, without provider-specific code.
+
+| Service | `lm.model` | `lm.api_base` |
+| --- | --- | --- |
+| OpenAI | `openai/YOUR_MODEL` | Omit |
+| Ollama | `ollama_chat/YOUR_MODEL` | `http://127.0.0.1:11434` |
+| vLLM / compatible local endpoint | `openai/YOUR_SERVED_MODEL` | `http://127.0.0.1:8000/v1` |
+
+Supported LM fields: `model`, `api_base`, `api_key_env`, `cache`, `max_tokens`, `temperature`, `timeout`, and `num_retries`. Add explicit typed fields when more settings are needed; arbitrary options are rejected.
+
+## Connect your client
+
+Claude (or any host) launches the OGhidra workflow server over stdio. Both your client and OGhidra connects to the existing PyGhidra-MCP HTTP endpoint. 
+
+```json
+{
+  "mcpServers": {
+    "pyghidra": {
+      "command": "cmd",
+      "args": [
+        "/c",
+        "npx",
+        "-y",
+        "mcp-remote",
+        "http://127.0.0.1:8001/mcp",
+        "--transport",
+        "http-only",
+        "--allow-http"
+      ]
+    },
+    "oghidra-workflows": {
+      "command": "C:/path/to/oghidra-workflows/.venv/Scripts/python.exe",
+      "args": [
+        "C:/path/to/oghidra-workflows/main.py",
+        "--config",
+        "C:/path/to/oghidra-workflows/config.yaml"
+      ],
+      "env": {
+        "OGHIDRA_MODEL_API_KEY": "your-model-api-key"
+      }
+    }
+  }
 }
 ```
 
----
+Omit `env` if the process already inherits the needed key or no key is configured. Restart the host after editing its configuration. Starting `main.py` manually with no check flag leaves it waiting for stdio MCP input; it does not expose another HTTP port.
 
-## Acknowledgments
+First invoke `rename_current_function` with `{"apply": false}`. Then use `{"apply": true}` to perform a fresh analysis and rename. Applying is not a commit of the previous preview. Your host can separately connect directly to pyghidra-mcp and any other MCP services; those connections are not automatically lent to this workflow server.
 
-OGhidra builds upon excellent open-source projects:
+## What the workflow does
 
-- **[Ghidra](https://github.com/NationalSecurityAgency/ghidra)** - NSA's reverse engineering platform
-- **[Ollama](https://ollama.com/)** - Local LLM runtime
-- **[LaurieWired/GhidraMCP](https://github.com/LaurieWired/GhidraMCP)** - Original Ghidra MCP plugin
-- **[starsong/GhydraMCP](https://github.com/starsong/GhydraMCP)** - Enhanced MCP implementation
+1. Calls upstream `get_gui_context()` and captures the active program path, cursor address, and function name.
+2. Calls upstream `decompile_function(binary_name, name_or_address)` with the captured program and address. Addresses within functions are supported by upstream's containing-function lookup.
+3. Uses typed DSPy prediction for a name, analysis, behavioral summary, and rationale. Optional `dspy.ReAct` gathers additional evidence through `dspy.Tool.from_mcp_tool`, using the program/address in its task context.
+4. Rechecks the active program, cursor, and old name before writing.
+5. Calls upstream `rename_function(binary_name, name_or_address, new_name)` exactly once.
+6. Validates the structured rename receipt and reads the GUI context again. Only matching receipt and read-back return `status="renamed"`.
 
----
+The result includes the captured `binary_name` and `address` (cursor address, not necessarily the entry point). After a rename receipt, `function_entry_address` contains the entry point reported by upstream. Structured response models validate the required fields. There is no parsing of old `Function: NAME at ADDRESS` text, no invented function identity, and no compatibility layer for LaurieWired tools.
 
-## License
+Return statuses are `proposed`, `unchanged`, `renamed`, and `verification_failed`. Pre-write errors are MCP tool errors. An uncertain write is never retried automatically. Keep the cursor on the selected function until the call finishes: moving after a successful write can prevent GUI read-back verification and therefore returns `verification_failed`. Inspect Ghidra before retrying. This is a live program edit; save the program through Ghidra as usual.
 
-OGhidra is distributed under the terms of the BSD 3-Clause license with a commercial license alternative.
+The upstream tools do not offer an atomic compare-and-rename operation. Pre-write checks detect observed selection changes, but cannot prevent another client editing or replacing a program between calls. The program path is now explicitly part of every decompile/write request. Calls in one workflow process are serialized.
 
-See [LICENSE](LICENSE) and [NOTICE.md](NOTICE.md) for details.
+## Typed configuration and tool extensibility
 
-**LLNL-CODE-2013290**
+`load_config(Path(...)) -> AppConfig` accepts YAML and JSON. Nested Pydantic models use `strict=True` and `extra="forbid"`; unknown fields and stringified numbers/booleans fail at startup. `config.lm.model` and `config.max_iters` are typed attributes. Transport is a discriminated union of stdio and HTTP settings. Models block field reassignment, but nested containers are not deeply immutable; treat config as read-only.
 
----
+```bash
+python main.py --schema > config.schema.json
+```
 
-## Support
+The YAML example links this generated schema for editor validation. The Python models remain the single source of truth. Static types help Python callers; validation of external YAML values still happens at load time.
 
-- **Issues**: [GitHub Issues](https://github.com/LLNL/OGhidra/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/LLNL/OGhidra/discussions)
-- **Just Email Me Directly**: enochsurge@gmail.com
+Additional MCP servers can be added to `mcp_servers`. `evidence_tools` lists their trusted read-only tools available to the DSPy investigation; upstream discovery supplies descriptions and parameter schemas. Internal DSPy names are `server__tool` to avoid collisions. The list is not a sandbox: tools have the effects their upstream implementation provides. Workflow writes are deterministic, outside ReAct.
+
+## DSPy optimization
+
+`examples/optimize.py` compiles the naming predictor using `BootstrapFewShot` and analyst-reviewed JSONL. Each row contains `function_name`, `decompiled_code`, `related_context`, and a `proposal` object with `suggested_name`, `analysis`, `behavior_summary`, and `rationale`. Use held-out binaries to avoid duplicate leakage:
+
+```bash
+python examples/optimize.py config.yaml train.jsonl heldout.jsonl predictor.json
+```
+
+Set `compiled_predictor` to the saved JSON path, relative to the config file. The script evaluates exact accepted-name matches; extend the metric for multiple acceptable names. This trains naming from supplied evidence, not evidence gathering. No trained artifact or naming-quality claim is bundled.
+
+## Scope, dependencies, and validation
+
+Runtime source consists of typed configuration, standard MCP connections, the DSPy workflow, and MCP entry points. There is no GUI implementation, provider wrapper, custom agent loop, RAG, or Ghidra backend in this repository. Upstream pyghidra-mcp itself includes ChromaDB/indexing dependencies; using this backend does not eliminate those third-party dependencies. Keep it in its own environment. For enclaves, stage approved dependencies and upstream model/indexing assets and configure internal endpoints; the workflow is not a claim that all third-party dependencies are network-free.
+
+The backend contract was inspected in the published **pyghidra-mcp 0.2.7 wheel**, specifically `mcp_tools.py`, `models.py`, `tools.py`, and `gui_context.py`. The README's abbreviated API listing can lag the code (for example, `get_gui_context`). The decompiler's `name` field is a filename-like label, so the workflow uses GUI context for the real function name; it also rejects code/error responses lacking a successful signature.
+
+```bash
+pytest -q
+```
+
+Tests cover strict config, typed DSPy outputs, MCP discovery, native ReAct tool calls, and both stdio and Streamable HTTP backend sessions. The full host → workflow stdio → simulated PyGhidra-MCP HTTP path is tested. Ghidra behavior and LM responses are fixtures. Actual JVM/GUI integration and naming quality still require a live test in your environment. DSPy 3.3.1 and MCP Python SDK 1.30.0 are pinned; `constraints-tested.txt` records the workflow test environment, not the separately installed backend.
+
+## Sources and license
+
+- PyGhidra-MCP: https://github.com/clearbluejar/pyghidra-mcp
+- Inspected release: https://pypi.org/project/pyghidra-mcp/0.2.7/
+- DSPy MCP: https://dspy.ai/learn/programming/mcp/
+- DSPy language models: https://dspy.ai/learn/programming/language_models/
+- Official MCP Python SDK v1: https://github.com/modelcontextprotocol/python-sdk/tree/v1.x
+
+The rename product derives from the supplied OGhidra archive's GUI rename workflow and typed `AnalyzeFunction` signature. `LICENSE` is retained verbatim from that archive, including its commercial-use terms. No upstream backend source is bundled.

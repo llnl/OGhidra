@@ -1,47 +1,22 @@
-[project]
-name = "oghidra"
-dynamic = ["version"]
-description = "AI-Powered Reverse Engineering with Ghidra - Bridge LLMs via Ollama with Ghidra for natural language binary analysis"
-readme = "README.md"
-requires-python = ">=3.12"
-license = {text = "BSD-3-Clause"}
-authors = [
-    {name = "ezrealenoch", email = "enochsurge@gmail.com"}
-]
-keywords = ["ghidra", "reverse-engineering", "llm", "ollama", "binary-analysis", "ai", "security"]
-
-dependencies = [
-    "dspy>=3.3.1,<3.4",
-    "flask>=3.0.3,<3.1",
-    "httpx>=0.24.0",
-    "ijson>=3.2.0",               # Optional: for streaming large JSON files (large sessions)
-    "matplotlib-stubs>=0.3.11" ,  # Optional: For making mypy type checker satisfied.
-    "numpy>=1.24.0",              # Required: for vector operations with Ollama embeddings
-    "psutil>=5.9.0",              # For system memory and CPU statistics in system information
-    "pydantic-settings>=2.2.1",
-    "pydantic>=2.7.1",
-    "python-dotenv>=1.0.0",
-    "requests>=2.26.0",
-    "rich>=13.7.1",               # For enhanced terminal output in interactive mode
-    "tenacity>=9.0.0",
-    "ttkbootstrap>=1.10.0", # Modern dark themes with rounded corners for UI
-    "pyghidra>=3.0.2",
-]
-
-[project.urls]
-Homepage = "https://github.com/llnl/OGhidra"
-Repository = "https://github.com/llnl/OGhidra"
-Issues = "https://github.com/llnl/OGhidra/issues"
-
 [build-system]
-requires = ["hatchling", "hatch-vcs"]
+requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-[tool.hatch.version]
-source = "vcs"
+[project]
+name = "oghidra-workflows"
+version = "0.2.0"
+description = "DSPy reverse-engineering workflows exposed through MCP"
+requires-python = ">=3.12"
+readme = "README.md"
+license = {file = "LICENSE"}
+dependencies = ["dspy[mcp]==3.3.1", "mcp==1.30.0", "pydantic>=2.11,<3", "PyYAML>=6,<7"]
 
-[tool.hatch.build.targets.wheel]
-packages = ["src"]
+[project.optional-dependencies]
+test = ["pytest>=8,<10", "pytest-asyncio>=1,<2"]
 
-[tool.ruff]
-line-length = 128
+[project.scripts]
+oghidra-workflows = "oghidra_workflows.server:main"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

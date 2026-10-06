@@ -1,0 +1,222 @@
+{
+  "$defs": {
+    "HttpServerConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "transport": {
+          "enum": [
+            "sse",
+            "streamable-http"
+          ],
+          "title": "Transport",
+          "type": "string"
+        },
+        "url": {
+          "format": "uri",
+          "minLength": 1,
+          "title": "Url",
+          "type": "string"
+        },
+        "evidence_tools": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Evidence Tools",
+          "type": "array"
+        }
+      },
+      "required": [
+        "transport",
+        "url"
+      ],
+      "title": "HttpServerConfig",
+      "type": "object"
+    },
+    "LMConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "model": {
+          "minLength": 1,
+          "title": "Model",
+          "type": "string"
+        },
+        "api_base": {
+          "anyOf": [
+            {
+              "format": "uri",
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Api Base"
+        },
+        "api_key_env": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Api Key Env"
+        },
+        "cache": {
+          "default": false,
+          "title": "Cache",
+          "type": "boolean"
+        },
+        "max_tokens": {
+          "default": 4096,
+          "exclusiveMinimum": 0,
+          "title": "Max Tokens",
+          "type": "integer"
+        },
+        "temperature": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Temperature"
+        },
+        "timeout": {
+          "default": 120.0,
+          "exclusiveMinimum": 0,
+          "title": "Timeout",
+          "type": "number"
+        },
+        "num_retries": {
+          "default": 3,
+          "minimum": 0,
+          "title": "Num Retries",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "model"
+      ],
+      "title": "LMConfig",
+      "type": "object"
+    },
+    "StdioServerConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "transport": {
+          "const": "stdio",
+          "default": "stdio",
+          "title": "Transport",
+          "type": "string"
+        },
+        "command": {
+          "minLength": 1,
+          "title": "Command",
+          "type": "string"
+        },
+        "args": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Args",
+          "type": "array"
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Env",
+          "type": "object"
+        },
+        "evidence_tools": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Evidence Tools",
+          "type": "array"
+        }
+      },
+      "required": [
+        "command"
+      ],
+      "title": "StdioServerConfig",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "lm": {
+      "$ref": "#/$defs/LMConfig"
+    },
+    "mcp_servers": {
+      "patternProperties": {
+        "^[A-Za-z][A-Za-z0-9_]*$": {
+          "discriminator": {
+            "mapping": {
+              "sse": "#/$defs/HttpServerConfig",
+              "stdio": "#/$defs/StdioServerConfig",
+              "streamable-http": "#/$defs/HttpServerConfig"
+            },
+            "propertyName": "transport"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/StdioServerConfig"
+            },
+            {
+              "$ref": "#/$defs/HttpServerConfig"
+            }
+          ]
+        }
+      },
+      "required": [
+        "ghidra"
+      ],
+      "title": "Mcp Servers",
+      "type": "object"
+    },
+    "max_iters": {
+      "default": 6,
+      "exclusiveMinimum": 0,
+      "title": "Max Iters",
+      "type": "integer"
+    },
+    "log_level": {
+      "default": "INFO",
+      "title": "Log Level",
+      "type": "string",
+      "enum": ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+    },
+    "compiled_predictor": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Compiled Predictor"
+    }
+  },
+  "required": [
+    "lm",
+    "mcp_servers"
+  ],
+  "title": "AppConfig",
+  "type": "object"
+}

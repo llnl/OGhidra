@@ -1,0 +1,16 @@
+// Load this into claude or whatever client you are using.
+{
+  "mcpServers": {
+    "pyghidra": {
+      "type": "http",
+      "url": "http://127.0.0.1:8001/mcp"
+    },
+    "oghidra": {
+      "type": "stdio",
+      "command": "C:/!dev/OGhidra/.venv/Scripts/python.exe",
+      "args": [
+        "C:/!dev/OGhidra/main.py"
+      ]
+    }
+  }
+}

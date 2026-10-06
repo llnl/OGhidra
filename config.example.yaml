@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=./config.schema.json
+lm:
+  model: gemma4:3b
+  api_base: http://127.0.0.1:8000/v1
+  api_key_env: OGHIDRA_MODEL_API_KEY
+  cache: false
+  max_tokens: 4096
+
+max_iters: 6
+
+# pyghidra-mcp owns the GUI and serves MCP directly
+# Port 8001 avoids the example LM endpoint on port 8000.
+mcp_servers:
+  ghidra:
+    transport: streamable-http
+    url: http://127.0.0.1:8001/mcp
+    evidence_tools:
+      - decompile_function
+      - list_xrefs
