@@ -17,7 +17,7 @@ async def test_dspy_react_calls_native_mcp_tool():
             "transport": "stdio",
             "command": sys.executable,
             "args": [str(Path(__file__).with_name("fake_ghidra.py"))],
-            "evidence_tools": ["get_xrefs_to"],
+            "evidence_tools": ["list_xrefs"],
         }
     }
     config = AppConfig.model_validate(
@@ -28,8 +28,11 @@ async def test_dspy_react_calls_native_mcp_tool():
             [
                 {
                     "next_thought": "Inspect callers",
-                    "next_tool_name": "ghidra__get_xrefs_to",
-                    "next_tool_args": {"address": "401000"},
+                    "next_tool_name": "ghidra__list_xrefs",
+                    "next_tool_args": {
+                        "binary_name": "/app.exe",
+                        "name_or_address": "00401008",
+                    },
                 },
                 {
                     "next_thought": "Enough evidence",
@@ -43,5 +46,5 @@ async def test_dspy_react_calls_native_mcp_tool():
             result = await dspy.ReAct(GatherEvidence, tools=tools).acall(
                 target="FUN_00401000 at 401000", decompiled_code="return x+1;"
             )
-        assert "No callers" in str(result.trajectory)
+        assert "cross_references" in str(result.trajectory)
         assert result.evidence == "No callers"

@@ -1,4 +1,3 @@
-// Load this into claude or whatever client you are using.
 {
   "mcpServers": {
     "pyghidra": {
@@ -10,7 +9,10 @@
       "command": "C:/!dev/OGhidra/.venv/Scripts/python.exe",
       "args": [
         "C:/!dev/OGhidra/main.py"
-      ]
+      ],
+      "env": {
+        "OGHIDRA_MODEL_API_KEY": "your-model-api-key"
+      }
     }
   }
 }

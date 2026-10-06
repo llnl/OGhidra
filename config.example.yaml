@@ -17,3 +17,9 @@ mcp_servers:
     evidence_tools:
       - decompile_function
       - list_xrefs
+
+# Application and MCP workflow diagnostics (stderr + rotating JSON file).
+log_level: DEBUG
+log_file: logs/oghidra-{pid}.jsonl
+log_max_bytes: 5000000
+log_backup_count: 3

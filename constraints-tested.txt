@@ -79,3 +79,4 @@ urllib3==2.8.0
 uvicorn==0.54.0
 yarl==1.25.1
 zipp==4.1.1
+python-json-logger==4.2.0

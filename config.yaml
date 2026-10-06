@@ -1,7 +1,8 @@
 # yaml-language-server: $schema=./config.schema.json
 lm:
-  model: gemma4:3b
-  api_base: http://127.0.0.1:8000/v1
+  model: claude-sonnet-4.5
+  api_base: <URL to your AI server>
+  api_key_env: OGHIDRA_MODEL_API_KEY
   cache: false
   max_tokens: 4096
 

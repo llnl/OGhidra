@@ -195,9 +195,40 @@
     },
     "log_level": {
       "default": "INFO",
+      "enum": [
+        "DEBUG",
+        "INFO",
+        "WARNING",
+        "ERROR",
+        "CRITICAL"
+      ],
       "title": "Log Level",
-      "type": "string",
-      "enum": ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+      "type": "string"
+    },
+    "log_file": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": "logs/oghidra-{pid}.jsonl",
+      "title": "Log File"
+    },
+    "log_max_bytes": {
+      "default": 5000000,
+      "exclusiveMinimum": 0,
+      "title": "Log Max Bytes",
+      "type": "integer"
+    },
+    "log_backup_count": {
+      "default": 3,
+      "minimum": 1,
+      "title": "Log Backup Count",
+      "type": "integer"
     },
     "compiled_predictor": {
       "anyOf": [

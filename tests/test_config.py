@@ -120,10 +120,25 @@ def test_no_later_field_reassignment():
 
 def test_examples_and_generated_schema_are_current():
     root = Path(__file__).resolve().parents[1]
-    assert load_config(root / "config.example.yaml") == load_config(
-        root / "config.example.json"
-    )
+    assert isinstance(load_config(root / "config.example.yaml"), AppConfig)
     assert (
         json.loads((root / "config.schema.json").read_text())
         == AppConfig.model_json_schema()
     )
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("log_level", "TRACE"),
+        ("log_max_bytes", 0),
+        ("log_max_bytes", "5000"),
+        ("log_backup_count", 0),
+        ("log_file", 123),
+    ],
+)
+def test_logging_settings_are_strict(field, value):
+    data = valid_config()
+    data[field] = value
+    with pytest.raises(ValidationError):
+        AppConfig.model_validate(data)

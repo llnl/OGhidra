@@ -12,7 +12,11 @@ ServerName = Annotated[str, Field(pattern=r"^[A-Za-z][A-Za-z0-9_]*$")]
 
 class ConfigModel(BaseModel):
     model_config = ConfigDict(
-        extra="forbid", strict=True, frozen=True, allow_inf_nan=False
+        extra="forbid",
+        strict=True,
+        frozen=True,
+        allow_inf_nan=False,
+        hide_input_in_errors=True,
     )
 
 
@@ -55,6 +59,9 @@ class AppConfig(ConfigModel):
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field(
         default="INFO"
     )
+    log_file: NonemptyString | None = "logs/oghidra-{pid}.jsonl"
+    log_max_bytes: int = Field(default=5_000_000, gt=0)
+    log_backup_count: int = Field(default=3, ge=1)
     compiled_predictor: NonemptyString | None = None
 
     @model_validator(mode="after")

@@ -8,8 +8,11 @@ from mcp import ClientSession
 from mcp.types import CallToolResult, Tool
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
+from .diagnostics import logger, operation
+
 
 class Proposal(BaseModel):
+    model_config = ConfigDict(hide_input_in_errors=True)
     suggested_name: str = Field(pattern=r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
     analysis: str
     behavior_summary: str
@@ -69,29 +72,31 @@ class RenameProgram(dspy.Module):
     async def aforward(self, function_name, address, decompiled_code, binary_name):
         context = ""
         if self.investigate is not None:
-            gathered = await self.investigate.acall(
-                target=f"binary_name={binary_name!r}; function={function_name!r}; address={address!r}",
-                decompiled_code=decompiled_code,
-            )
+            with operation("dspy.evidence"):
+                gathered = await self.investigate.acall(
+                    target=f"binary_name={binary_name!r}; function={function_name!r}; address={address!r}",
+                    decompiled_code=decompiled_code,
+                )
             context = gathered.evidence
-        return await self.analyze.acall(
-            function_name=function_name,
-            decompiled_code=decompiled_code,
-            related_context=context,
-        )
+        with operation("dspy.propose_name"):
+            return await self.analyze.acall(
+                function_name=function_name,
+                decompiled_code=decompiled_code,
+                related_context=context,
+            )
 
 
 class GuiContext(BaseModel):
     """Required subset of pyghidra-mcp's GUI response; additive fields are allowed."""
 
-    model_config = ConfigDict(strict=True)
+    model_config = ConfigDict(strict=True, hide_input_in_errors=True)
     active_program: str = Field(min_length=1)
     active_address: str = Field(min_length=1)
     active_function: str = Field(min_length=1)
 
 
 class Decompilation(BaseModel):
-    model_config = ConfigDict(strict=True)
+    model_config = ConfigDict(strict=True, hide_input_in_errors=True)
     name: str
     code: str
     signature: str | None = None
@@ -99,7 +104,7 @@ class Decompilation(BaseModel):
 
 
 class RenameReceipt(BaseModel):
-    model_config = ConfigDict(strict=True)
+    model_config = ConfigDict(strict=True, hide_input_in_errors=True)
     binary_name: str
     address: str = Field(min_length=1)
     old_name: str
@@ -131,39 +136,55 @@ async def rename_current(
             "Use pyghidra-mcp 0.2.7 with --gui --transport streamable-http."
         )
     try:
-        target = GuiContext.model_validate(
-            result_data(await session.call_tool("get_gui_context", {}))
-        )
+        with operation("ghidra.get_gui_context"):
+            target = GuiContext.model_validate(
+                result_data(await session.call_tool("get_gui_context", {}))
+            )
     except ValueError as exc:
         raise ValueError(
             "Select a function in the Ghidra GUI launched by pyghidra-mcp"
         ) from exc
+    logger.info(
+        "workflow.target_selected",
+        extra={
+            "binary_name": target.active_program,
+            "address": target.active_address,
+            "function_name": target.active_function,
+        },
+    )
     # active_address can be inside a function. Upstream resolves the containing
     # function, so names (which can be ambiguous) are never used as write targets.
     arguments = {
         "binary_name": target.active_program,
         "name_or_address": target.active_address,
     }
-    data = result_data(await session.call_tool("decompile_function", arguments))
-    # FastMCP represents a list return value as {"result": [...]}.
-    if isinstance(data, dict) and "result" in data:
-        data = data["result"]
-    functions = TypeAdapter(list[Decompilation]).validate_python(data)
-    if len(functions) != 1:
-        raise ValueError("Expected exactly one decompiled function")
-    function = functions[0]
-    if function.error or not function.code.strip() or not function.signature:
-        # Upstream can return a decompiler error as code with signature=None.
-        raise RuntimeError(
-            f"Decompilation failed: {function.error or function.code or 'empty response'}"
-        )
-    prediction = await program.acall(
-        function_name=target.active_function,
-        address=target.active_address,
+    with operation(
+        "ghidra.decompile_function",
+        mcp_server="ghidra",
         binary_name=target.active_program,
-        decompiled_code=function.code,
-    )
-    proposal = Proposal.model_validate(prediction.proposal)
+        address=target.active_address,
+    ):
+        data = result_data(await session.call_tool("decompile_function", arguments))
+        # FastMCP represents a list return value as {"result": [...]}.
+        if isinstance(data, dict) and "result" in data:
+            data = data["result"]
+        functions = TypeAdapter(list[Decompilation]).validate_python(data)
+        if len(functions) != 1:
+            raise ValueError("Expected exactly one decompiled function")
+        function = functions[0]
+        if function.error or not function.code.strip() or not function.signature:
+            # Upstream can return a decompiler error as code with signature=None.
+            raise RuntimeError(
+                f"Decompilation failed: {function.error or function.code or 'empty response'}"
+            )
+    with operation("dspy.rename_program"):
+        prediction = await program.acall(
+            function_name=target.active_function,
+            address=target.active_address,
+            binary_name=target.active_program,
+            decompiled_code=function.code,
+        )
+        proposal = Proposal.model_validate(prediction.proposal)
     result = RenameResult(
         status="proposed",
         binary_name=target.active_program,
@@ -172,32 +193,43 @@ async def rename_current(
         proposal=proposal,
     )
     if not apply:
-        return result
-    current = GuiContext.model_validate(
-        result_data(await session.call_tool("get_gui_context", {}))
-    )
-    if current != target:
-        raise RuntimeError(
-            "Program, cursor, or function name changed during analysis; rerun the workflow"
+        logger.info(
+            "workflow.proposal_ready", extra={"suggested_name": proposal.suggested_name}
         )
+        return result
+    with operation("ghidra.prewrite_check"):
+        current = GuiContext.model_validate(
+            result_data(await session.call_tool("get_gui_context", {}))
+        )
+        if current != target:
+            raise RuntimeError(
+                "Program, cursor, or function name changed during analysis; rerun the workflow"
+            )
     if proposal.suggested_name == target.active_function:
         result.status, result.observed_name = "unchanged", target.active_function
         return result
     # Do not retry a mutation when the response might have been lost.
     result.status = "verification_failed"
     try:
-        receipt = RenameReceipt.model_validate(
-            result_data(
-                await session.call_tool(
-                    "rename_function",
-                    {**arguments, "new_name": proposal.suggested_name},
+        with operation(
+            "ghidra.rename_function",
+            mcp_server="ghidra",
+            binary_name=target.active_program,
+            address=target.active_address,
+        ):
+            receipt = RenameReceipt.model_validate(
+                result_data(
+                    await session.call_tool(
+                        "rename_function",
+                        {**arguments, "new_name": proposal.suggested_name},
+                    )
                 )
             )
-        )
         result.function_entry_address = receipt.address
-        current = GuiContext.model_validate(
-            result_data(await session.call_tool("get_gui_context", {}))
-        )
+        with operation("ghidra.verify_rename"):
+            current = GuiContext.model_validate(
+                result_data(await session.call_tool("get_gui_context", {}))
+            )
         result.observed_name = current.active_function
         if (
             receipt.binary_name == target.active_program
@@ -209,8 +241,16 @@ async def rename_current(
         ):
             result.status = "renamed"
         else:
+            logger.warning(
+                "workflow.rename_verification_mismatch",
+                extra={
+                    "observed_name": current.active_function,
+                    "expected_name": proposal.suggested_name,
+                },
+            )
             result.detail = "Rename receipt or GUI read-back did not match; inspect Ghidra before retrying."
     except Exception as exc:
+        logger.exception("workflow.rename_outcome_uncertain")
         result.detail = (
             f"Write outcome uncertain; inspect Ghidra before retrying: {exc}"
         )
