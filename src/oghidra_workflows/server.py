@@ -1,5 +1,11 @@
 """MCP entry point. No provider-specific clients or Ghidra proxy endpoints."""
 
+import truststore
+
+# Use the operating system's certificate trust configuration.
+# Must run before importing DSPy, LiteLLM, or other HTTP clients.
+truststore.inject_into_ssl()
+
 import argparse
 import asyncio
 import logging
@@ -32,7 +38,12 @@ from .workflow import RenameProgram, RenameResult, rename_current
 
 
 def make_lm(config: LMConfig) -> dspy.LM:
-    kwargs = config.model_dump(mode="json", exclude={"api_key_env"}, exclude_none=True)
+    kwargs = config.model_dump(
+        mode="json",
+        exclude={"api_key_env"},
+        exclude_none=True,
+    )
+
     # Remove trailing slash from api_base to avoid double-slash issues with litellm
     if "api_base" in kwargs and kwargs["api_base"] is not None:
         api_base_str = str(kwargs["api_base"])
@@ -46,6 +57,11 @@ def make_lm(config: LMConfig) -> dspy.LM:
             )
         register_secret(key)
         kwargs["api_key"] = key
+    else:
+        # For self-hosted VLLM servers or other endpoints that don't require authentication,
+        # provide a dummy key that satisfies OpenAI client validation (must start with 'sk-').
+        # The server will ignore this key if authentication is not configured.
+        kwargs["api_key"] = "sk-no-key-required"
     if "/" not in config.model:
         logger.warning(
             "model.provider_prefix_missing",
@@ -54,6 +70,9 @@ def make_lm(config: LMConfig) -> dspy.LM:
                 "hint": "DSPy/LiteLLM may require a provider prefix, e.g. ollama_chat/MODEL or openai/MODEL",
             },
         )
+    # Pass ssl_verify to LiteLLM via DSPy LM kwargs
+    # Default to verification when omitted; preserve an explicit setting.
+    kwargs.setdefault("ssl_verify", True)
     with operation(
         "model.initialize",
         model=config.model,
@@ -125,9 +144,11 @@ def build_server(config: AppConfig) -> FastMCP:
                 if result.status == "verification_failed":
                     result.detail += f" [request_id={request_id}]"
                 logger.log(
-                    logging.WARNING
-                    if result.status == "verification_failed"
-                    else logging.INFO,
+                    (
+                        logging.WARNING
+                        if result.status == "verification_failed"
+                        else logging.INFO
+                    ),
                     "workflow.completed",
                     extra={"status": result.status},
                 )

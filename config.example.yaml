@@ -1,10 +1,38 @@
 # yaml-language-server: $schema=./config.schema.json
+# Copy this file to config.yaml and select your actual model and endpoint.
+# model uses DSPy/LiteLLM's <provider>/<exact model ID> format, not a URL.
+# Only the first prefix selects the API integration. Preserve all slashes
+# in the model ID returned by the server's /v1/models endpoint.
+# No separate provider field or application aliases are used.
 lm:
-  model: gemma4:3b
+  # Example: vLLM serving the exact ID "openai/gpt-oss-120b".
+  model: hosted_vllm/openai/gpt-oss-120b
   api_base: http://127.0.0.1:8000/v1
-  api_key_env: OGHIDRA_MODEL_API_KEY
+  # If authentication is required, uncomment and set this variable in the
+  # environment of the process launched by your MCP client (not just a shell).
+  # api_key_env: OGHIDRA_MODEL_API_KEY
+  ssl_verify: true
   cache: false
   max_tokens: 4096
+
+# Alternative model/endpoint pairs (replace the fields above):
+# Generic OpenAI-compatible API, same exact model ID:
+#   model: openai/openai/gpt-oss-120b
+#   api_base: http://127.0.0.1:8000/v1
+# OpenAI directly:
+#   model: openai/gpt-4o
+#   api_key_env: OPENAI_API_KEY
+#   Omit api_base to use the provider's default endpoint.
+# Anthropic directly (Claude):
+#   model: anthropic/claude-sonnet-4-5-20250929
+#   api_key_env: ANTHROPIC_API_KEY
+#   Omit api_base to use the provider's default endpoint.
+# Ollama native chat API:
+#   model: ollama_chat/llama3.2
+#   api_base: http://127.0.0.1:11434
+# Replace example model IDs with models available to your installation/account.
+# hosted_vllm/ is the hosted server integration.
+# api_base is a base URL: do not append /models or /chat/completions.
 
 max_iters: 6
 

@@ -35,8 +35,17 @@
     },
     "LMConfig": {
       "additionalProperties": false,
+      "description": "DSPy/LiteLLM settings; model is passed through without rewriting.",
       "properties": {
         "model": {
+          "description": "DSPy/LiteLLM identifier: <provider>/<exact model ID>. The first prefix selects the API integration; the remaining ID may contain slashes. This is not a URL. No aliases or prefix rewriting are applied. For a server ID openai/gpt-oss-120b, use hosted_vllm/openai/gpt-oss-120b or openai/openai/gpt-oss-120b.",
+          "examples": [
+            "openai/gpt-4o",
+            "anthropic/claude-sonnet-4-5-20250929",
+            "ollama_chat/llama3.2",
+            "hosted_vllm/openai/gpt-oss-120b",
+            "openai/openai/gpt-oss-120b"
+          ],
           "minLength": 1,
           "title": "Model",
           "type": "string"
@@ -53,6 +62,7 @@
             }
           ],
           "default": null,
+          "description": "API base URL, separate from model. For an OpenAI-compatible server, typically http://127.0.0.1:8000/v1; for native Ollama, http://127.0.0.1:11434. Do not append /models or /chat/completions. Omit to use the provider's default endpoint.",
           "title": "Api Base"
         },
         "api_key_env": {
@@ -66,6 +76,7 @@
             }
           ],
           "default": null,
+          "description": "Name of the environment variable containing this LM endpoint's API key, not the key itself. It must be available to the MCP server process. Omit for an endpoint that needs no key.",
           "title": "Api Key Env"
         },
         "cache": {
@@ -103,6 +114,12 @@
           "minimum": 0,
           "title": "Num Retries",
           "type": "integer"
+        },
+        "ssl_verify": {
+          "default": true,
+          "description": "Verify HTTPS server certificates. Keep true for internal servers too; certificate trust is configured by application startup (for example, truststore), not by this configuration model.",
+          "title": "Ssl Verify",
+          "type": "boolean"
         }
       },
       "required": [

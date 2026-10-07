@@ -21,14 +21,54 @@ class ConfigModel(BaseModel):
 
 
 class LMConfig(ConfigModel):
-    model: NonemptyString
-    api_base: AnyHttpUrl | None = None
-    api_key_env: NonemptyString | None = None
+    """DSPy/LiteLLM settings"""
+
+    model: NonemptyString = Field(
+        description=(
+            "DSPy/LiteLLM identifier: <provider>/<exact model ID>. The first "
+            "prefix selects the API integration; the remaining ID may contain "
+            "slashes. This is not a URL. No aliases or prefix rewriting are "
+            "applied. For a server ID openai/gpt-oss-120b, use "
+            "hosted_vllm/openai/gpt-oss-120b or openai/openai/gpt-oss-120b."
+        ),
+        examples=[
+            "openai/gpt-4o",
+            "anthropic/claude-sonnet-4-5-20250929",
+            "ollama_chat/llama3.2",
+            "hosted_vllm/openai/gpt-oss-120b",
+            "openai/openai/gpt-oss-120b",
+        ],
+    )
+    api_base: AnyHttpUrl | None = Field(
+        default=None,
+        description=(
+            "API base URL, separate from model. For an OpenAI-compatible "
+            "server, typically http://127.0.0.1:8000/v1; for native Ollama, "
+            "http://127.0.0.1:11434. Do not append /models or "
+            "/chat/completions. Omit to use the provider's default endpoint."
+        ),
+    )
+    api_key_env: NonemptyString | None = Field(
+        default=None,
+        description=(
+            "Name of the environment variable containing this LM endpoint's "
+            "API key, not the key itself. It must be available to the MCP "
+            "server process. Omit for an endpoint that needs no key."
+        ),
+    )
     cache: bool = False
     max_tokens: int = Field(default=4096, gt=0)
     temperature: float | None = Field(default=None, ge=0)
     timeout: float = Field(default=120.0, gt=0)
     num_retries: int = Field(default=3, ge=0)
+    ssl_verify: bool = Field(
+        default=True,
+        description=(
+            "Verify HTTPS server certificates. Keep true for internal servers "
+            "too; certificate trust is configured by application startup "
+            "(for example, truststore), not by this configuration model."
+        ),
+    )
 
 
 class StdioServerConfig(ConfigModel):

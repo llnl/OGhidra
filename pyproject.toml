@@ -9,10 +9,10 @@ description = "DSPy reverse-engineering workflows exposed through MCP"
 requires-python = ">=3.12"
 readme = "README.md"
 license = {file = "LICENSE"}
-dependencies = ["dspy[mcp]==3.3.1", "mcp==1.30.0", "pydantic>=2.11,<3", "PyYAML>=6,<7", "python-json-logger>=3,<5", "pyghidra-mcp"]
+dependencies = ["dspy[mcp]==3.3.1", "mcp==1.30.0", "pydantic>=2.11,<3", "PyYAML>=6,<7", "python-json-logger>=3,<5", "pyghidra-mcp", "truststore"]
 
 [project.optional-dependencies]
-test = ["pytest>=8,<10", "pytest-asyncio>=1,<2"]
+test = ["pytest>=8,<10", "pytest-asyncio>=1,<2", "ruff"]
 
 [project.scripts]
 oghidra-workflows = "oghidra_workflows.server:main"

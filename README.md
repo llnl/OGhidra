@@ -77,14 +77,9 @@ upstream process's logs alongside the last OGhidra stage. This implementation
 uses standard `logging`, `RotatingFileHandler`, `python-json-logger`, and DSPy's
 callback API, with no external logging service.
 
-The uploaded `mcp.json` does not parse as JSON as supplied; this logging update
-preserves it rather than guessing at the intended client format. The configured
-model identifier `gemma4:3b` also has no provider prefix. A warning points this
-out without changing model selection. For an Ollama native endpoint, the usual
-DSPy model identifier is `ollama_chat/gemma4:3b`; for an OpenAI-compatible endpoint,
-use `openai/gemma4:3b` and that service's API base. Confirm which endpoint you run.
 A client-side configuration error can prevent OGhidra from being launched at all;
-in that case there will be no new OGhidra log.
+in that case there will be no new OGhidra log. For model identifier and endpoint
+configuration, see the model connection instructions below.
 
 
 One product: `rename_current_function(apply=True)`, implemented with DSPy and exposed through MCP. This version uses **clearbluejar/pyghidra-mcp 0.2.7** to launch the Ghidra GUI and serve MCP over Streamable HTTP. LaurieWired's extension and Python bridge are not used.
@@ -138,15 +133,85 @@ mcp_servers:
       - list_xrefs
 ```
 
-The `lm` section configures DSPy's own model connection; it does not inherit the host client's model. `api_key_env` names an environment variable; remove it for a service that needs no explicit key. All model access goes through `dspy.LM`, without provider-specific code.
+### Model connection: provider prefix, model ID, and URL
 
-| Service | `lm.model` | `lm.api_base` |
-| --- | --- | --- |
-| OpenAI | `openai/YOUR_MODEL` | Omit |
-| Ollama | `ollama_chat/YOUR_MODEL` | `http://127.0.0.1:11434` |
-| vLLM / compatible local endpoint | `openai/YOUR_SERVED_MODEL` | `http://127.0.0.1:8000/v1` |
+The `lm` section configures DSPy's own model connection; it does not inherit the
+host client's model. OGhidra passes `lm.model` directly to `dspy.LM` without
+aliases, automatic prefix insertion/removal, or provider-specific parsing.
+There is no separate `provider` configuration field.
 
-Supported LM fields: `model`, `api_base`, `api_key_env`, `cache`, `max_tokens`, `temperature`, `timeout`, and `num_retries`. Add explicit typed fields when more settings are needed; arbitrary options are rejected.
+Use DSPy/LiteLLM's format:
+
+```text
+<LiteLLM provider>/<exact model identifier>
+```
+
+The first prefix selects the API integration, not necessarily the model's
+publisher. The remainder is the model ID and can itself contain slashes.
+`model` is not a URL; `api_base` is the separate API base URL. An ID returned by
+`/v1/models` is not necessarily a complete DSPy model string.
+
+For example, if your server returns `"id": "openai/gpt-oss-120b"`, configure:
+
+```yaml
+lm:
+  model: hosted_vllm/openai/gpt-oss-120b
+  api_base: https://your-model-server.example/v1
+  ssl_verify: true
+  # Uncomment when the endpoint requires authentication:
+  # api_key_env: OGHIDRA_MODEL_API_KEY
+```
+
+`hosted_vllm/` selects LiteLLM's hosted vLLM integration. Use this prefix for
+hosted vLLM; `vllm/` is the deprecated local SDK integration. The generic
+OpenAI-compatible integration also works with this server: set
+`model: openai/openai/gpt-oss-120b`. The first `openai/` selects the integration;
+the second is part of the server's literal ID. Do not deduplicate them.
+
+| API integration | Exact model ID (example) | `lm.model` | `lm.api_base` |
+| --- | --- | --- | --- |
+| OpenAI directly | `gpt-4o` | `openai/gpt-4o` | Omit |
+| Anthropic directly | `claude-sonnet-4-5-20250929` | `anthropic/claude-sonnet-4-5-20250929` | Omit |
+| Native Ollama chat | `llama3.2` | `ollama_chat/llama3.2` | `http://127.0.0.1:11434` |
+| Hosted vLLM | `openai/gpt-oss-120b` | `hosted_vllm/openai/gpt-oss-120b` | `http://127.0.0.1:8000/v1` |
+| Generic OpenAI-compatible API | `openai/gpt-oss-120b` | `openai/openai/gpt-oss-120b` | `http://127.0.0.1:8000/v1` |
+| Generic OpenAI-compatible API | `mistralai/Devstral-2-123B-Instruct-2512` | `openai/mistralai/Devstral-2-123B-Instruct-2512` | Your server's API base |
+
+Model IDs above are examples, not availability guarantees. Use the exact ID
+provided by your service. Other LiteLLM integrations use their documented
+prefixes and endpoint settings; no OGhidra alias list is needed. Keep all parts
+of the server model ID, including organization names and tags.
+
+For OpenAI-compatible services, `api_base` typically ends in `/v1`. Do not
+append `/models` or `/chat/completions`; the client adds the request endpoint.
+For native Ollama, use its base URL without `/v1` as shown above.
+
+`api_key_env` is an environment variable **name**, not the secret value. For
+an authenticated endpoint, set it explicitly and make sure that variable is
+available to the MCP server launched by your client. For example, use
+`api_key_env: ANTHROPIC_API_KEY` for a direct Anthropic connection. Omit it for
+an endpoint that needs no key. When comparing curl with OGhidra, use the same
+base URL and credentials. Restart the workflow MCP server after config changes.
+
+Keep `ssl_verify: true`, including on internal HTTPS endpoints. When the server
+entry point initializes `truststore` before importing DSPy and HTTP clients,
+verification uses system trust on Windows and Linux. Setting this flag alone
+does not initialize truststore. Certificates must be trusted in the account
+and environment running the process; WSL and containers have separate trust
+configuration from the Windows host.
+
+If a request fails with "Invalid model name", compare the model ID in the
+server's error with the exact `/v1/models` ID. For the example above, an error
+showing only `gpt-oss-120b` means the model namespace was consumed as the routing
+prefix: use `hosted_vllm/openai/gpt-oss-120b` or
+`openai/openai/gpt-oss-120b`. A successful `/models` request alone does not test
+chat completion access.
+
+Supported LM fields: `model`, `api_base`, `api_key_env`, `cache`, `max_tokens`,
+`temperature`, `timeout`, `num_retries`, and `ssl_verify`. Add explicit typed
+fields when more settings are needed; arbitrary options are rejected. Config
+validation checks field types, not whether a remote model exists or accepts
+the selected generation parameters.
 
 ## Connect Your Client
 
@@ -242,6 +307,8 @@ Tests cover strict config, typed DSPy outputs, MCP discovery, native ReAct tool 
 - Inspected release: https://pypi.org/project/pyghidra-mcp/0.2.7/
 - DSPy MCP: https://dspy.ai/learn/programming/mcp/
 - DSPy language models: https://dspy.ai/learn/programming/language_models/
+- LiteLLM hosted vLLM: https://docs.litellm.ai/docs/providers/vllm
+- LiteLLM OpenAI-compatible endpoints: https://docs.litellm.ai/docs/providers/openai_compatible
 - Official MCP Python SDK v1: https://github.com/modelcontextprotocol/python-sdk/tree/v1.x
 
 The rename product derives from the supplied OGhidra archive's GUI rename workflow and typed `AnalyzeFunction` signature. `LICENSE` is retained verbatim from that archive, including its commercial-use terms. No upstream backend source is bundled.
