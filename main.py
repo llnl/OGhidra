@@ -12,7 +12,7 @@ if __name__ == "__main__":
         pass  # Some IDE stderr streams have no file descriptor.
 
     try:
-        from oghidra_workflows.server import main
+        from src.oghidra_workflows.server import main
 
         main()
     except Exception:
