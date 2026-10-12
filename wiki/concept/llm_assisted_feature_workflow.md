@@ -5,6 +5,11 @@ confidence: medium
 grounded_by: []
 policy: agent-editable
 last_validated: 2026-10-12
+status: active
+owners: team-reverse-engineering
+code_refs: AGENTS.md | wiki/decision/feature_work_artifacts.md
+stability: stable
+last_verified: 2026-10-12
 tags: [workflow, llm, requirements, design, testing]
 ---
 

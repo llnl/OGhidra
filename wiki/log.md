@@ -18,3 +18,11 @@ Pages created: knowledge_schema/knowledge-json-concept.md
 Pages updated: knowledge_schema/function-signatures-json.md, knowledge_schema/common-workflows-json.md, index.md
 Contradictions flagged: none
 Notes: Documented the convention-based loader contract, source/cache boundary, retrieval behavior, extension procedures, and validation limitations from the live CAG implementation.
+
+## [2026-10-12] ingest | Repository-wide architecture and operations
+
+Pages created: best_practice/security-and-privacy.md, module/session-memory-and-cag.md
+Pages updated: architecture/oghidra-end-to-end-data-flow.md, module/python-orchestration.md, concept/mcp-in-oghidra.md, concept/feature_work_template.md, concept/llm_assisted_feature_workflow.md, workflow/analyze-a-binary.md, workflow/extend-knowledge-json.md, integration/maintained-ghidra-plugin.md, decision/deprecate-java-ghidra-plugin.md, decision/feature_work_artifacts.md, benchmark/evaluation-infrastructure.md, deployment/docker-and-release.md, best_practice/using-oghidra-for-binary-analysis.md, index.md
+Pages removed: tmp.md
+Contradictions flagged: README recommends Ghidra 12.0.3 while Dockerfile pins Ghidra 12.1; README/build script reference absent OGhidraMCP Gradle sources while live Python code supports HTTP and PyGhidra backends.
+Notes: Documented runtime data flow, backend boundaries, MCP, orchestration, analysis workflow, benchmark semantics, deployment, security, and remaining maturity/verification limits.
