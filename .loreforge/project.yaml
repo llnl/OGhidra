@@ -1,0 +1,225 @@
+schema_version: 1
+catalog_version: 1
+project:
+  project_name: OGhidra
+  project_description: OGhidra connects large language models to Ghidra to enable
+    conversational and automated reverse engineering of binary programs.
+  host_repo: .
+  primary_repo: .
+  sibling_repos: []
+  domain_context: OGhidra is an AI-assisted reverse-engineering system built around
+    Python orchestration, MCP-based interaction, Ghidra analysis workflows, and structured
+    knowledge about tools and function signatures. This wiki exists primarily to help
+    developers navigate the codebase, understand end-to-end binary-analysis data flow,
+    and safely extend the orchestration and knowledge layers. It should also preserve
+    evaluation practices and, over time, document best practices for using OGhidra
+    effectively.
+  page_types:
+  - tension
+  - decision
+  - concept
+  - architecture
+  - workflow
+  - module
+  - knowledge_schema
+  - integration
+  - benchmark
+  - deployment
+  - best_practice
+  extra_frontmatter_fields:
+  - name: status
+    example: draft | active | deprecated
+    default: draft
+    description: Lifecycle state of the wiki page.
+  - name: owners
+    example: team-reverse-engineering | maintainer-handle
+    default: team-reverse-engineering
+    description: People or team responsible for keeping the page accurate.
+  - name: code_refs
+    example: src/cag/knowledge/common_workflows.json | pyproject.toml
+    default: ''
+    description: Repository paths that substantiate or implement the documented behavior.
+  - name: stability
+    example: experimental | stable | deprecated
+    default: experimental
+    description: Expected stability of the documented interface, workflow, or behavior.
+  - name: last_verified
+    example: '2026-10-12'
+    default: ''
+    description: Date when the page was last checked against the repository.
+  example_tags:
+  - reverse-engineering
+  - binary-analysis
+  - python
+  - mcp
+  - llm-orchestration
+  - ghidra
+  - knowledge-base
+  - function-signatures
+  - benchmarks
+  - deprecated-java
+  key_questions:
+  - What is the end-to-end data flow from an MCP or LLM request through Python orchestration,
+    Ghidra analysis, tool invocation, and the returned result?
+  - Which Python modules own orchestration, tool discovery, workflow execution, state
+    management, and translation between LLM-facing and Ghidra-facing representations?
+  - How are common workflows and function signatures represented, validated, loaded,
+    selected, and extended in the knowledge JSON files?
+  - Which parts of the Java/Gradle Ghidra plugin are still required during the transition
+    to the maintained Ghidra plugin, and what is the deprecation or removal plan?
+  - How do tests and benchmark evaluations measure correctness, usefulness, latency,
+    and failure modes in AI-assisted binary analysis?
+  - What assumptions, limitations, and safety practices should developers follow when
+    using OGhidra to analyze binaries?
+  reasoning_lint_checks:
+  - Every architecture or workflow claim must cite the relevant Python module, configuration
+    file, schema, test, or documented entry point.
+  - Distinguish observed repository behavior from inferred LLM behavior, planned changes,
+    and recommended best practices.
+  - Knowledge JSON documentation must identify the schema shape, required fields,
+    valid values, loading path, and at least one concrete repository example.
+  - Do not present the Java/Gradle plugin as the long-term integration path; mark
+    claims about it as transitional or deprecated where appropriate.
+  - Document data transformations and boundaries between the LLM, MCP layer, Python
+    orchestration, Ghidra, and benchmark outputs.
+  - Pages describing workflows or evaluation must include failure modes and explain
+    how the documented behavior can be verified.
+  - Flag pages whose referenced files, symbols, schemas, or workflows no longer exist
+    in the repository.
+  staleness_days: 60
+  feature_workflow: true
+  stubs:
+  - slug: architecture/oghidra-end-to-end-data-flow
+    title: OGhidra End-to-End Data Flow
+    description: Trace a binary-analysis request from the LLM and MCP boundary through
+      Python orchestration, Ghidra operations, and the returned analysis.
+    tags:
+    - architecture
+    - data-flow
+    - mcp
+    - llm-orchestration
+  - slug: workflow/analyze-a-binary
+    title: Analyze a Binary with OGhidra
+    description: Document the primary developer workflow for starting an analysis,
+      invoking tools conversationally, and interpreting results.
+    tags:
+    - workflow
+    - binary-analysis
+    - reverse-engineering
+  - slug: module/python-orchestration
+    title: Python Orchestration Layer
+    description: Map the Python packages and responsibilities that coordinate LLM
+      requests, MCP interactions, workflows, and Ghidra analysis.
+    tags:
+    - python
+    - orchestration
+    - mcp
+  - slug: knowledge_schema/common-workflows-json
+    title: Common Workflows Knowledge Schema
+    description: Explain the structure and runtime role of src/cag/knowledge/common_workflows.json,
+      including how workflows are represented and selected.
+    tags:
+    - knowledge-base
+    - schema
+    - workflows
+  - slug: knowledge_schema/function-signatures-json
+    title: Function Signatures Knowledge Schema
+    description: Document the structure, semantics, and extension process for src/cag/knowledge/function_signatures.json.
+    tags:
+    - knowledge-base
+    - function-signatures
+    - schema
+  - slug: workflow/extend-knowledge-json
+    title: Extend OGhidra Knowledge JSON
+    description: Provide a verified procedure for adding or modifying common workflows
+      and function-signature knowledge without breaking consumers.
+    tags:
+    - workflow
+    - knowledge-base
+    - contributing
+  - slug: benchmark/evaluation-infrastructure
+    title: OGhidra Evaluation Infrastructure
+    description: Describe the benchmark layout, evaluation entry points, expected
+      outputs, and how analysis quality is assessed.
+    tags:
+    - benchmarks
+    - evaluation
+    - reverse-engineering
+  - slug: decision/deprecate-java-ghidra-plugin
+    title: Deprecate the Java Ghidra Plugin
+    description: Record the rationale, migration boundaries, compatibility concerns,
+      and removal plan for the Java/Gradle plugin.
+    tags:
+    - decision
+    - deprecated-java
+    - ghidra
+  - slug: integration/maintained-ghidra-plugin
+    title: Integration with the Maintained Ghidra Plugin
+    description: Define how OGhidra should interact with the Ghidra-maintained plugin
+      as the replacement for the project Java extension.
+    tags:
+    - integration
+    - ghidra
+    - deprecated-java
+  - slug: deployment/docker-and-release
+    title: Docker and Release Workflow
+    description: Document the Docker packaging and GitHub Actions release path used
+      to distribute OGhidra.
+    tags:
+    - deployment
+    - docker
+    - github-actions
+  - slug: concept/mcp-in-oghidra
+    title: MCP in OGhidra
+    description: Explain the role of MCP in exposing OGhidra capabilities to LLM-driven
+      reverse-engineering sessions.
+    tags:
+    - concept
+    - mcp
+    - llm-orchestration
+  - slug: best_practice/using-oghidra-for-binary-analysis
+    title: Best Practices for OGhidra Binary Analysis
+    description: Capture evidence-based guidance for preparing binaries, structuring
+      requests, validating results, and handling uncertain LLM output.
+    tags:
+    - best-practice
+    - binary-analysis
+    - reverse-engineering
+  scanned_sources:
+  - .
+features:
+  adaptive-feature-interview: 1
+  canonical-promotion: 1
+  contradiction-workflow: 1
+  decisions: 1
+  developer-handoff: 1
+  domain-frontmatter: 1
+  feature-workflow: 2
+  frontmatter-governance: 1
+  grounding-markers: 1
+  index-log: 1
+  lint-contract: 1
+  live-repo-source-policy: 1
+  managed-sections: 1
+  opencode-integration: 1
+  operations: 1
+  project-profile: 1
+  raw-provenance: 1
+  research-threads: 1
+  session-startup: 1
+  speculative-marker: 1
+  tensions: 1
+  vault-layout: 1
+  verification-audit: 1
+  write-boundaries: 1
+ownership:
+  managed_sections:
+  - operating-modes
+  - source-policy
+  - frontmatter
+  - tensions
+  - decisions
+  - operations
+  - grounding
+  - session-startup
+  detached_features: []
