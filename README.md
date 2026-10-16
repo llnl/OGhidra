@@ -1,22 +1,40 @@
-# OGhidra workflows — PyGhidra backend
+# OGhidra — AI-powered reverse engineering with Ghidra
 
-OGhidra exposes one DSPy-powered MCP workflow, `rename_current_function`, for a
-program open in Ghidra. It is not a Ghidra plugin and does not launch a separate
-OGhidra GUI. The upstream `pyghidra-mcp` process launches Ghidra and serves its
-tools; your MCP host launches this repository's workflow server.
+OGhidra connects language models to Ghidra through MCP, giving an AI agent
+grounded access to the program and project state in your live Ghidra session.
+It can support workflows that:
 
-## How the pieces connect
+- inspect and search decompiled code, disassembly, symbols, strings, imports,
+  exports, cross-references, raw bytes, and call graphs;
+- improve a program by renaming functions and variables, setting types and
+  function prototypes, and adding comments;
+- work with Ghidra projects and the GUI by importing or opening programs,
+  navigating to analysis targets, and saving changes; and
+- combine those primitives with DSPy to build repeatable, model-driven reverse
+  engineering workflows.
+
+`rename_current_function` is one packaged DSPy workflow: it gathers evidence
+about the function selected in Ghidra, proposes a descriptive name, and can
+apply that name after revalidating the target. It is an example of what OGhidra
+can automate, not the limit of the underlying Ghidra toolset.
+
+OGhidra does not launch a separate GUI or replace Ghidra. The upstream
+`pyghidra-mcp` process launches Ghidra and exposes its analysis and editing
+tools; this repository adds higher-level workflows that an MCP host can invoke.
+
+## Architecture
 
 ```mermaid
 flowchart LR
-    Host["Codex / MCP host"] -->|"stdio: rename_current_function"| OG["OGhidra workflow"]
-    OG -->|"Streamable HTTP :8001/mcp"| Py["pyghidra-mcp"]
-    Host -->|"optional direct Ghidra tools"| Py
+    Host["Codex / MCP host"] -->|"stdio: workflow tools"| OG["OGhidra workflows"]
+    OG -->|"Ghidra evidence and actions"| Py["pyghidra-mcp"]
+    Host -->|"direct Ghidra tools"| Py
     Py <--> GUI["Ghidra GUI / CodeBrowser"]
 ```
 
-Both servers are passive. Opening a project or program does not automatically
-run OGhidra; a host must invoke the workflow tool.
+Both MCP servers are passive. Opening a project or program does not
+automatically run an OGhidra workflow; the host decides which direct tools or
+higher-level workflows to invoke.
 
 ## Quick start with Codex
 
