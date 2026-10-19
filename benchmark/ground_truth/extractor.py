@@ -19,7 +19,7 @@ import logging
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger("oghidra.benchmark.ground_truth")
 
@@ -36,27 +36,27 @@ class FunctionGroundTruth:
 
     # Source code artifacts
     signature: str
-    original_docstring: Optional[str]
+    original_docstring: str | None
     source_code: str
 
     # Generated ground truth
-    llm_source_summary: Optional[str] = None
+    llm_source_summary: str | None = None
 
     # Binary mapping (filled after compilation)
-    binary_path: Optional[str] = None
-    binary_address: Optional[str] = None
-    optimization_level: Optional[str] = None
+    binary_path: str | None = None
+    binary_address: str | None = None
+    optimization_level: str | None = None
 
     # OGhidra generated (filled during benchmark)
-    oghidra_summary: Optional[str] = None
-    oghidra_suggested_name: Optional[str] = None
+    oghidra_summary: str | None = None
+    oghidra_suggested_name: str | None = None
 
     # Metadata
-    complexity_score: Optional[int] = None
-    tags: List[str] = field(default_factory=list)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    complexity_score: int | None = None
+    tags: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -71,19 +71,19 @@ class GroundTruthDataset:
     source_project: str
 
     # Configuration
-    optimization_levels: List[str]
+    optimization_levels: list[str]
     compiler: str
     compiler_version: str
 
     # Functions
-    functions: List[FunctionGroundTruth]
+    functions: list[FunctionGroundTruth]
 
     # Statistics
     total_functions: int = 0
     functions_with_docstrings: int = 0
     functions_with_summaries: int = 0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "version": self.version,
@@ -127,7 +127,7 @@ class GroundTruthExtractor:
 
     def __init__(
         self,
-        ollama_client: Optional[Any] = None,
+        ollama_client: Any | None = None,
         generate_summaries: bool = True,
     ):
         """
@@ -146,11 +146,11 @@ class GroundTruthExtractor:
         self,
         source_dir: str,
         project_name: str,
-        binary_path: Optional[str] = None,
+        binary_path: str | None = None,
         optimization_level: str = "O2",
         compiler: str = "gcc",
         compiler_version: str = "unknown",
-        file_patterns: List[str] = None,
+        file_patterns: list[str] = None,
     ) -> GroundTruthDataset:
         """
         Extract ground truth from a source code project.
@@ -187,7 +187,7 @@ class GroundTruthExtractor:
 
         # Parse source files
         parser = SourceCodeParser()
-        all_functions: List[FunctionGroundTruth] = []
+        all_functions: list[FunctionGroundTruth] = []
 
         for source_file in source_files:
             try:

@@ -21,7 +21,7 @@ from benchmark.metrics import SemanticEvaluator
 evaluator = SemanticEvaluator()
 result = evaluator.evaluate(
     generated="This function encrypts data using AES-128 block cipher",
-    reference="Encrypts a single 16-byte block with AES encryption"
+    reference="Encrypts a single 16-byte block with AES encryption",
 )
 
 print(f"BERTScore: {result.scores['bert_score_f1']:.3f}")
@@ -99,9 +99,7 @@ from benchmark.reports import ReportGenerator
 # 1. Extract ground truth from source
 extractor = GroundTruthExtractor(ollama_client=ollama)
 dataset = extractor.extract_from_project(
-    source_dir="path/to/source",
-    project_name="my_project",
-    binary_path="path/to/binary.exe"
+    source_dir="path/to/source", project_name="my_project", binary_path="path/to/binary.exe"
 )
 
 # 2. Map to binary addresses (requires Ghidra running)
@@ -110,8 +108,8 @@ dataset = extractor.map_binary_addresses(dataset, ghidra_client)
 # 3. Run benchmark
 config = BenchmarkConfig(
     name="my_benchmark",
-    include_context=True,      # Use caller/callee context
-    include_llm_judge=False,   # Faster without LLM judge
+    include_context=True,  # Use caller/callee context
+    include_llm_judge=False,  # Faster without LLM judge
 )
 runner = BenchmarkRunner(bridge=oghidra_bridge, config=config)
 results = runner.run(dataset)

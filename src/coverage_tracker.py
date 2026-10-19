@@ -13,7 +13,6 @@ nothing reminded it to check that area.
 
 import logging
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -24,16 +23,16 @@ class CoverageArea:
 
     name: str
     description: str
-    apis: List[str] = field(default_factory=list)
-    strings: List[str] = field(default_factory=list)
+    apis: list[str] = field(default_factory=list)
+    strings: list[str] = field(default_factory=list)
     covered: bool = False
-    covered_by: Optional[str] = None  # Which tool call covered it
-    result_summary: Optional[str] = None  # Brief summary of what was found
+    covered_by: str | None = None  # Which tool call covered it
+    result_summary: str | None = None  # Brief summary of what was found
     hits: int = 0  # How many API/string hits were found
 
 
 # Default security checklist for binary analysis
-DEFAULT_CHECKLIST: Dict[str, dict] = {
+DEFAULT_CHECKLIST: dict[str, dict] = {
     "service_management": {
         "description": "Windows service registration and management",
         "apis": ["CreateServiceW", "OpenServiceW", "OpenSCManagerW", "StartServiceW", "ChangeServiceConfigW", "DeleteService"],
@@ -93,7 +92,7 @@ class CoverageTracker:
     API names or strings.
     """
 
-    def __init__(self, checklist: Optional[Dict[str, dict]] = None):
+    def __init__(self, checklist: dict[str, dict] | None = None):
         """
         Initialize the coverage tracker.
 
@@ -101,7 +100,7 @@ class CoverageTracker:
             checklist: Custom checklist dict, or None to use DEFAULT_CHECKLIST.
         """
         raw = DEFAULT_CHECKLIST if checklist is None else checklist
-        self.areas: Dict[str, CoverageArea] = {}
+        self.areas: dict[str, CoverageArea] = {}
         for name, spec in raw.items():
             self.areas[name] = CoverageArea(
                 name=name,
@@ -122,7 +121,7 @@ class CoverageTracker:
             area.result_summary = result_summary
             logger.info(f"Coverage: '{area_name}' marked covered by {tool_used}")
 
-    def auto_mark_from_result(self, tool_name: str, tool_params: dict, result: str) -> List[str]:
+    def auto_mark_from_result(self, tool_name: str, tool_params: dict, result: str) -> list[str]:
         """
         Automatically scan a tool result for coverage matches.
 
@@ -138,7 +137,7 @@ class CoverageTracker:
             List of area names that were newly covered.
         """
         newly_covered = []
-        combined_text = f"{tool_name} {str(tool_params)} {result}".lower()
+        combined_text = f"{tool_name} {tool_params!s} {result}".lower()
 
         for name, area in self.areas.items():
             if area.covered:
@@ -166,11 +165,11 @@ class CoverageTracker:
 
         return newly_covered
 
-    def get_uncovered(self) -> List[CoverageArea]:
+    def get_uncovered(self) -> list[CoverageArea]:
         """Return list of areas that have NOT been investigated."""
         return [a for a in self.areas.values() if not a.covered]
 
-    def get_covered(self) -> List[CoverageArea]:
+    def get_covered(self) -> list[CoverageArea]:
         """Return list of areas that HAVE been investigated."""
         return [a for a in self.areas.values() if a.covered]
 

@@ -12,8 +12,9 @@ Verifies:
 """
 
 import unittest
-from src.models.memory import ExecutionSignal
+
 from src.execution_gate import ExecutionGatekeeper
+from src.models.memory import ExecutionSignal
 
 
 class MockConfig:

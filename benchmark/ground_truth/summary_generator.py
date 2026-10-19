@@ -8,7 +8,7 @@ access to the original source code.
 """
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from .extractor import FunctionGroundTruth
 
@@ -59,7 +59,7 @@ class SourceSummaryGenerator:
     def __init__(
         self,
         ollama_client: Any,
-        model: Optional[str] = None,
+        model: str | None = None,
         temperature: float = 0.3,
         max_source_chars: int = 4000,
     ):
@@ -146,7 +146,7 @@ class SourceSummaryGenerator:
     def batch_generate(
         self,
         functions: list,
-        progress_callback: Optional[callable] = None,
+        progress_callback: callable | None = None,
     ) -> list:
         """
         Generate summaries for multiple functions.

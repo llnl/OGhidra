@@ -1,8 +1,8 @@
-import tkinter as tk
-from tkinter import ttk, scrolledtext, messagebox
-from ..bridge import Bridge
-
 import logging
+import tkinter as tk
+from tkinter import messagebox, scrolledtext, ttk
+
+from ..bridge import Bridge
 
 logger = logging.getLogger(__name__)
 
@@ -180,7 +180,6 @@ class MemoryInfoPanel:
                         self.bridge.cag_manager.save_session()
                     except Exception as e:
                         logger.warning(f"Failed to save session for the CAG manager: {e}")
-                        pass
                     self.bridge.cag_manager = None
                     self.bridge.memory_manager = None
 

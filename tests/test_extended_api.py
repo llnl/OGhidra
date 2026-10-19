@@ -5,15 +5,16 @@ used by our AI agent. This script is focused on understanding which endpoints
 actually work and how they should be properly called.
 """
 
-import json
-import requests
 import argparse
+import inspect
+import json
+import logging
+import os
 import sys
 import traceback
-import inspect
-import os
-from typing import Dict, Any
-import logging
+from typing import Any
+
+import requests
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -27,7 +28,7 @@ class GhidraMCPTester:
         self.available_functions = []
         self.available_addresses = []
 
-    def test_methods(self) -> Dict[str, Any]:
+    def test_methods(self) -> dict[str, Any]:
         """Test the /methods endpoint which returns available functions."""
         try:
             response = requests.get(f"{self.base_url}/methods")
@@ -46,7 +47,6 @@ class GhidraMCPTester:
                             self.available_addresses.append(address)
                     except Exception as e:
                         logger.warning(f"An error occured in attempting to extract addresses from function names {method}: {e}")
-                        pass
 
             return {
                 "success": True,
@@ -57,7 +57,7 @@ class GhidraMCPTester:
         except Exception as e:
             return {"success": False, "error": str(e)}
 
-    def test_direct_tool_call(self, tool_name: str, params: Dict[str, Any] = None) -> Dict[str, Any]:
+    def test_direct_tool_call(self, tool_name: str, params: dict[str, Any] = None) -> dict[str, Any]:
         """
         Test calling a tool directly, simulating how the Bridge class would call it.
 
@@ -74,8 +74,8 @@ class GhidraMCPTester:
         try:
             # Try to import the GhidraMCPClient directly to see how it calls methods
             sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
-            from src.ghidra_client import GhidraMCPClient
             from src.config import GhidraMCPConfig
+            from src.ghidra_client import GhidraMCPClient
 
             # Create a config
             config = GhidraMCPConfig()

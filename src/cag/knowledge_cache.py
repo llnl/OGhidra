@@ -5,10 +5,9 @@ This module implements a persistent cache for domain knowledge related to Ghidra
 binary analysis, and common function patterns.
 """
 
-import os
 import json
 import logging
-from typing import Dict, List
+import os
 from dataclasses import dataclass, field
 
 logger = logging.getLogger("ollama-ghidra-bridge.cag.knowledge")
@@ -20,10 +19,10 @@ class FunctionSignature:
 
     name: str
     description: str
-    parameters: Dict[str, str] = field(default_factory=dict)
+    parameters: dict[str, str] = field(default_factory=dict)
     return_type: str = ""
-    common_locations: List[str] = field(default_factory=list)
-    related_functions: List[str] = field(default_factory=list)
+    common_locations: list[str] = field(default_factory=list)
+    related_functions: list[str] = field(default_factory=list)
     token_count: int = 0
 
 
@@ -46,7 +45,7 @@ class AnalysisRule:
     description: str
     condition: str
     action: str
-    examples: List[str] = field(default_factory=list)
+    examples: list[str] = field(default_factory=list)
     token_count: int = 0
 
 
@@ -61,10 +60,10 @@ class GhidraKnowledgeCache:
             cache_dir: Directory to store cache files
         """
         self.cache_dir = cache_dir
-        self.function_signatures: Dict[str, FunctionSignature] = {}
-        self.binary_patterns: Dict[str, BinaryPattern] = {}
-        self.analysis_rules: Dict[str, AnalysisRule] = {}
-        self.common_workflows: Dict[str, str] = {}
+        self.function_signatures: dict[str, FunctionSignature] = {}
+        self.binary_patterns: dict[str, BinaryPattern] = {}
+        self.analysis_rules: dict[str, AnalysisRule] = {}
+        self.common_workflows: dict[str, str] = {}
         self.knowledge_initialized = False
 
         # Ensure cache directory exists
@@ -73,7 +72,7 @@ class GhidraKnowledgeCache:
         # Initialize logger
         self.logger = logging.getLogger("ollama-ghidra-bridge.cag.knowledge")
 
-    def preload(self, knowledge_files: List[str] = None) -> None:
+    def preload(self, knowledge_files: list[str] = None) -> None:
         """
         Preload domain knowledge from files.
 
@@ -143,7 +142,7 @@ class GhidraKnowledgeCache:
                 loaded_files += 1
                 self.logger.info(f"Loaded knowledge from {file_path}")
             except Exception as e:
-                self.logger.error(f"Error loading knowledge file {file_path}: {str(e)}")
+                self.logger.error(f"Error loading knowledge file {file_path}: {e!s}")
 
         if loaded_files > 0:
             self.knowledge_initialized = True
@@ -310,7 +309,7 @@ class GhidraKnowledgeCache:
 
         return result
 
-    def _extract_potential_functions(self, query: str) -> List[str]:
+    def _extract_potential_functions(self, query: str) -> list[str]:
         """Extract potential function names from a query using simple heuristics."""
         # This is a simple implementation - could be enhanced with regex patterns
         potential_functions = []
@@ -407,5 +406,5 @@ class GhidraKnowledgeCache:
             self.logger.info(f"Knowledge cache loaded from {self.cache_dir}")
             return True
         except Exception as e:
-            self.logger.error(f"Error loading knowledge cache: {str(e)}")
+            self.logger.error(f"Error loading knowledge cache: {e!s}")
             return False
