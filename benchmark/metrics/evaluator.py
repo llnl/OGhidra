@@ -18,7 +18,7 @@ Usage:
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import numpy as np
 
@@ -32,8 +32,8 @@ class EvaluationResult:
     function_id: str
     generated_summary: str
     reference_summary: str
-    scores: Dict[str, float]
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    scores: dict[str, float]
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     @property
     def combined_score(self) -> float:
@@ -55,7 +55,7 @@ class EvaluationResult:
 
         return weighted_sum / total_weight if total_weight > 0 else 0.0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
         return {
             "function_id": self.function_id,
@@ -74,14 +74,12 @@ class BaseMetric(ABC):
     @abstractmethod
     def name(self) -> str:
         """Metric name for reporting."""
-        pass
 
     @abstractmethod
     def score(self, candidate: str, reference: str) -> float:
         """Compute similarity score between candidate and reference."""
-        pass
 
-    def batch_score(self, candidates: List[str], references: List[str]) -> List[float]:
+    def batch_score(self, candidates: list[str], references: list[str]) -> list[float]:
         """Score multiple pairs. Override for batch-optimized implementations."""
         return [self.score(c, r) for c, r in zip(candidates, references)]
 
@@ -104,7 +102,7 @@ class SemanticEvaluator:
         use_gpu: bool = True,
         batch_size: int = 32,
         include_llm_judge: bool = False,
-        llm_client: Optional[Any] = None,
+        llm_client: Any | None = None,
     ):
         """
         Initialize the evaluator with selected metrics.
@@ -117,7 +115,7 @@ class SemanticEvaluator:
         """
         self.use_gpu = use_gpu
         self.batch_size = batch_size
-        self.metrics: Dict[str, BaseMetric] = {}
+        self.metrics: dict[str, BaseMetric] = {}
         self._initialized = False
         self._llm_embedding_client = llm_client
         self._include_llm_judge = include_llm_judge
@@ -173,7 +171,7 @@ class SemanticEvaluator:
         generated: str,
         reference: str,
         function_id: str = "unknown",
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
     ) -> EvaluationResult:
         """
         Evaluate a single generated summary against its reference.
@@ -207,11 +205,11 @@ class SemanticEvaluator:
 
     def batch_evaluate(
         self,
-        generated: List[str],
-        references: List[str],
-        function_ids: Optional[List[str]] = None,
-        metadata: Optional[List[Dict[str, Any]]] = None,
-    ) -> List[EvaluationResult]:
+        generated: list[str],
+        references: list[str],
+        function_ids: list[str] | None = None,
+        metadata: list[dict[str, Any]] | None = None,
+    ) -> list[EvaluationResult]:
         """
         Evaluate multiple generated summaries in batch for efficiency.
 
@@ -233,7 +231,7 @@ class SemanticEvaluator:
             metadata = [{} for _ in range(n)]
 
         # Compute all metrics in batch
-        all_scores: Dict[str, List[float]] = {}
+        all_scores: dict[str, list[float]] = {}
         for name, metric in self.metrics.items():
             try:
                 all_scores[name] = metric.batch_score(generated, references)
@@ -259,8 +257,8 @@ class SemanticEvaluator:
 
     def compute_corpus_statistics(
         self,
-        results: List[EvaluationResult],
-    ) -> Dict[str, Any]:
+        results: list[EvaluationResult],
+    ) -> dict[str, Any]:
         """
         Compute aggregate statistics over a corpus of evaluation results.
 
@@ -273,7 +271,7 @@ class SemanticEvaluator:
         stats = {}
 
         # Collect scores per metric
-        metric_scores: Dict[str, List[float]] = {}
+        metric_scores: dict[str, list[float]] = {}
         for result in results:
             for metric, score in result.scores.items():
                 if score is not None:
@@ -307,7 +305,7 @@ class SemanticEvaluator:
 
         return stats
 
-    def get_available_metrics(self) -> List[str]:
+    def get_available_metrics(self) -> list[str]:
         """Return list of available metric names."""
         self._lazy_init()
         return list(self.metrics.keys())

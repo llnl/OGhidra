@@ -13,9 +13,9 @@ The dump file provides visibility into:
 
 import logging
 import os
-from datetime import datetime
-from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
+from datetime import datetime
+from typing import Any
 
 logger = logging.getLogger("ollama-ghidra-bridge.analysis_dump")
 
@@ -28,10 +28,10 @@ class DumpEntry:
     timestamp: datetime
     loop_number: int
     step_number: int
-    tool_name: Optional[str] = None
-    parameters: Optional[Dict[str, Any]] = None
-    result: Optional[str] = None
-    reasoning: Optional[str] = None
+    tool_name: str | None = None
+    parameters: dict[str, Any] | None = None
+    result: str | None = None
+    reasoning: str | None = None
     char_count: int = 0
     was_truncated: bool = False
     truncated_to: int = 0
@@ -59,7 +59,7 @@ class AnalysisDumper:
             logs_dir = os.path.join(os.path.dirname(src_dir), "logs")
 
         self.logs_dir = logs_dir
-        self.entries: List[DumpEntry] = []
+        self.entries: list[DumpEntry] = []
         self.current_loop = 1
         self.current_step = 0
         self.session_start = datetime.now()
@@ -88,9 +88,9 @@ class AnalysisDumper:
     def add_execution(
         self,
         tool_name: str,
-        parameters: Dict[str, Any],
+        parameters: dict[str, Any],
         result: str,
-        reasoning: Optional[str] = None,
+        reasoning: str | None = None,
         was_truncated: bool = False,
         truncated_to: int = 0,
     ) -> None:
@@ -161,7 +161,7 @@ class AnalysisDumper:
         )
         self.entries.append(entry)
 
-    def get_statistics(self) -> Dict[str, Any]:
+    def get_statistics(self) -> dict[str, Any]:
         """Get statistics about the dump."""
         total_chars = sum(e.char_count for e in self.entries)
         tool_entries = [e for e in self.entries if e.entry_type == "tool"]

@@ -5,7 +5,7 @@ Command parser module for extracting and executing GhidraMCP commands from AI re
 import json
 import logging
 import re
-from typing import Dict, Any, List, Tuple, Optional
+from typing import Any
 
 logger = logging.getLogger("ollama-ghidra-bridge.parser")
 
@@ -86,7 +86,7 @@ class CommandParser:
     ]
 
     @staticmethod
-    def validate_command_parameters(command_name: str, params: Dict[str, Any]) -> Tuple[bool, str]:
+    def validate_command_parameters(command_name: str, params: dict[str, Any]) -> tuple[bool, str]:
         """
         Validate that a command has all required parameters.
 
@@ -111,7 +111,7 @@ class CommandParser:
         return True, ""
 
     @staticmethod
-    def extract_commands(response: str) -> List[Tuple[str, Dict[str, Any]]]:
+    def extract_commands(response: str) -> list[tuple[str, dict[str, Any]]]:
         """
         Extract commands and their parameters from an AI response.
         Handles malformed responses gracefully and provides feedback.
@@ -245,7 +245,7 @@ class CommandParser:
         return commands
 
     @staticmethod
-    def _validate_and_transform_params(command_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
+    def _validate_and_transform_params(command_name: str, params: dict[str, Any]) -> dict[str, Any]:
         """
         Validate and potentially transform parameters for specific commands.
         This helps catch common errors before they reach the GhidraMCP client.
@@ -269,7 +269,7 @@ class CommandParser:
             "xref_lookup": None,  # handled dynamically below
         }
 
-        if command_name in alias_mapping and alias_mapping[command_name]:
+        if alias_mapping.get(command_name):
             # Simple alias mapping (string_search -> list_strings)
             command_name = alias_mapping[command_name]
             logger.info(f"Alias command mapped to '{command_name}'")
@@ -359,7 +359,7 @@ class CommandParser:
         return validated_params
 
     @staticmethod
-    def _parse_parameters(params_text: str) -> Dict[str, Any]:
+    def _parse_parameters(params_text: str) -> dict[str, Any]:
         """
         Parse parameters from the parameter text string.
 
@@ -369,7 +369,7 @@ class CommandParser:
         Returns:
             Dictionary of parameter names to values
         """
-        params: Dict[str, Any] = {}
+        params: dict[str, Any] = {}
 
         if not params_text:
             return params
@@ -433,7 +433,7 @@ class CommandParser:
         return params
 
     @staticmethod
-    def format_command_results(command: str, params: Dict[str, str], result: Dict[str, Any]) -> str:
+    def format_command_results(command: str, params: dict[str, str], result: dict[str, Any]) -> str:
         """
         Format the results of a command execution.
 
@@ -485,7 +485,7 @@ class CommandParser:
         return clean_text.strip()
 
     @staticmethod
-    def get_enhanced_error_message(command_name: str, params: Dict[str, str], error: str) -> str:
+    def get_enhanced_error_message(command_name: str, params: dict[str, str], error: str) -> str:
         """
         Generate an enhanced error message with specific guidance based on the command and error.
 
@@ -536,7 +536,7 @@ class CommandParser:
         # Check for common parameter name errors
         common_param_errors = {"address": "function_address (in rename_function_by_address)"}
 
-        for param_name in params.keys():
+        for param_name in params:
             if param_name in common_param_errors:
                 return (
                     f"ERROR: Parameter '{param_name}' may be incorrect. "
@@ -547,7 +547,7 @@ class CommandParser:
         return enhanced_error
 
     @staticmethod
-    def generate_format_feedback(response: str, commands: List[Tuple[str, Dict[str, Any]]]) -> Optional[str]:
+    def generate_format_feedback(response: str, commands: list[tuple[str, dict[str, Any]]]) -> str | None:
         """
         Generate feedback message when format violations are detected.
         This can be returned to the LLM to help it improve.

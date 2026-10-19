@@ -1,9 +1,10 @@
-from typing import Optional
-from ttkbootstrap import Style
-import tkinter as tk
-from tkinter import messagebox, scrolledtext, ttk, filedialog
 import json
+import tkinter as tk
 from datetime import datetime
+from tkinter import filedialog, messagebox, scrolledtext, ttk
+
+from ttkbootstrap import Style
+
 from .ui_thread import ui_safe
 
 
@@ -57,7 +58,7 @@ class AIResponsePanel:
         self.response_text.tag_config("tool", foreground=colors.warning, font=("Consolas", 11, "italic"))
         self.response_text.tag_config("reasoning", foreground="#a0a0a0")  # Subtle gray for reasoning
 
-    def add_response(self, response_type: str, content: str, timestamp: Optional[datetime] = None):
+    def add_response(self, response_type: str, content: str, timestamp: datetime | None = None):
         """Add a new AI response. Model update is synchronous; render is marshalled."""
         if timestamp is None:
             timestamp = datetime.now()
@@ -81,7 +82,7 @@ class AIResponsePanel:
         self.response_text.insert(tk.END, text)
         self.response_text.see(tk.END)
 
-    def add_cot_update(self, update_type: str, content: str, timestamp: Optional[datetime] = None):
+    def add_cot_update(self, update_type: str, content: str, timestamp: datetime | None = None):
         """Add a chain of thought update to the display (streaming during agentic loop).
 
         This method displays the AI's reasoning and progress during query processing,

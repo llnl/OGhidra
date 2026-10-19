@@ -21,13 +21,13 @@ import math
 import os
 import sys
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any
 
 import numpy as np
 import requests
-
 
 # Roughly matches src/ollama_client.py defaults.
 MAX_EMBED_TOKENS = 8192
@@ -35,13 +35,13 @@ CHARS_PER_TOKEN = 4
 MAX_EMBED_CHARS = int(MAX_EMBED_TOKENS * CHARS_PER_TOKEN * 0.95)
 
 
-def _chunk_text(text: str, max_chars: int = MAX_EMBED_CHARS, overlap: int = 500) -> List[str]:
+def _chunk_text(text: str, max_chars: int = MAX_EMBED_CHARS, overlap: int = 500) -> list[str]:
     if not text:
         return [""]
     if len(text) <= max_chars:
         return [text]
 
-    chunks: List[str] = []
+    chunks: list[str] = []
     start = 0
     n = len(text)
     while start < n:
@@ -74,7 +74,7 @@ def _chunk_text(text: str, max_chars: int = MAX_EMBED_CHARS, overlap: int = 500)
     return chunks if chunks else [text[:max_chars]]
 
 
-def _average_embeddings(embs: List[List[float]]) -> List[float]:
+def _average_embeddings(embs: list[list[float]]) -> list[float]:
     if not embs:
         return []
     if len(embs) == 1:
@@ -104,9 +104,9 @@ class OllamaEmbedder:
         self.timeout_s = timeout_s
         # Cache embedding API mode per model, since some Ollama builds/models may
         # only support the legacy endpoint.
-        self._api_mode_by_model: Dict[str, str] = {}  # model -> "new"|"old"
+        self._api_mode_by_model: dict[str, str] = {}  # model -> "new"|"old"
 
-    def list_models(self) -> List[Dict[str, Any]]:
+    def list_models(self) -> list[dict[str, Any]]:
         resp = requests.get(f"{self.base_url}/api/tags", timeout=self.timeout_s)
         resp.raise_for_status()
         data = resp.json()
@@ -120,7 +120,7 @@ class OllamaEmbedder:
         embs = [self._embed_single(c, model) for c in chunks]
         return np.asarray(_average_embeddings(embs), dtype=np.float32)
 
-    def _embed_single(self, text: str, model: str) -> List[float]:
+    def _embed_single(self, text: str, model: str) -> list[float]:
         mode = self._api_mode_by_model.get(model)
         if mode == "new":
             return self._embed_new(text, model)
@@ -137,7 +137,7 @@ class OllamaEmbedder:
             self._api_mode_by_model[model] = "old"
             return emb
 
-    def _embed_new(self, text: str, model: str) -> List[float]:
+    def _embed_new(self, text: str, model: str) -> list[float]:
         url = f"{self.base_url}/api/embed"
         payload = {"model": model, "input": [text]}
         resp = requests.post(url, json=payload, timeout=self.timeout_s)
@@ -150,7 +150,7 @@ class OllamaEmbedder:
         emb = data.get("embedding", [])
         return emb
 
-    def _embed_old(self, text: str, model: str) -> List[float]:
+    def _embed_old(self, text: str, model: str) -> list[float]:
         url = f"{self.base_url}/api/embeddings"
         payload = {"model": model, "prompt": text}
         resp = requests.post(url, json=payload, timeout=self.timeout_s)
@@ -159,7 +159,7 @@ class OllamaEmbedder:
         return data.get("embedding", [])
 
 
-def looks_like_embedding_model(model_info: Dict[str, Any]) -> bool:
+def looks_like_embedding_model(model_info: dict[str, Any]) -> bool:
     """Heuristic: include likely embedding models from /api/tags."""
     name = str(model_info.get("name", ""))
     details = model_info.get("details", {}) or {}
@@ -190,7 +190,7 @@ def normalize_model_name(name: str) -> str:
     return name + ":latest"
 
 
-def load_session_functions(session_path: Path) -> Dict[str, Dict[str, Any]]:
+def load_session_functions(session_path: Path) -> dict[str, dict[str, Any]]:
     data = json.loads(session_path.read_text(encoding="utf-8"))
     funcs = data.get("analyzed_functions", {})
     if not isinstance(funcs, dict):
@@ -198,7 +198,7 @@ def load_session_functions(session_path: Path) -> Dict[str, Dict[str, Any]]:
     return funcs
 
 
-def build_function_text(entry: Dict[str, Any], include_name: bool) -> str:
+def build_function_text(entry: dict[str, Any], include_name: bool) -> str:
     name = str(entry.get("new_name") or entry.get("old_name") or "")
     summary = str(entry.get("behavior_summary") or "")
     if include_name and name:
@@ -206,7 +206,7 @@ def build_function_text(entry: Dict[str, Any], include_name: bool) -> str:
     return summary
 
 
-def default_prompts() -> List[str]:
+def default_prompts() -> list[str]:
     # Intentionally general: try to describe behavior rather than matching exact strings.
     return [
         "Find a function that reads or parses the Unix password hash file to extract credentials.",
@@ -218,7 +218,7 @@ def default_prompts() -> List[str]:
     ]
 
 
-def expand_prompt_variants(base: str) -> List[str]:
+def expand_prompt_variants(base: str) -> list[str]:
     """Small, fixed expansion set for quick prompt tweaking."""
     base = base.strip()
     if not base:
@@ -243,7 +243,7 @@ def expand_prompt_variants(base: str) -> List[str]:
 
     # Dedupe while preserving order.
     seen = set()
-    out: List[str] = []
+    out: list[str] = []
     for v in variants:
         key = " ".join(v.split())
         if key not in seen:
@@ -257,8 +257,8 @@ class SweepRow:
     model: str
     prompt: str
     score: float
-    target_rank: Optional[int] = None
-    total_ranked: Optional[int] = None
+    target_rank: int | None = None
+    total_ranked: int | None = None
 
 
 def compute_rank(
@@ -266,7 +266,7 @@ def compute_rank(
     corpus_embs: np.ndarray,
     corpus_addrs: Sequence[str],
     target_addr: str,
-) -> Tuple[int, int]:
+) -> tuple[int, int]:
     # Normalize for dot-product cosine.
     q = query_emb.astype(np.float32)
     qn = np.linalg.norm(q)
@@ -292,7 +292,7 @@ def compute_rank(
     return (rank, len(corpus_addrs))
 
 
-def main(argv: Optional[Sequence[str]] = None) -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="Compare Ollama embedding models for prompt similarity")
     p.add_argument(
         "--session",
@@ -387,7 +387,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print("ERROR: Target function has empty behavior_summary", file=sys.stderr)
         return 2
 
-    prompts: List[str]
+    prompts: list[str]
     if args.prompts_file:
         pf = Path(args.prompts_file)
         prompts = []
@@ -402,14 +402,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         prompts = default_prompts()
 
     if args.expand:
-        expanded: List[str] = []
+        expanded: list[str] = []
         for pr in prompts:
             expanded.extend(expand_prompt_variants(pr))
         prompts = expanded
 
     # Optionally build corpus for ranking.
-    corpus_addrs: List[str] = []
-    corpus_texts: List[str] = []
+    corpus_addrs: list[str] = []
+    corpus_texts: list[str] = []
     if args.rank:
         for addr, entry in funcs.items():
             txt = build_function_text(entry, include_name=args.include_name)
@@ -418,7 +418,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             corpus_addrs.append(str(addr))
             corpus_texts.append(txt)
 
-    rows: List[SweepRow] = []
+    rows: list[SweepRow] = []
 
     print(f"Session: {session_path}")
     print(f"Ollama:  {embedder.base_url}")
@@ -427,11 +427,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     for m in models:
         print(f"  - {m}")
     print(f"Prompts: {len(prompts)}" + (" (expanded)" if args.expand else ""))
-    print("")
+    print()
 
     # Precompute target embedding per model.
-    target_emb_by_model: Dict[str, np.ndarray] = {}
-    corpus_embs_by_model: Dict[str, Tuple[np.ndarray, List[str]]] = {}
+    target_emb_by_model: dict[str, np.ndarray] = {}
+    corpus_embs_by_model: dict[str, tuple[np.ndarray, list[str]]] = {}
 
     for model in models:
         t0 = time.time()
@@ -445,8 +445,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
         if args.rank:
             # Embed full corpus for this model.
-            embs: List[np.ndarray] = []
-            kept_addrs: List[str] = []
+            embs: list[np.ndarray] = []
+            kept_addrs: list[str] = []
             for addr, txt in zip(corpus_addrs, corpus_texts):
                 try:
                     e = embedder.embed(txt, model=model)
@@ -468,7 +468,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         elapsed = time.time() - t0
         print(f"Embedded target for {model} ({len(target_emb)} dims) in {elapsed:.2f}s")
 
-    print("")
+    print()
 
     if not target_emb_by_model:
         print("ERROR: No embeddings produced for any model", file=sys.stderr)
@@ -522,7 +522,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     rows_sorted = sorted([r for r in rows if not math.isnan(r.score)], key=lambda r: r.score, reverse=True)
     top_n = min(20, len(rows_sorted))
     if top_n:
-        print("")
+        print()
         print(f"Top {top_n} (model,prompt) pairs overall:")
         for r in rows_sorted[:top_n]:
             rank_s = ""

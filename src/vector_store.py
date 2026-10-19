@@ -2,11 +2,12 @@
 Vector storage for session records to enable RAG capabilities.
 """
 
-import os
 import json
-import numpy as np
-from typing import List, Dict, Any
 import logging
+import os
+from typing import Any
+
+import numpy as np
 
 # Optional FAISS import for fast ANN search
 try:
@@ -140,7 +141,7 @@ class SimpleVectorStore:
                 faiss.normalize_L2(emb.reshape(1, -1))
                 self._faiss_index.add(emb.reshape(1, -1))
 
-    def search(self, query_embedding: np.ndarray, top_k: int = 5) -> List[Dict[str, Any]]:
+    def search(self, query_embedding: np.ndarray, top_k: int = 5) -> list[dict[str, Any]]:
         """
         Search for similar sessions based on embedding similarity.
 
@@ -188,7 +189,7 @@ class SimpleVectorStore:
 
         return results
 
-    def get_session_ids(self) -> List[str]:
+    def get_session_ids(self) -> list[str]:
         """Returns a list of all session IDs in the store."""
         return [m["session_id"] for m in self.metadata]
 

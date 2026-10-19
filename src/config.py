@@ -2,16 +2,17 @@
 Configuration module for the Ollama-GhidraMCP Bridge.
 """
 
-from pydantic import BaseModel, Field, validator, AnyHttpUrl
-from pydantic_settings import BaseSettings
-from typing import Optional, Dict, Any, List, ClassVar
 import re
+from typing import Any, ClassVar
+
+from pydantic import AnyHttpUrl, BaseModel, Field, validator
+from pydantic_settings import BaseSettings
 
 
 class ToolParameters(BaseModel):
     type: str = "object"
-    properties: Dict[str, Any]
-    required: List[str] = []
+    properties: dict[str, Any]
+    required: list[str] = []
 
 
 class Function(BaseModel):
@@ -251,7 +252,7 @@ class OllamaConfig(BaseModel):
 
     # Model map for different phases of the simplified agentic loop
     # If a phase is not in the map or the value is empty, the default model will be used
-    model_map: Dict[str, str] = Field(
+    model_map: dict[str, str] = Field(
         default_factory=lambda: {
             "planning": "",  # Model for planning phase
             "execution": "",  # Model for tool execution phase
@@ -266,7 +267,7 @@ class OllamaConfig(BaseModel):
     """
 
     # Define tools for Ollama's tool calling API
-    tools: List[Tool] = Field(
+    tools: list[Tool] = Field(
         default_factory=lambda: [
             {
                 "type": "function",
@@ -1137,7 +1138,7 @@ You MUST output ONLY valid JSON (no markdown, no explanation) with this structur
 """
 
     # System prompts for different phases
-    phase_system_prompts: Dict[str, str] = Field(
+    phase_system_prompts: dict[str, str] = Field(
         default_factory=lambda: {
             "planning": "",  # If empty, use planning_system_prompt
             "execution": "",  # If empty, use execution_system_prompt
@@ -1171,7 +1172,7 @@ class GoogleConfig(BaseModel):
     )
 
     # Model map for phases
-    model_map: Dict[str, str] = Field(default_factory=lambda: {"planning": "", "execution": "", "analysis": ""})
+    model_map: dict[str, str] = Field(default_factory=lambda: {"planning": "", "execution": "", "analysis": ""})
 
     # Defaults handled by the client if empty, but good to have fields
     default_system_prompt: str = """
@@ -1181,7 +1182,7 @@ class GoogleConfig(BaseModel):
 
     # Reuse Ollama tool definitions for now as the internal structure is likely similar for the bridge
     # The client will translate them to Google's format
-    tools: List[Tool] = Field(default_factory=lambda: OllamaConfig().tools)
+    tools: list[Tool] = Field(default_factory=lambda: OllamaConfig().tools)
 
     # Context Budget (reused logic)
     context_budget: int = Field(default=80000, ge=4000, le=2000000, env="CONTEXT_BUDGET")
@@ -1227,7 +1228,7 @@ class ExternalConfig(BaseModel):
     top_k: int = Field(default=40, ge=1, env="EXTERNAL_TOP_K")
 
     # Model map for phases
-    model_map: Dict[str, str] = Field(default_factory=lambda: {"planning": "", "execution": "", "analysis": ""})
+    model_map: dict[str, str] = Field(default_factory=lambda: {"planning": "", "execution": "", "analysis": ""})
 
     # Defaults
     default_system_prompt: str = """
@@ -1236,7 +1237,7 @@ class ExternalConfig(BaseModel):
     """
 
     # Tools logic reused from OllamaConfig
-    tools: List[Tool] = Field(default_factory=lambda: OllamaConfig().tools)
+    tools: list[Tool] = Field(default_factory=lambda: OllamaConfig().tools)
 
     # Context Budget (reused logic)
     context_budget: int = Field(default=20000, ge=4000, le=2000000, env="CONTEXT_BUDGET")
@@ -1303,7 +1304,7 @@ class CustomAPIConfig(BaseModel):
     default_system_prompt: str = Field(default="", env="CUSTOM_API_SYSTEM_PROMPT")
 
     # Model map for different phases
-    model_map: Dict[str, str] = Field(default_factory=lambda: {"planning": "", "execution": "", "analysis": ""})
+    model_map: dict[str, str] = Field(default_factory=lambda: {"planning": "", "execution": "", "analysis": ""})
 
     # LLM Logging (inherited from main config)
     llm_logging_enabled: bool = Field(default=True, env="LLM_LOGGING_ENABLED")
@@ -1352,7 +1353,7 @@ class CustomAPIConfig(BaseModel):
     agentic_loop_enabled: bool = Field(default=True, env="AGENTIC_LOOP_ENABLED")
 
     # Reuse tools and system prompts from OllamaConfig
-    tools: List[Tool] = Field(default_factory=lambda: OllamaConfig().tools)
+    tools: list[Tool] = Field(default_factory=lambda: OllamaConfig().tools)
     planning_system_prompt: str = OllamaConfig().planning_system_prompt
     execution_system_prompt: str = OllamaConfig().execution_system_prompt
     evaluation_system_prompt: str = OllamaConfig().evaluation_system_prompt
@@ -1520,7 +1521,7 @@ class BridgeConfig(BaseSettings):
 
 
 # Helper function to get the config instance
-_config_instance: Optional[BridgeConfig] = None
+_config_instance: BridgeConfig | None = None
 
 
 def get_config() -> BridgeConfig:

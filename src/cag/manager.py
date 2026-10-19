@@ -5,12 +5,12 @@ This module implements the main manager for Cache-Augmented Generation
 that integrates with the Bridge class.
 """
 
-import os
 import logging
-from typing import Dict, Any, Optional, List, Tuple
+import os
+from typing import Any
 
-from .vector_store import create_vector_store_from_docs
 from .malware_patterns import analyze_all_patterns, list_all_patterns
+from .vector_store import create_vector_store_from_docs
 
 logger = logging.getLogger("ollama-ghidra-bridge.cag.manager")
 
@@ -187,7 +187,7 @@ class CAGManager:
 
         return ""
 
-    def update_session_from_bridge_context(self, context_history: List[Dict[str, Any]]) -> None:
+    def update_session_from_bridge_context(self, context_history: list[dict[str, Any]]) -> None:
         """
         Update the session context from the Bridge's context history.
 
@@ -279,9 +279,8 @@ class CAGManager:
 
     def save_session(self) -> None:
         """Save the session memory (handled by Bridge/MemoryManager)."""
-        pass
 
-    def find_similar_analysis(self, query: str) -> Optional[str]:
+    def find_similar_analysis(self, query: str) -> str | None:
         """
         Find a similar previous analysis result.
 
@@ -313,7 +312,7 @@ class CAGManager:
 
         return None
 
-    def get_available_sessions(self) -> List[str]:
+    def get_available_sessions(self) -> list[str]:
         """
         Get a list of available session IDs (handled by MemoryManager).
 
@@ -336,7 +335,7 @@ class CAGManager:
         """
         return False
 
-    def get_debug_info(self) -> Dict[str, Any]:
+    def get_debug_info(self) -> dict[str, Any]:
         """
         Get debug information about the CAG manager.
 
@@ -445,14 +444,15 @@ class CAGManager:
                 return vector_store
 
         except Exception as e:
-            logging.error(f"Error initializing vector store: {str(e)}")
+            logging.error(f"Error initializing vector store: {e!s}")
             return None
 
     def _load_existing_vector_db(self):
         """Load existing vector database if available."""
         try:
-            from pathlib import Path
             import json
+            from pathlib import Path
+
             import numpy as np
 
             vector_db_path = Path("data/vector_db")
@@ -578,6 +578,7 @@ class CAGManager:
         """Check if Ollama server is available for embeddings."""
         try:
             import requests
+
             from src.config import get_config
 
             config = get_config()
@@ -591,7 +592,7 @@ class CAGManager:
         except Exception:
             return False
 
-    def should_skip_command(self, command_name: str, params: Dict[str, Any], context_window: int = 10) -> Tuple[bool, str]:
+    def should_skip_command(self, command_name: str, params: dict[str, Any], context_window: int = 10) -> tuple[bool, str]:
         """
         Determine if a command should be skipped based on recent execution history.
 
@@ -644,7 +645,7 @@ class CAGManager:
 
         return False, ""
 
-    def get_cached_command_result(self, command_name: str, params: Dict[str, Any]) -> Optional[str]:
+    def get_cached_command_result(self, command_name: str, params: dict[str, Any]) -> str | None:
         """
         Get a cached result for a command from the session memory.
 
@@ -680,7 +681,7 @@ class CAGManager:
 
         return None
 
-    def enhance_prompt_with_memory_context(self, query: str, command_name: str = None, params: Dict[str, Any] = None) -> str:
+    def enhance_prompt_with_memory_context(self, query: str, command_name: str = None, params: dict[str, Any] = None) -> str:
         """
         Enhance a prompt with relevant memory context to prevent redundant operations.
 
@@ -746,7 +747,7 @@ class CAGManager:
 
         return ""
 
-    def _get_command_specific_guidance(self, command_name: str, params: Dict[str, Any]) -> str:
+    def _get_command_specific_guidance(self, command_name: str, params: dict[str, Any]) -> str:
         """
         Get command-specific guidance based on memory state.
 
@@ -792,7 +793,7 @@ class CAGManager:
 
         return "\n".join(guidance) if guidance else ""
 
-    def update_command_execution(self, command_name: str, params: Dict[str, Any], result: str) -> None:
+    def update_command_execution(self, command_name: str, params: dict[str, Any], result: str) -> None:
         """
         Update the session context with a completed command execution.
 
@@ -828,7 +829,7 @@ class CAGManager:
             query = f"analyze_function for {func_identifier}"
             self.update_from_analysis_result(query, str(params), result)
 
-    def _prune_session_for_query(self, query: str, token_limit: int = 4000) -> Dict[str, Any]:
+    def _prune_session_for_query(self, query: str, token_limit: int = 4000) -> dict[str, Any]:
         """
         Prune the session context to fit within token limits while retaining relevant information.
         """
@@ -881,7 +882,7 @@ class CAGManager:
 
         return pruned_cache
 
-    def _format_session_context(self, pruned_cache: Dict[str, Any]) -> str:
+    def _format_session_context(self, pruned_cache: dict[str, Any]) -> str:
         """
         Format the pruned session context as a string for prompt inclusion.
         """
@@ -946,8 +947,8 @@ class CAGManager:
     # ========================================================================
 
     def check_function_for_malware_patterns(
-        self, decompiled_code: str, assembly: Optional[str] = None, function_address: Optional[str] = None
-    ) -> Dict[str, Any]:
+        self, decompiled_code: str, assembly: str | None = None, function_address: str | None = None
+    ) -> dict[str, Any]:
         """
         Check decompiled code against malware pattern library.
 
@@ -1006,7 +1007,7 @@ class CAGManager:
             logger.error(f"Error checking malware patterns: {e}", exc_info=True)
             return {"has_matches": False, "matches": [], "summary": ""}
 
-    def _format_pattern_alert(self, all_matches: List[Dict], high_severity: List[Dict], address: Optional[str]) -> str:
+    def _format_pattern_alert(self, all_matches: list[dict], high_severity: list[dict], address: str | None) -> str:
         """
         Format pattern matches as alert text for prompt injection.
 
@@ -1056,7 +1057,7 @@ class CAGManager:
 
         return "\n".join(lines)
 
-    def get_available_patterns(self) -> List[Dict[str, str]]:
+    def get_available_patterns(self) -> list[dict[str, str]]:
         """
         Get list of all available malware patterns.
 
