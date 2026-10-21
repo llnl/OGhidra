@@ -6,9 +6,8 @@
     },
     "oghidra": {
       "type": "stdio",
-      "command": "/absolute/path/to/OGhidra/.venv/bin/python",
+      "command": "/absolute/path/to/OGhidra/.venv/bin/oghidra-workflows",
       "args": [
-        "/absolute/path/to/OGhidra/main.py",
         "--config",
         "/absolute/path/to/OGhidra/config.yaml"
       ]

@@ -203,7 +203,7 @@ def main():
         )
     except KeyboardInterrupt:
         logger.info("server.interrupted")
-    except Exception:
+    except Exception:  # noqa: BLE001 - log every unexpected startup failure.
         if config is None:
             try:
                 configure_logging(

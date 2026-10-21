@@ -35,7 +35,7 @@
     },
     "LMConfig": {
       "additionalProperties": false,
-      "description": "DSPy/LiteLLM settings; model is passed through without rewriting.",
+      "description": "DSPy/LiteLLM settings",
       "properties": {
         "model": {
           "description": "DSPy/LiteLLM identifier: <provider>/<exact model ID>. The first prefix selects the API integration; the remaining ID may contain slashes. This is not a URL. No aliases or prefix rewriting are applied. For a server ID openai/gpt-oss-120b, use hosted_vllm/openai/gpt-oss-120b or openai/openai/gpt-oss-120b.",
