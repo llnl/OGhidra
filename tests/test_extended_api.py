@@ -1,19 +1,19 @@
-#!/usr/bin/env python3
 """
 Test script for the GhidraMCP API to verify the communication endpoints
 used by our AI agent. This script is focused on understanding which endpoints
 actually work and how they should be properly called.
 """
 
-import json
-import requests
 import argparse
+import inspect
+import json
+import logging
+import os
 import sys
 import traceback
-import inspect
-import os
-from typing import Dict, Any
-import logging
+from typing import Any
+
+import requests
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -27,7 +27,7 @@ class GhidraMCPTester:
         self.available_functions = []
         self.available_addresses = []
 
-    def test_methods(self) -> Dict[str, Any]:
+    def test_methods(self) -> dict[str, Any]:
         """Test the /methods endpoint which returns available functions."""
         try:
             response = requests.get(f"{self.base_url}/methods")
@@ -44,9 +44,8 @@ class GhidraMCPTester:
                         address = method.split("_")[1]
                         if all(c in "0123456789abcdefABCDEF" for c in address):
                             self.available_addresses.append(address)
-                    except Exception as e:
+                    except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                         logger.warning(f"An error occured in attempting to extract addresses from function names {method}: {e}")
-                        pass
 
             return {
                 "success": True,
@@ -54,10 +53,10 @@ class GhidraMCPTester:
                 "type": "string[]",
                 "description": "Returns list of all function names in the program",
             }
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             return {"success": False, "error": str(e)}
 
-    def test_direct_tool_call(self, tool_name: str, params: Dict[str, Any] = None) -> Dict[str, Any]:
+    def test_direct_tool_call(self, tool_name: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         """
         Test calling a tool directly, simulating how the Bridge class would call it.
 
@@ -74,8 +73,8 @@ class GhidraMCPTester:
         try:
             # Try to import the GhidraMCPClient directly to see how it calls methods
             sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
-            from src.ghidra_client import GhidraMCPClient
             from src.config import GhidraMCPConfig
+            from src.ghidra_client import GhidraMCPClient
 
             # Create a config
             config = GhidraMCPConfig()
@@ -113,7 +112,7 @@ class GhidraMCPTester:
                 "description": f"Direct call to {tool_name} with params {params}",
                 "signature": str(sig),
             }
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             return {"success": False, "error": str(e), "traceback": traceback.format_exc()}
 
     def run_tests(self, specific_tools=None):

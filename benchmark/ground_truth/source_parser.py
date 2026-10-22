@@ -12,7 +12,7 @@ For more accurate parsing, consider integrating with tree-sitter or clang.
 import logging
 import re
 from pathlib import Path
-from typing import List, Optional
+from typing import ClassVar
 
 from .extractor import FunctionGroundTruth
 
@@ -28,7 +28,7 @@ class SourceCodeParser:
     """
 
     # Regex patterns for C/C++ parsing
-    PATTERNS = {
+    PATTERNS: ClassVar[dict[str, re.Pattern[str]]] = {
         # Doxygen-style comments: /** ... */ or /// ...
         "doxygen_block": re.compile(r"/\*\*\s*(.*?)\s*\*/", re.DOTALL),
         "doxygen_line": re.compile(r"(?:^|\n)\s*///\s*(.+?)(?=\n(?!\s*///))", re.MULTILINE),
@@ -56,7 +56,7 @@ class SourceCodeParser:
     }
 
     # Keywords that are not function names
-    KEYWORDS = {
+    KEYWORDS: ClassVar[set[str]] = {
         "if",
         "else",
         "while",
@@ -92,7 +92,7 @@ class SourceCodeParser:
         self,
         file_path: str,
         base_path: str = "",
-    ) -> List[FunctionGroundTruth]:
+    ) -> list[FunctionGroundTruth]:
         """
         Parse a C/C++ source file and extract functions.
 
@@ -128,7 +128,7 @@ class SourceCodeParser:
         self,
         content: str,
         source_file: str,
-    ) -> List[FunctionGroundTruth]:
+    ) -> list[FunctionGroundTruth]:
         """Extract all functions from source content."""
         functions = []
 
@@ -185,7 +185,7 @@ class SourceCodeParser:
         self,
         content: str,
         func_start: int,
-    ) -> Optional[str]:
+    ) -> str | None:
         """Find documentation comment immediately before function."""
         # Look at the 500 characters before the function
         search_start = max(0, func_start - 500)
@@ -259,8 +259,8 @@ class SourceCodeParser:
         self,
         func_name: str,
         body: str,
-        docstring: Optional[str],
-    ) -> List[str]:
+        docstring: str | None,
+    ) -> list[str]:
         """Extract semantic tags based on function characteristics."""
         tags = []
         combined = f"{func_name} {body} {docstring or ''}"

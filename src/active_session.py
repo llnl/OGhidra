@@ -3,7 +3,7 @@ Active session management for the Ollama-GhidraMCP Bridge.
 """
 
 import datetime
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Literal
 
 from .memory_models import SessionRecord, ToolCallRecord
 from .session_store import SessionHistoryStore
@@ -12,9 +12,9 @@ from .session_store import SessionHistoryStore
 class ActiveSessionManager:
     def __init__(self, store: SessionHistoryStore):
         self.store = store
-        self.current_session: Optional[SessionRecord] = None
+        self.current_session: SessionRecord | None = None
 
-    def start_new_session(self, user_task_description: str) -> Optional[str]:
+    def start_new_session(self, user_task_description: str) -> str | None:
         """
         Starts a new session. If a previous one was in progress, it's saved as 'aborted'.
 
@@ -33,9 +33,9 @@ class ActiveSessionManager:
     def log_tool_call(
         self,
         tool_name: str,
-        parameters: Dict[str, Any],
-        status: Optional[Literal["success", "error"]] = None,
-        result_preview: Optional[str] = None,
+        parameters: dict[str, Any],
+        status: Literal["success", "error"] | None = None,
+        result_preview: str | None = None,
     ) -> bool:
         """
         Logs a tool call to the current active session.
@@ -57,7 +57,7 @@ class ActiveSessionManager:
         return True
 
     def update_tool_call_status(
-        self, index: int, status: Literal["success", "error"], result_preview: Optional[str] = None
+        self, index: int, status: Literal["success", "error"], result_preview: str | None = None
     ) -> bool:
         """
         Updates the status of a previously logged tool call.
@@ -98,8 +98,8 @@ class ActiveSessionManager:
     def end_current_session(
         self,
         outcome: Literal["success", "failure", "partial_success", "aborted"],
-        reason: Optional[str] = None,
-        summary: Optional[str] = None,
+        reason: str | None = None,
+        summary: str | None = None,
     ) -> bool:
         """
         Ends the current session, sets its outcome, and saves it.
@@ -124,11 +124,11 @@ class ActiveSessionManager:
         self.current_session = None
         return True
 
-    def get_current_session_id(self) -> Optional[str]:
+    def get_current_session_id(self) -> str | None:
         """Returns the ID of the current session, if one exists."""
         return self.current_session.session_id if self.current_session else None
 
-    def get_session_tools(self) -> List[ToolCallRecord]:
+    def get_session_tools(self) -> list[ToolCallRecord]:
         """Returns the list of tool calls for the current session."""
         if not self.current_session:
             return []

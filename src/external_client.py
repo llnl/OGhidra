@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 External Generic Client for OGhidra
 -----------------------------------
@@ -8,15 +7,16 @@ Currently implements Google Gemini v1beta interface.
 
 import json
 import logging
-import requests
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Union, Tuple
-from tenacity import Retrying, stop_after_attempt, wait_exponential, retry_if_exception
+from typing import Any
+
+import requests
+from tenacity import Retrying, retry_if_exception, stop_after_attempt, wait_exponential
 
 # Reuse text chunking utilities from ollama_client
-from src.ollama_client import chunk_text_for_embedding, average_embeddings
+from src.ollama_client import average_embeddings, chunk_text_for_embedding
 
 
 def is_retryable_exception(e):
@@ -110,7 +110,7 @@ class ExternalClient:
 
         self.logger.info(f"External LLM logging initialized. Log file: {self.llm_log_file}")
 
-    def _log_llm_interaction(self, interaction_type: str, data: Dict[str, Any]):
+    def _log_llm_interaction(self, interaction_type: str, data: dict[str, Any]):
         """Log LLM interaction to dedicated log file."""
         if not self.llm_logging_enabled or not self.llm_logger:
             return
@@ -127,7 +127,7 @@ class ExternalClient:
                 lines.append(f"{key}: {value}")
             self.llm_logger.info("\n".join(lines))
 
-    def query(self, prompt: Union[str, Tuple[str, str]], phase: Optional[str] = None) -> str:
+    def query(self, prompt: str | tuple[str, str], phase: str | None = None) -> str:
         """
         High-level query interface compatible with Bridge.
         Handles both string prompts and (system, user) tuples.
@@ -151,11 +151,11 @@ class ExternalClient:
     def generate(
         self,
         prompt: str,
-        model: Optional[str] = None,
-        system_prompt: Optional[str] = None,
-        temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None,
-        phase: Optional[str] = None,
+        model: str | None = None,
+        system_prompt: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        phase: str | None = None,
     ) -> str:
         """
         Generate a response from the External API.
@@ -314,10 +314,9 @@ class ExternalClient:
             if hasattr(e, "response") and e.response is not None:
                 try:
                     error_body = e.response.text
-                    error_detail = f"{str(e)} | Response: {error_body[:1000]}"
-                except Exception as inner_exception:
+                    error_detail = f"{e!s} | Response: {error_body[:1000]}"
+                except Exception as inner_exception:  # noqa: BLE001 intentional defensive recovery boundary
                     self.logger.warning(f"Failed to get the error detail while parsing exception {e}: {inner_exception}")
-                    pass
 
             self.logger.error(f"Error calling External API (Google): {error_detail}")
             self.logger.error(
@@ -337,19 +336,22 @@ class ExternalClient:
                 )
             raise
 
-    def generate_with_phase(self, prompt: str, phase: Optional[str] = None, system_prompt: Optional[str] = None) -> str:
+    def generate_with_phase(self, prompt: str, phase: str | None = None, system_prompt: str | None = None) -> str:
         """Generate using phase-specific model configuration."""
         model = self.model_map.get(phase) if phase else None
 
         # Defensive Check: Validate model against provider
-        if self.provider == "google":
-            if model and not (model.lower().startswith("gemini") or model.lower().startswith("learnlm")):
-                self.logger.warning(f"Ignoring invalid model '{model}' for Google provider. Using default.")
-                model = None
+        if (
+            self.provider == "google"
+            and model
+            and not (model.lower().startswith("gemini") or model.lower().startswith("learnlm"))
+        ):
+            self.logger.warning(f"Ignoring invalid model '{model}' for Google provider. Using default.")
+            model = None
 
         return self.generate(prompt=prompt, model=model, system_prompt=system_prompt, phase=phase)
 
-    def embed(self, text: str, model: str = None) -> List[float]:
+    def embed(self, text: str, model: str | None = None) -> list[float]:
         """
         Generate embeddings.
         """
@@ -371,7 +373,7 @@ class ExternalClient:
             self.logger.error("Embeddings not implemented for this provider yet.")
             return []
 
-    def _embed_chunked(self, text: str, embedding_model: str, start_time: Optional[float]) -> List[float]:
+    def _embed_chunked(self, text: str, embedding_model: str, start_time: float | None) -> list[float]:
         chunks = chunk_text_for_embedding(text, max_chars=8000)
         chunk_embeddings = []
         for chunk in chunks:
@@ -384,7 +386,7 @@ class ExternalClient:
 
                 if emb:
                     chunk_embeddings.append(emb)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                 self.logger.error(f"Failed to embed chunk: {e}")
 
         if not chunk_embeddings:
@@ -392,7 +394,7 @@ class ExternalClient:
 
         return average_embeddings(chunk_embeddings)
 
-    def _embed_single_google(self, text: str, embedding_model: str, start_time: Optional[float]) -> List[float]:
+    def _embed_single_google(self, text: str, embedding_model: str, start_time: float | None) -> list[float]:
         if not text.strip():
             return []
 
@@ -443,6 +445,6 @@ class ExternalClient:
                 # Try a lightweight call or just return True if API key valid format
                 return bool(self.api_key)
             return True
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             self.logger.warning(f"Failed external client health check: {e}")
             return False

@@ -1,12 +1,17 @@
-from ..bridge import Bridge
-from .ui_thread import run_on_ui
-import tkinter as tk
-from tkinter import ttk, messagebox, scrolledtext, filedialog
-from datetime import datetime
 import json
 import logging
+import tkinter as tk
+from datetime import datetime
+from tkinter import filedialog, messagebox, scrolledtext, ttk
+
+from ..bridge import Bridge
+from .ui_thread import run_on_ui
 
 logger = logging.getLogger(__name__)
+
+
+class VectorStoreError(RuntimeError):
+    """Raised when vector-store initialization or updates fail."""
 
 
 class RenamedFunctionsPanel:
@@ -16,8 +21,8 @@ class RenamedFunctionsPanel:
     _UI_POLL_INTERVAL_MS = 50
 
     def __init__(self, parent, bridge: Bridge):
-        import threading
         import queue
+        import threading
 
         self.frame = ttk.LabelFrame(parent, text="Analyzed Functions", padding=10)
         self.bridge = bridge
@@ -144,7 +149,7 @@ class RenamedFunctionsPanel:
                     applied = True
                 except tk.TclError as e:
                     logger.debug(f"Queued UI update skipped: {e}")
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                     logger.error(f"Error applying queued UI update: {e}")
 
             if applied:
@@ -166,8 +171,8 @@ class RenamedFunctionsPanel:
 
     def _load_vectors_from_functions(self):
         """Load all analyzed functions into the vector store for RAG enhancement."""
-        import tkinter.messagebox as messagebox
         import threading
+        from tkinter import messagebox
 
         # Check if CAG/RAG is available
         if not (
@@ -190,7 +195,7 @@ class RenamedFunctionsPanel:
                 renamed_functions = self.bridge.analysis_state.get("functions_renamed", {})
                 function_address_mapping = getattr(self.bridge, "function_address_mapping", {})
                 function_count = len(set(list(renamed_functions.keys()) + list(function_address_mapping.keys())))
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             logger.warning(f"Failed to get the function_count: {e}")
             function_count = 0
 
@@ -277,7 +282,7 @@ class RenamedFunctionsPanel:
                                 functions_to_process.append(
                                     {"address": address, "old_name": old_name, "new_name": new_name, "summary": summary}
                                 )
-                    except Exception as e:
+                    except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                         logger.warning(f"Error reading row snapshot: {e}")
                         continue
 
@@ -338,7 +343,7 @@ class RenamedFunctionsPanel:
                         client_config = getattr(Bridge._ollama_client, "config", None)
                         emb_model = getattr(client_config, "embedding_model", "nomic-embed-text")
                         provider = getattr(Bridge._ollama_client, "provider", "LLM")
-                        raise Exception(
+                        raise VectorStoreError(
                             f"{provider} embedding model ({emb_model}) not available.\n\nPlease ensure your configuration is correct."
                         )
 
@@ -347,7 +352,7 @@ class RenamedFunctionsPanel:
                     provider = getattr(Bridge._ollama_client, "provider", "Ollama")
                     logger.info(f"✅ Using {provider} embeddings ({emb_model}) for vector creation")
                 except Exception as e:
-                    raise Exception(f"Embedding service not available: {e}")
+                    raise VectorStoreError(f"Embedding service not available: {e}") from e
 
                 # Process in batches for better performance
                 BATCH_SIZE = 50  # Process 50 functions at once
@@ -406,7 +411,7 @@ class RenamedFunctionsPanel:
                                 )
                             )
 
-                        except Exception as e:
+                        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                             logger.warning(f"Failed to add {func_data['new_name']}: {e}")
                             vectors_failed += 1
 
@@ -451,7 +456,7 @@ class RenamedFunctionsPanel:
                 # Add close button (created + auto-close scheduled on the main thread)
                 run_on_ui(lambda: self._add_vector_close_button(progress_dialog, progress_frame, vectors_failed == 0))
 
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                 logger.error(f"Vector loading error: {e}")
                 err = str(e)
                 set_status("Error occurred during vector loading!")
@@ -506,7 +511,7 @@ class RenamedFunctionsPanel:
                     cag_manager._vector_store_initialized = True
                     logger.info("Created new empty vector store for function embeddings")
                 except Exception as e:
-                    raise Exception(f"Could not create vector store: {e}")
+                    raise VectorStoreError(f"Could not create vector store: {e}") from e
 
             # Now add the document and embedding
             vector_store.documents.append(function_doc)
@@ -521,7 +526,7 @@ class RenamedFunctionsPanel:
                 else:
                     vector_store.embeddings = np.vstack([vector_store.embeddings, embedding.reshape(1, -1)])
         else:
-            raise Exception("CAG manager not available - cannot add to vector store")
+            raise VectorStoreError("CAG manager not available - cannot add to vector store")
 
     @staticmethod
     def _addr_iid(address: str) -> str:
@@ -640,7 +645,7 @@ class RenamedFunctionsPanel:
         with self.dict_lock:
             try:
                 rows = self._compute_desired_rows()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                 logger.error(f"Error computing function list: {e}")
                 return
             self._rows_model = {iid: tuple(values) for iid, values in rows}
@@ -713,10 +718,7 @@ class RenamedFunctionsPanel:
             return True
 
         # Check for decimal addresses (long numbers)
-        if text.isdigit() and len(text) >= 8:
-            return True
-
-        return False
+        return bool(text.isdigit() and len(text) >= 8)
 
     def _on_function_double_click(self, event):
         """Handle double-click on function item - opens summary editor."""
@@ -944,7 +946,7 @@ class RenamedFunctionsPanel:
                 editor_window.destroy()
                 messagebox.showinfo("Success", "Behavior summary updated successfully!")
 
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                 logger.error(f"Error saving summary: {e}")
                 # Even if tree update fails, we can still save the summary to storage
                 try:
@@ -959,7 +961,7 @@ class RenamedFunctionsPanel:
 
                     editor_window.destroy()
                     messagebox.showinfo("Success", "Behavior summary saved to storage (UI will update on next refresh)")
-                except Exception as inner_e:
+                except Exception as inner_e:  # noqa: BLE001 intentional defensive recovery boundary
                     logger.error(f"Failed to save to storage as well: {inner_e}")
                     messagebox.showerror("Error", f"Failed to save summary: {e}")
 
@@ -1058,7 +1060,7 @@ class RenamedFunctionsPanel:
 
             messagebox.showinfo("Success", f"Function list exported to {filename}")
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             messagebox.showerror("Error", f"Failed to export function list: {e}")
 
     def _clear_all_functions(self):
@@ -1078,7 +1080,7 @@ class RenamedFunctionsPanel:
                 self._update_function_list()
 
                 messagebox.showinfo("Success", "All renamed functions cleared.")
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                 messagebox.showerror("Error", f"Failed to clear functions: {e}")
 
     def _start_auto_refresh(self):
@@ -1091,7 +1093,7 @@ class RenamedFunctionsPanel:
                     logger.debug("Skipping auto-refresh during batch operation")
                 else:
                     self._update_function_list()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                 logger.error(f"Error in auto-refresh: {e}")
 
             # Schedule next refresh

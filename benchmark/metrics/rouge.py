@@ -10,7 +10,6 @@ than embedding-based metrics, but useful for content coverage.
 """
 
 import logging
-from typing import Dict, List
 
 from .evaluator import BaseMetric
 
@@ -76,7 +75,7 @@ class RougeMetric(BaseMetric):
         scores = self._scorer.score(reference, candidate)
         return scores["rougeL"].fmeasure
 
-    def detailed_score(self, candidate: str, reference: str) -> Dict[str, Dict[str, float]]:
+    def detailed_score(self, candidate: str, reference: str) -> dict[str, dict[str, float]]:
         """
         Get detailed ROUGE scores including precision, recall, and F-measure.
 
@@ -106,7 +105,7 @@ class RougeMetric(BaseMetric):
             },
         }
 
-    def batch_score(self, candidates: List[str], references: List[str]) -> List[float]:
+    def batch_score(self, candidates: list[str], references: list[str]) -> list[float]:
         """
         Compute ROUGE-L for multiple pairs.
 

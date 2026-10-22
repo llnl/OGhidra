@@ -36,5 +36,5 @@ try:
         if not response or len(response) < 10:
             print("WARNING: EMPTY/SHORT RESPONSE")
 
-except Exception as e:
+except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
     print(f"Error: {e}")

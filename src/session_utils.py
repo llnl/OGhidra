@@ -3,14 +3,13 @@ Utilities for working with session records, generating embeddings and summaries.
 """
 
 import logging
-import numpy as np
-from typing import Optional
 import time
+
+import numpy as np
 
 # Import your Ollama client or other LLM clients as needed
 # For example, if you have an Ollama client in src/ollama_client.py
 # from .ollama_client import OllamaClient
-
 from .memory_models import SessionRecord
 
 logger = logging.getLogger(__name__)
@@ -96,7 +95,7 @@ class SessionEmbedder:
                 logger.debug("Generated embedding for session %s", session.session_id)
                 return emb_vec
             logger.warning("LLM client returned no embedding – falling back to placeholder vector")
-        except Exception as exc:  # pylint: disable=broad-except
+        except Exception as exc:  # pylint: disable=broad-except  # noqa: BLE001 intentional defensive recovery boundary
             logger.error("Failed to generate embedding: %s – falling back to placeholder", exc)
 
         # ------------------------------------------------------------------
@@ -165,7 +164,7 @@ Focus on the key insights, findings, or conclusions that would be useful for fut
 """
         return prompt
 
-    def generate_summary(self, session: SessionRecord) -> Optional[str]:
+    def generate_summary(self, session: SessionRecord) -> str | None:
         """
         Generate a summary for a session record.
 
@@ -190,8 +189,8 @@ Focus on the key insights, findings, or conclusions that would be useful for fut
 
             outcome_text = outcome_map.get(session.outcome, "Session completed")
             tool_count = len(session.tool_calls)
-            tools_used = ", ".join(set(tc.tool_name for tc in session.tool_calls[:3]))
-            if len(set(tc.tool_name for tc in session.tool_calls)) > 3:
+            tools_used = ", ".join({tc.tool_name for tc in session.tool_calls[:3]})
+            if len({tc.tool_name for tc in session.tool_calls}) > 3:
                 tools_used += ", and others"
 
             summary = f"{outcome_text} using {tool_count} tool calls. Main tools used: {tools_used}. "
@@ -207,6 +206,6 @@ Focus on the key insights, findings, or conclusions that would be useful for fut
             prompt = self._create_summary_prompt(session)
             response = self.llm_client.generate(prompt=prompt, max_tokens=150)
             return response.text.strip()
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             logger.error(f"Error generating summary: {e}")
             return None

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Lead Tracker — Prioritized Investigation Queue
 -----------------------------------------------
@@ -7,9 +6,8 @@ before moving to new areas. Prevents the "breadth-over-depth" failure mode.
 """
 
 import logging
-from dataclasses import dataclass
-from typing import List, Optional, Set
 import re
+from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +18,7 @@ class Lead:
 
     description: str
     priority: str  # HIGH, MEDIUM, LOW
-    source_address: Optional[str] = None
+    source_address: str | None = None
     status: str = "new"  # new, in_progress, completed, abandoned
 
     def __str__(self):
@@ -34,15 +32,15 @@ class LeadTracker:
     """
 
     def __init__(self):
-        self.leads: List[Lead] = []
-        self.seen_leads: Set[str] = set()  # To prevent duplicates
+        self.leads: list[Lead] = []
+        self.seen_leads: set[str] = set()  # To prevent duplicates
 
     def reset(self):
         """Reset the tracker state, clearing all leads."""
         self.leads = []
         self.seen_leads = set()
 
-    def add_lead(self, description: str, priority: str = "MEDIUM", address: str = None) -> bool:
+    def add_lead(self, description: str, priority: str = "MEDIUM", address: str | None = None) -> bool:
         """
         Add a new lead if it hasn't been seen before.
         Returns True if added, False if duplicate.
@@ -90,12 +88,12 @@ class LeadTracker:
                 if self.add_lead(desc, prio, addr):
                     count += 1
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             logger.error(f"Error parsing leads from dump: {e}")
 
         return count
 
-    def get_active_leads(self, limit: int = 3) -> List[Lead]:
+    def get_active_leads(self, limit: int = 3) -> list[Lead]:
         """Get top N active (new/in_progress) leads."""
         active = [lead for lead in self.leads if lead.status in ["new", "in_progress"]]
         return active[:limit]

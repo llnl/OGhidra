@@ -1,16 +1,15 @@
-#!/usr/bin/env python3
 """Debug script to investigate why no function pointer tables are found."""
 
-import sys
-import os
 import base64
-import struct
 import logging
+import os
+import struct
+import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.ghidra_client import GhidraMCPClient
 from src.config import GhidraMCPConfig
+from src.ghidra_client import GhidraMCPClient
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -32,9 +31,8 @@ def main():
             try:
                 addr = int(parts[1].strip(), 16)
                 function_map[addr] = name
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                 logger.warning(f"An error occured in attempting to extract the address from the function line {line}: {e}")
-                pass
 
     print(f"Parsed {len(function_map)} functions")
     if not function_map:
@@ -92,13 +90,12 @@ def main():
                 # Parse as 8-byte pointers
                 for i in range(0, len(data) - 7, 8):
                     ptr = struct.unpack("<Q", data[i : i + 8])[0]
-                    if min_addr <= ptr <= max_addr:
-                        # Check if it's exactly a function address
-                        if ptr in function_map:
-                            found_ptrs.append((addr + i, ptr, function_map[ptr]))
+                    # Check if it is in range and exactly a function address.
+                    if min_addr <= ptr <= max_addr and ptr in function_map:
+                        found_ptrs.append((addr + i, ptr, function_map[ptr]))
 
                 scan_offset += chunk_size
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                 print(f"  Exception at 0x{addr:x}: {e}")
                 break
 

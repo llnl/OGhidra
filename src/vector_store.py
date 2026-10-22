@@ -2,11 +2,12 @@
 Vector storage for session records to enable RAG capabilities.
 """
 
-import os
 import json
-import numpy as np
-from typing import List, Dict, Any
 import logging
+import os
+from typing import Any
+
+import numpy as np
 
 # Optional FAISS import for fast ANN search
 try:
@@ -60,7 +61,7 @@ class SimpleVectorStore:
                 self.vectors = np.zeros((0, 0))  # Empty array, dimension will be set on first add
                 self.metadata = []
                 logger.info("No existing vector storage found. Starting with empty storage.")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             logger.error(f"Error loading vector store: {e}")
             self.vectors = np.zeros((0, 0))
             self.metadata = []
@@ -94,7 +95,7 @@ class SimpleVectorStore:
                 with open(self.metadata_file, "w", encoding="utf-8") as f:
                     json.dump(self.metadata, f)
                 logger.info(f"Saved {len(self.metadata)} vectors to disk.")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             logger.error(f"Error saving vector store: {e}")
 
     def add_session(self, session: SessionRecord, embedding: np.ndarray):
@@ -140,7 +141,7 @@ class SimpleVectorStore:
                 faiss.normalize_L2(emb.reshape(1, -1))
                 self._faiss_index.add(emb.reshape(1, -1))
 
-    def search(self, query_embedding: np.ndarray, top_k: int = 5) -> List[Dict[str, Any]]:
+    def search(self, query_embedding: np.ndarray, top_k: int = 5) -> list[dict[str, Any]]:
         """
         Search for similar sessions based on embedding similarity.
 
@@ -182,13 +183,13 @@ class SimpleVectorStore:
             if idx < 0 or idx >= len(self.metadata):
                 continue  # FAISS may return -1 if fewer than k vectors
             result = self.metadata[idx].copy()
-            sim = similarities[i] if isinstance(similarities, np.ndarray) else similarities[i]
+            sim = similarities[i]
             result["similarity"] = float(sim)
             results.append(result)
 
         return results
 
-    def get_session_ids(self) -> List[str]:
+    def get_session_ids(self) -> list[str]:
         """Returns a list of all session IDs in the store."""
         return [m["session_id"] for m in self.metadata]
 

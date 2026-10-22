@@ -1,22 +1,22 @@
-#!/usr/bin/env python3
 """
 Custom API Client for OGhidra
 -----------------------------
 Handles communication with OpenAI-compatible APIs (GPT-5, custom endpoints, etc.).
 """
 
+import email.utils
 import json
 import logging
-import requests
+import random
+import threading
 import time
 import uuid
-import threading
-import email.utils
-import random
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Union, Tuple
-from tenacity import Retrying, stop_after_attempt, wait_exponential, retry_if_exception
+from typing import Any
+
+import requests
+from tenacity import Retrying, retry_if_exception, stop_after_attempt, wait_exponential
 
 from .api_health import build_health_request, health_error_detail, post_health_request
 
@@ -157,7 +157,7 @@ class CustomAPIClient:
 
         self.logger.info(f"Custom API LLM logging initialized. Log file: {self.llm_log_file}")
 
-    def _log_llm_interaction(self, interaction_type: str, data: Dict[str, Any]):
+    def _log_llm_interaction(self, interaction_type: str, data: dict[str, Any]):
         """Log LLM interaction to dedicated log file."""
         if not self.llm_logging_enabled or not self.llm_logger:
             return
@@ -173,13 +173,13 @@ class CustomAPIClient:
                 lines.append(f"{key}: {value}")
             self.llm_logger.info("\n".join(lines))
 
-    def _emit_ui_event(self, event_type: str, payload: Dict[str, Any]) -> None:
+    def _emit_ui_event(self, event_type: str, payload: dict[str, Any]) -> None:
         cb = self._ui_event_callback
         if not cb:
             return
         try:
             cb(event_type, payload)
-        except Exception:
+        except Exception:  # noqa: BLE001, S110 intentional defensive recovery boundary
             pass
 
     def _warn_if_tls_verification_disabled(self, operation: str) -> None:
@@ -295,10 +295,10 @@ class CustomAPIClient:
             if delta <= 0:
                 return 0.0
             return min(delta, float(self.retry_after_max_seconds))
-        except Exception:
+        except Exception:  # noqa: BLE001 intentional defensive recovery boundary
             return 0.0
 
-    def _make_before_sleep(self, interaction_type: str, request_id: str, model: str, phase: Optional[str]):
+    def _make_before_sleep(self, interaction_type: str, request_id: str, model: str, phase: str | None):
         """Create a tenacity before_sleep callback that logs retries and adapts throttle."""
 
         def before_sleep(retry_state):
@@ -306,7 +306,7 @@ class CustomAPIClient:
             try:
                 if retry_state and retry_state.outcome:
                     exc = retry_state.outcome.exception()
-            except Exception:
+            except Exception:  # noqa: BLE001 intentional defensive recovery boundary
                 exc = None
 
             status_code = None
@@ -315,7 +315,7 @@ class CustomAPIClient:
                 try:
                     status_code = exc.response.status_code
                     retry_after_s = self._parse_retry_after_seconds(exc.response)
-                except Exception:
+                except Exception:  # noqa: BLE001 intentional defensive recovery boundary
                     status_code = None
                     retry_after_s = 0.0
 
@@ -332,7 +332,7 @@ class CustomAPIClient:
                             sleep_s = max(sleep_s, float(self._adaptive_interval))
 
                     retry_state.next_action.sleep = sleep_s
-            except Exception:
+            except Exception:  # noqa: BLE001, S110 intentional defensive recovery boundary
                 pass
 
             if status_code in (429, 503):
@@ -340,7 +340,7 @@ class CustomAPIClient:
 
             try:
                 sleep_s = float(retry_state.next_action.sleep) if retry_state.next_action is not None else None
-            except Exception:
+            except Exception:  # noqa: BLE001 intentional defensive recovery boundary
                 sleep_s = None
 
             adaptive_interval = None
@@ -383,12 +383,12 @@ class CustomAPIClient:
 
         return before_sleep
 
-    def query(self, prompt: Union[str, Tuple[str, str]], phase: Optional[str] = None) -> str:
+    def query(self, prompt: str | tuple[str, str], phase: str | None = None) -> str:
         """
         High-level query interface compatible with Bridge.
         Handles both string prompts and (system, user) tuples.
         """
-        system_prompt: Optional[str] = None
+        system_prompt: str | None = None
         user_prompt: str
 
         if isinstance(prompt, tuple) and len(prompt) == 2:
@@ -401,11 +401,11 @@ class CustomAPIClient:
     def generate(
         self,
         prompt: str,
-        model: Optional[str] = None,
-        system_prompt: Optional[str] = None,
-        temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None,
-        phase: Optional[str] = None,
+        model: str | None = None,
+        system_prompt: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        phase: str | None = None,
     ) -> str:
         """
         Generate a response from the Custom API.
@@ -577,7 +577,7 @@ class CustomAPIClient:
                     error_body = http_resp.text
                     self.logger.error(f"Response Status: {http_resp.status_code}")
                     self.logger.error(f"Response Body: {error_body[:1000]}")
-                except Exception:
+                except Exception:  # noqa: BLE001, S110 intentional defensive recovery boundary
                     pass
 
             # Log request sizes for debugging
@@ -608,17 +608,17 @@ class CustomAPIClient:
             # Ensure we always release semaphore
             try:
                 self._request_semaphore.release()
-            except Exception:
+            except Exception:  # noqa: BLE001, S110 intentional defensive recovery boundary
                 pass
 
-    def generate_with_phase(self, prompt: str, phase: Optional[str] = None, system_prompt: Optional[str] = None) -> str:
+    def generate_with_phase(self, prompt: str, phase: str | None = None, system_prompt: str | None = None) -> str:
         """Generate using phase-specific model configuration."""
         model_override = self.model_map.get(phase) if phase else None
         if model_override:
             return self.generate(prompt=prompt, model=model_override, system_prompt=system_prompt, phase=phase)
         return self.generate(prompt=prompt, system_prompt=system_prompt, phase=phase)
 
-    def embed(self, text: str, model: Optional[str] = None) -> List[float]:
+    def embed(self, text: str, model: str | None = None) -> list[float]:
         """
         Generate embeddings using Custom API (OpenAI-compatible).
         Supports text-embedding-ada-002 and similar models.
@@ -741,7 +741,7 @@ class CustomAPIClient:
         finally:
             try:
                 self._request_semaphore.release()
-            except Exception:
+            except Exception:  # noqa: BLE001, S110 intentional defensive recovery boundary
                 pass
 
     def check_health(self) -> bool:
@@ -757,6 +757,6 @@ class CustomAPIClient:
                     health_error_detail(response),
                 )
             return response.status_code == 200
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             self.logger.error(f"Custom API health check failed: {e}")
             return False

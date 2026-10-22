@@ -3,9 +3,9 @@ Unit tests for behavior summary extraction from function analysis text.
 Tests the _extract_behavior_summary method in Bridge class.
 """
 
-import sys
 import os
 import re
+import sys
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -182,7 +182,7 @@ if __name__ == "__main__":
     except AssertionError as e:
         print(f"\nTEST FAILED: {e}")
         sys.exit(1)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
         print(f"\nERROR: {e}")
         import traceback
 

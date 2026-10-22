@@ -9,7 +9,6 @@ Reference: https://github.com/Tiiiger/bert_score
 """
 
 import logging
-from typing import List
 
 from .evaluator import BaseMetric
 
@@ -78,7 +77,7 @@ class BERTScoreMetric(BaseMetric):
         """
         self._lazy_init()
 
-        P, R, F1 = self._scorer.score(
+        _P, _R, F1 = self._scorer.score(
             cands=[candidate],
             refs=[reference],
             model_type=self.model_type,
@@ -89,7 +88,7 @@ class BERTScoreMetric(BaseMetric):
 
         return float(F1[0])
 
-    def batch_score(self, candidates: List[str], references: List[str]) -> List[float]:
+    def batch_score(self, candidates: list[str], references: list[str]) -> list[float]:
         """
         Compute BERTScore for multiple pairs efficiently.
 
@@ -102,7 +101,7 @@ class BERTScoreMetric(BaseMetric):
         """
         self._lazy_init()
 
-        P, R, F1 = self._scorer.score(
+        _P, _R, F1 = self._scorer.score(
             cands=candidates,
             refs=references,
             model_type=self.model_type,

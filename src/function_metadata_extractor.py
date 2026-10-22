@@ -8,9 +8,9 @@ Author: OGhidra Enhanced Knowledge System
 Date: 2026-02-19
 """
 
-import re
 import logging
-from typing import Dict, List, Any, Set, Optional
+import re
+from typing import Any, ClassVar
 
 logger = logging.getLogger("ollama-ghidra-bridge.metadata_extractor")
 
@@ -28,49 +28,52 @@ class FunctionMetadataExtractor:
     """
 
     # Operation detection patterns
-    CRYPTO_PATTERNS = [
+    CRYPTO_PATTERNS: ClassVar[list[str]] = [
         r"\b(encrypt|decrypt|cipher|hash|md5|sha\d+|aes|des|rsa|crypto|random|nonce|iv)\b",
         r"\bCrypt\w+",
         r"\b(key|salt|hmac)\b",
     ]
 
-    NETWORK_PATTERNS = [
+    NETWORK_PATTERNS: ClassVar[list[str]] = [
         r"\b(socket|connect|send|recv|bind|listen|accept|http|tcp|udp|ip|dns)\b",
         r"\b(WSA|getaddrinfo|inet_|htons|ntohs)\b",
         r"\b(url|uri|request|response|packet)\b",
     ]
 
-    FILE_IO_PATTERNS = [
+    FILE_IO_PATTERNS: ClassVar[list[str]] = [
         r"\b(fopen|fclose|fread|fwrite|fseek|ftell|file|FILE)\b",
         r"\b(open|close|read|write|lseek)\b",
         r"\b(CreateFile|ReadFile|WriteFile|CloseHandle)\b",
         r"\b(path|directory|folder)\b",
     ]
 
-    MEMORY_PATTERNS = [
+    MEMORY_PATTERNS: ClassVar[list[str]] = [
         r"\b(malloc|calloc|realloc|free|new|delete)\b",
         r"\b(memcpy|memset|memmove|memcmp)\b",
         r"\b(HeapAlloc|HeapFree|VirtualAlloc|VirtualFree)\b",
         r"\b(buffer|alloc)\b",
     ]
 
-    STRING_PATTERNS = [
+    STRING_PATTERNS: ClassVar[list[str]] = [
         r"\b(str(cpy|cat|cmp|len|chr|str|tok|dup|n\w+))\b",
         r"\b(sprintf|snprintf|printf|scanf)\b",
         r"\b(wcs\w+|_tcs\w+)\b",
         r"\b(string|text|char\s*\*)\b",
     ]
 
-    VALIDATION_PATTERNS = [
+    VALIDATION_PATTERNS: ClassVar[list[str]] = [
         r"\bif\s*\([^)]*(<|>|==|!=|<=|>=)",
         r"\b(validate|check|verify|assert|ensure)\b",
         r"\breturn\s+(NULL|0|-1|FALSE)",
         r"\b(bounds|range|limit|max|min)\b",
     ]
 
-    REGISTRY_PATTERNS = [r"\b(Reg(OpenKey|QueryValue|SetValue|CreateKey|DeleteKey|CloseKey))\b", r"\b(HKEY_|registry)\b"]
+    REGISTRY_PATTERNS: ClassVar[list[str]] = [
+        r"\b(Reg(OpenKey|QueryValue|SetValue|CreateKey|DeleteKey|CloseKey))\b",
+        r"\b(HKEY_|registry)\b",
+    ]
 
-    PROCESS_PATTERNS = [
+    PROCESS_PATTERNS: ClassVar[list[str]] = [
         r"\b(CreateProcess|OpenProcess|TerminateProcess|process)\b",
         r"\b(thread|CreateThread|_beginthread)\b",
         r"\b(mutex|semaphore|event|critical_section)\b",
@@ -80,7 +83,7 @@ class FunctionMetadataExtractor:
         """Initialize the metadata extractor."""
         self.logger = logger
 
-    def extract_all_metadata(self, decompiled_code: str, function_name: str, context: Optional[Dict] = None) -> Dict[str, Any]:
+    def extract_all_metadata(self, decompiled_code: str, function_name: str, context: dict | None = None) -> dict[str, Any]:
         """
         Extract all metadata from decompiled function code.
 
@@ -108,11 +111,11 @@ class FunctionMetadataExtractor:
 
             return metadata
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             self.logger.error(f"Error extracting metadata: {e}")
             return self._get_default_metadata()
 
-    def extract_metrics(self, decompiled_code: str) -> Dict[str, Any]:
+    def extract_metrics(self, decompiled_code: str) -> dict[str, Any]:
         """
         Extract code complexity metrics.
 
@@ -157,7 +160,7 @@ class FunctionMetadataExtractor:
             "estimated_instructions": len(code_lines) * 2,  # Rough estimate
         }
 
-    def categorize_operations(self, decompiled_code: str, function_name: str) -> Dict[str, Any]:
+    def categorize_operations(self, decompiled_code: str, function_name: str) -> dict[str, Any]:
         """
         Categorize the operations performed by the function.
 
@@ -199,11 +202,11 @@ class FunctionMetadataExtractor:
 
         return {
             "primary_domain": primary_domain,
-            "operations": sorted(list(operations)),
+            "operations": sorted(operations),
             "security_relevant": self._is_security_relevant(operations),
         }
 
-    def extract_function_signature(self, decompiled_code: str) -> Dict[str, Any]:
+    def extract_function_signature(self, decompiled_code: str) -> dict[str, Any]:
         """
         Parse function signature from decompiled code.
 
@@ -251,7 +254,7 @@ class FunctionMetadataExtractor:
             "param_count": len(params),
         }
 
-    def detect_patterns(self, decompiled_code: str) -> List[str]:
+    def detect_patterns(self, decompiled_code: str) -> list[str]:
         """
         Detect common code patterns.
 
@@ -283,8 +286,8 @@ class FunctionMetadataExtractor:
             patterns.append("conditional_return")
 
         # Resource management (alloc + free pairs)
-        has_alloc = bool(re.search(r"\b(malloc|calloc|new|alloc)\b", decompiled_code, re.I))
-        has_free = bool(re.search(r"\b(free|delete)\b", decompiled_code, re.I))
+        has_alloc = bool(re.search(r"\b(malloc|calloc|new|alloc)\b", decompiled_code, re.IGNORECASE))
+        has_free = bool(re.search(r"\b(free|delete)\b", decompiled_code, re.IGNORECASE))
         if has_alloc and has_free:
             patterns.append("resource_management")
 
@@ -294,7 +297,7 @@ class FunctionMetadataExtractor:
 
         return patterns
 
-    def analyze_security_indicators(self, decompiled_code: str, operations: List[str]) -> Dict[str, Any]:
+    def analyze_security_indicators(self, decompiled_code: str, operations: list[str]) -> dict[str, Any]:
         """
         Analyze security-relevant indicators.
 
@@ -339,18 +342,16 @@ class FunctionMetadataExtractor:
         criticality = "low"
         if "handles_credentials" in indicators or "uses_crypto" in indicators:
             criticality = "high"
-        elif "network_communication" in indicators or "process_manipulation" in indicators:
-            criticality = "medium"
-        elif len(indicators) >= 3:
+        elif "network_communication" in indicators or "process_manipulation" in indicators or len(indicators) >= 3:
             criticality = "medium"
 
         return {
-            "indicators": sorted(list(indicators)),
+            "indicators": sorted(indicators),
             "risks": risks,
             "criticality": criticality,
         }
 
-    def extract_data_flow(self, decompiled_code: str) -> Dict[str, Any]:
+    def extract_data_flow(self, decompiled_code: str) -> dict[str, Any]:
         """
         Extract data flow information.
 
@@ -367,7 +368,7 @@ class FunctionMetadataExtractor:
 
         # Detect side effects
         side_effects = []
-        if re.search(r"\b(fprintf|printf|log|write)\b", decompiled_code, re.I):
+        if re.search(r"\b(fprintf|printf|log|write)\b", decompiled_code, re.IGNORECASE):
             side_effects.append("writes_to_output")
         if re.search(r"\b(fwrite|WriteFile|write)\b", decompiled_code):
             side_effects.append("writes_to_file")
@@ -387,7 +388,7 @@ class FunctionMetadataExtractor:
             "has_void_return": has_void_return,
         }
 
-    def extract_dependencies(self, context: Dict) -> Dict[str, Any]:
+    def extract_dependencies(self, context: dict) -> dict[str, Any]:
         """
         Extract function dependencies from context.
 
@@ -428,14 +429,14 @@ class FunctionMetadataExtractor:
 
     # Helper methods
 
-    def _matches_patterns(self, text: str, patterns: List[str]) -> bool:
+    def _matches_patterns(self, text: str, patterns: list[str]) -> bool:
         """Check if text matches any of the given regex patterns."""
         for pattern in patterns:
             if re.search(pattern, text, re.IGNORECASE):
                 return True
         return False
 
-    def _determine_primary_domain(self, operations: Set[str], function_name: str) -> str:
+    def _determine_primary_domain(self, operations: set[str], function_name: str) -> str:
         """Determine the primary functional domain of the function."""
         # Priority order for domain assignment
         domain_priority = [
@@ -461,12 +462,12 @@ class FunctionMetadataExtractor:
 
         return "general"
 
-    def _is_security_relevant(self, operations: Set[str]) -> bool:
+    def _is_security_relevant(self, operations: set[str]) -> bool:
         """Determine if operations are security-relevant."""
         security_ops = {"crypto", "network", "authentication", "registry", "process_management"}
         return bool(operations & security_ops)
 
-    def _parse_parameters(self, signature_line: str) -> List[Dict[str, str]]:
+    def _parse_parameters(self, signature_line: str) -> list[dict[str, str]]:
         """Parse function parameters from signature."""
         params = []
 
@@ -509,7 +510,7 @@ class FunctionMetadataExtractor:
 
         return params
 
-    def _get_default_metadata(self) -> Dict[str, Any]:
+    def _get_default_metadata(self) -> dict[str, Any]:
         """Return default metadata structure when extraction fails."""
         return {
             "metrics": {
@@ -544,7 +545,7 @@ class FunctionMetadataExtractor:
             },
         }
 
-    def _get_default_signature(self) -> Dict[str, Any]:
+    def _get_default_signature(self) -> dict[str, Any]:
         """Return default function signature."""
         return {
             "return_type": "unknown",

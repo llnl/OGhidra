@@ -1,18 +1,17 @@
-#!/usr/bin/env python3
 """
 Comprehensive test script for verifying all GhidraMCP tool call capabilities.
 This script directly tests the methods available in GhidraMCPClient that our AI agent uses to interact with Ghidra.
 """
 
-import json
-import sys
-import os
-import inspect
-import traceback
 import argparse
-from typing import Dict, List, Any, Optional
+import inspect
+import json
 import logging
+import os
+import sys
+import traceback
 from datetime import datetime
+from typing import Any
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -50,8 +49,8 @@ class ToolCapabilityTester:
         try:
             # Add the parent directory to sys.path to import from src
             sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
-            from src.ghidra_client import GhidraMCPClient
             from src.config import GhidraMCPConfig
+            from src.ghidra_client import GhidraMCPClient
 
             # Create a config
             config = GhidraMCPConfig()
@@ -66,8 +65,8 @@ class ToolCapabilityTester:
             ]
 
             print(f"Successfully initialized GhidraMCPClient with {len(self.available_tools)} available tools")
-        except Exception as e:
-            print(f"Failed to initialize GhidraMCPClient: {str(e)}")
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
+            print(f"Failed to initialize GhidraMCPClient: {e!s}")
             traceback.print_exc()
             sys.exit(1)
 
@@ -86,11 +85,10 @@ class ToolCapabilityTester:
                             address = method.split("_")[1]
                             if all(c in "0123456789abcdefABCDEF" for c in address):
                                 self.available_addresses.append(address)
-                        except Exception as e:
+                        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                             logger.warning(
                                 f"An error occured in attempting to extract addresses from function names {method}: {e}"
                             )
-                            pass
 
                 # Set sample function name and address for tests
                 if self.available_functions:
@@ -105,11 +103,11 @@ class ToolCapabilityTester:
                 print(f"Sample address: {self.test_data['function_address']}")
             else:
                 print("No functions found. Testing will be limited.")
-        except Exception as e:
-            print(f"Error gathering function data: {str(e)}")
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
+            print(f"Error gathering function data: {e!s}")
             traceback.print_exc()
 
-    def get_function_parameters(self, func) -> Dict[str, Dict[str, Any]]:
+    def get_function_parameters(self, func) -> dict[str, dict[str, Any]]:
         """Get the parameters of a function and their details."""
         params = {}
         try:
@@ -123,12 +121,12 @@ class ToolCapabilityTester:
                     "required": param.default is inspect.Parameter.empty,
                     "annotation": str(param.annotation) if param.annotation is not inspect.Parameter.empty else "Any",
                 }
-        except Exception as e:
-            logger.warning(f"Error getting parameters for function: {str(e)}")
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
+            logger.warning(f"Error getting parameters for function: {e!s}")
 
         return params
 
-    def prepare_test_params(self, tool_name: str, params_info: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+    def prepare_test_params(self, tool_name: str, params_info: dict[str, dict[str, Any]]) -> dict[str, Any]:
         """Prepare test parameters for a tool based on its signature."""
         test_params = {}
 
@@ -172,13 +170,12 @@ class ToolCapabilityTester:
         if tool_name == "rename_function":
             if "new_name" in test_params:
                 test_params["new_name"] = f"{self.test_data['function_name']}_renamed_test"
-        elif tool_name == "rename_function_by_address":
-            if "new_name" in test_params:
-                test_params["new_name"] = f"func_{self.test_data['function_address']}_renamed_test"
+        elif tool_name == "rename_function_by_address" and "new_name" in test_params:
+            test_params["new_name"] = f"func_{self.test_data['function_address']}_renamed_test"
 
         return test_params
 
-    def test_tool(self, tool_name: str) -> Dict[str, Any]:
+    def test_tool(self, tool_name: str) -> dict[str, Any]:
         """Test a specific tool by calling it with appropriate parameters."""
         if not self.client or not hasattr(self.client, tool_name):
             return {"success": False, "error": f"Tool {tool_name} not found or client not initialized", "parameters": {}}
@@ -211,7 +208,7 @@ class ToolCapabilityTester:
                 "signature": str(inspect.signature(func)),
                 "docstring": inspect.getdoc(func),
             }
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
             return {
                 "success": False,
                 "parameters": test_params,
@@ -222,7 +219,7 @@ class ToolCapabilityTester:
                 "docstring": inspect.getdoc(func),
             }
 
-    def run_all_tests(self, specific_tools: Optional[List[str]] = None) -> Dict[str, Dict[str, Any]]:
+    def run_all_tests(self, specific_tools: list[str] | None = None) -> dict[str, dict[str, Any]]:
         """Run tests for all available tools or specific tools if provided."""
         tools_to_test = specific_tools if specific_tools else self.available_tools
 
@@ -321,7 +318,7 @@ class ToolCapabilityTester:
 
         print("\n=== End of Summary ===")
 
-    def generate_documentation(self, output_file: Optional[str] = "tool_capabilities.md") -> None:
+    def generate_documentation(self, output_file: str | None = "tool_capabilities.md") -> None:
         """Generate comprehensive documentation for available tools."""
         if not output_file:
             return
@@ -340,7 +337,7 @@ class ToolCapabilityTester:
 
                 result = self.test_results[tool_name]
                 docstring = result.get("docstring", "No description available").split("\n")[0]
-                params = ", ".join([f"{name}" for name in result.get("parameters_info", {}).keys()])
+                params = ", ".join([f"{name}" for name in result.get("parameters_info", {})])
                 return_type = (
                     result.get("signature", "").split("->")[1].strip() if "->" in result.get("signature", "") else "Unknown"
                 )
@@ -392,8 +389,7 @@ class ToolCapabilityTester:
                     f.write("- Sample Result:\n")
                     f.write("```\n")
                     if isinstance(result.get("display_result"), list):
-                        for item in result.get("display_result", []):
-                            f.write(f"{item}\n")
+                        f.writelines(f"{item}\n" for item in result.get("display_result", []))
                     else:
                         f.write(f"{result.get('display_result', 'No result')}\n")
                     f.write("```\n")
