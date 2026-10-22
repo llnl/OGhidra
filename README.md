@@ -253,7 +253,6 @@ Codex MCP configuration. Start a new Codex session after changing it.
 
 | Observation | Meaning and next action |
 | --- | --- |
-| `.venv/bin/oghidra-doctor` does not exist | The environment predates the doctor command or setup did not finish. From the repository root, run `.venv/bin/python -m pip install -e .` (or rerun `./scripts/setup.sh`) to refresh the package metadata and launchers. |
 | Doctor cannot connect to `http://127.0.0.1:8001/mcp` | Start PyGhidra-MCP in terminal 1 and keep it running. |
 | Doctor reports a missing model placeholder or credential | Finish the `lm` section and expose the named credential to the Codex process. |
 | Doctor cannot find a function | Open a program in CodeBrowser and place the cursor inside a function. |
