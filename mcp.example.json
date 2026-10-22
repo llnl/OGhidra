@@ -1,16 +1,16 @@
 {
   "mcpServers": {
-    "pyghidra": {
-      "type": "http",
-      "url": "http://127.0.0.1:8001/mcp"
-    },
     "oghidra": {
-      "type": "stdio",
-      "command": "/absolute/path/to/OGhidra/.venv/bin/oghidra-workflows",
       "args": [
         "--config",
         "/absolute/path/to/OGhidra/config.yaml"
-      ]
+      ],
+      "command": "/absolute/path/to/OGhidra/.venv/bin/oghidra-workflows",
+      "type": "stdio"
+    },
+    "pyghidra": {
+      "type": "http",
+      "url": "http://127.0.0.1:8001/mcp"
     }
   }
 }

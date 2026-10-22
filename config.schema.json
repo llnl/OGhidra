@@ -3,6 +3,14 @@
     "HttpServerConfig": {
       "additionalProperties": false,
       "properties": {
+        "evidence_tools": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Evidence Tools",
+          "type": "array"
+        },
         "transport": {
           "enum": [
             "sse",
@@ -16,14 +24,6 @@
           "minLength": 1,
           "title": "Url",
           "type": "string"
-        },
-        "evidence_tools": {
-          "items": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "title": "Evidence Tools",
-          "type": "array"
         }
       },
       "required": [
@@ -37,19 +37,6 @@
       "additionalProperties": false,
       "description": "DSPy/LiteLLM settings",
       "properties": {
-        "model": {
-          "description": "DSPy/LiteLLM identifier: <provider>/<exact model ID>. The first prefix selects the API integration; the remaining ID may contain slashes. This is not a URL. No aliases or prefix rewriting are applied. For a server ID openai/gpt-oss-120b, use hosted_vllm/openai/gpt-oss-120b or openai/openai/gpt-oss-120b.",
-          "examples": [
-            "openai/gpt-4o",
-            "anthropic/claude-sonnet-4-5-20250929",
-            "ollama_chat/llama3.2",
-            "hosted_vllm/openai/gpt-oss-120b",
-            "openai/openai/gpt-oss-120b"
-          ],
-          "minLength": 1,
-          "title": "Model",
-          "type": "string"
-        },
         "api_base": {
           "anyOf": [
             {
@@ -90,6 +77,31 @@
           "title": "Max Tokens",
           "type": "integer"
         },
+        "model": {
+          "description": "DSPy/LiteLLM identifier: <provider>/<exact model ID>. The first prefix selects the API integration; the remaining ID may contain slashes. This is not a URL. No aliases or prefix rewriting are applied. For a server ID openai/gpt-oss-120b, use hosted_vllm/openai/gpt-oss-120b or openai/openai/gpt-oss-120b.",
+          "examples": [
+            "openai/gpt-4o",
+            "anthropic/claude-sonnet-4-5-20250929",
+            "ollama_chat/llama3.2",
+            "hosted_vllm/openai/gpt-oss-120b",
+            "openai/openai/gpt-oss-120b"
+          ],
+          "minLength": 1,
+          "title": "Model",
+          "type": "string"
+        },
+        "num_retries": {
+          "default": 3,
+          "minimum": 0,
+          "title": "Num Retries",
+          "type": "integer"
+        },
+        "ssl_verify": {
+          "default": true,
+          "description": "Verify HTTPS server certificates. Keep true for internal servers too; certificate trust is configured by application startup (for example, truststore), not by this configuration model.",
+          "title": "Ssl Verify",
+          "type": "boolean"
+        },
         "temperature": {
           "anyOf": [
             {
@@ -108,18 +120,6 @@
           "exclusiveMinimum": 0,
           "title": "Timeout",
           "type": "number"
-        },
-        "num_retries": {
-          "default": 3,
-          "minimum": 0,
-          "title": "Num Retries",
-          "type": "integer"
-        },
-        "ssl_verify": {
-          "default": true,
-          "description": "Verify HTTPS server certificates. Keep true for internal servers too; certificate trust is configured by application startup (for example, truststore), not by this configuration model.",
-          "title": "Ssl Verify",
-          "type": "boolean"
         }
       },
       "required": [
@@ -131,23 +131,17 @@
     "StdioServerConfig": {
       "additionalProperties": false,
       "properties": {
-        "transport": {
-          "const": "stdio",
-          "default": "stdio",
-          "title": "Transport",
-          "type": "string"
-        },
-        "command": {
-          "minLength": 1,
-          "title": "Command",
-          "type": "string"
-        },
         "args": {
           "items": {
             "type": "string"
           },
           "title": "Args",
           "type": "array"
+        },
+        "command": {
+          "minLength": 1,
+          "title": "Command",
+          "type": "string"
         },
         "env": {
           "additionalProperties": {
@@ -163,6 +157,12 @@
           },
           "title": "Evidence Tools",
           "type": "array"
+        },
+        "transport": {
+          "const": "stdio",
+          "default": "stdio",
+          "title": "Transport",
+          "type": "string"
         }
       },
       "required": [
@@ -174,8 +174,64 @@
   },
   "additionalProperties": false,
   "properties": {
+    "compiled_predictor": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Compiled Predictor"
+    },
     "lm": {
       "$ref": "#/$defs/LMConfig"
+    },
+    "log_backup_count": {
+      "default": 3,
+      "minimum": 1,
+      "title": "Log Backup Count",
+      "type": "integer"
+    },
+    "log_file": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": "logs/oghidra-{pid}.jsonl",
+      "title": "Log File"
+    },
+    "log_level": {
+      "default": "INFO",
+      "enum": [
+        "DEBUG",
+        "INFO",
+        "WARNING",
+        "ERROR",
+        "CRITICAL"
+      ],
+      "title": "Log Level",
+      "type": "string"
+    },
+    "log_max_bytes": {
+      "default": 5000000,
+      "exclusiveMinimum": 0,
+      "title": "Log Max Bytes",
+      "type": "integer"
+    },
+    "max_iters": {
+      "default": 6,
+      "exclusiveMinimum": 0,
+      "title": "Max Iters",
+      "type": "integer"
     },
     "mcp_servers": {
       "patternProperties": {
@@ -203,62 +259,6 @@
       ],
       "title": "Mcp Servers",
       "type": "object"
-    },
-    "max_iters": {
-      "default": 6,
-      "exclusiveMinimum": 0,
-      "title": "Max Iters",
-      "type": "integer"
-    },
-    "log_level": {
-      "default": "INFO",
-      "enum": [
-        "DEBUG",
-        "INFO",
-        "WARNING",
-        "ERROR",
-        "CRITICAL"
-      ],
-      "title": "Log Level",
-      "type": "string"
-    },
-    "log_file": {
-      "anyOf": [
-        {
-          "minLength": 1,
-          "type": "string"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": "logs/oghidra-{pid}.jsonl",
-      "title": "Log File"
-    },
-    "log_max_bytes": {
-      "default": 5000000,
-      "exclusiveMinimum": 0,
-      "title": "Log Max Bytes",
-      "type": "integer"
-    },
-    "log_backup_count": {
-      "default": 3,
-      "minimum": 1,
-      "title": "Log Backup Count",
-      "type": "integer"
-    },
-    "compiled_predictor": {
-      "anyOf": [
-        {
-          "minLength": 1,
-          "type": "string"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "title": "Compiled Predictor"
     }
   },
   "required": [
