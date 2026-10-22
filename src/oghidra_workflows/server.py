@@ -1,5 +1,8 @@
 """MCP entry point. No provider-specific clients or Ghidra proxy endpoints."""
 
+# Import ordering below intentionally initializes the system trust store first.
+# ruff: noqa: E402
+
 import truststore
 
 # Use the operating system's certificate trust configuration.
