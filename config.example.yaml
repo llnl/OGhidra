@@ -1,13 +1,15 @@
 # yaml-language-server: $schema=./config.schema.json
 # Copy this file to config.yaml and select your actual model and endpoint.
-# model uses DSPy/LiteLLM's <provider>/<exact model ID> format, not a URL.
-# Only the first prefix selects the API integration. Preserve all slashes
-# in the model ID returned by the server's /v1/models endpoint.
+# Build model as <LiteLLM integration>/<exact endpoint model ID>, not as a URL.
+# Only the first slash separates the integration. Preserve every slash in the
+# literal model ID returned by the endpoint's /models response.
 # No separate provider field or application aliases are used.
 lm:
-  # Example: vLLM serving the exact ID "openai/gpt-oss-120b".
-  model: hosted_vllm/openai/gpt-oss-120b
-  api_base: http://127.0.0.1:8000/v1
+  # Required: replace this obvious placeholder before starting OGhidra.
+  model: replace/provider-and-model-id
+  # Set api_base for local or OpenAI-compatible endpoints. Omit it when the
+  # provider integration supplies its own endpoint.
+  # api_base: http://127.0.0.1:8000/v1
   # If authentication is required, uncomment and set this variable in the
   # environment of the process launched by your MCP client (not just a shell).
   # api_key_env: OGHIDRA_MODEL_API_KEY
@@ -15,10 +17,15 @@ lm:
   cache: false
   max_tokens: 4096
 
-# Alternative model/endpoint pairs (replace the fields above):
-# Generic OpenAI-compatible API, same exact model ID:
+# If /models reports the exact ID "openai/gpt-oss-120b":
+# Hosted vLLM integration:
+#   model: hosted_vllm/openai/gpt-oss-120b
+#   api_base: http://127.0.0.1:8000/v1
+# Generic OpenAI-compatible integration:
 #   model: openai/openai/gpt-oss-120b
 #   api_base: http://127.0.0.1:8000/v1
+# The shorter openai/gpt-oss-120b is correct only when the endpoint reports
+# the exact ID "gpt-oss-120b" without the leading "openai/".
 # OpenAI directly:
 #   model: openai/gpt-4o
 #   api_key_env: OPENAI_API_KEY
@@ -46,8 +53,10 @@ mcp_servers:
       - decompile_function
       - list_xrefs
 
-# Application and MCP workflow diagnostics (stderr + rotating JSON file).
-log_level: DEBUG
+# Baseline application and MCP diagnostics (stderr + rotating JSON file).
+# Relative paths are resolved from this file's directory. Set log_file to null
+# to keep stderr logging but disable the JSON file.
+log_level: INFO
 log_file: logs/oghidra-{pid}.jsonl
 log_max_bytes: 5000000
 log_backup_count: 3

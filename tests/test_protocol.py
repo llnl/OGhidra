@@ -1,14 +1,48 @@
 import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
+from types import SimpleNamespace
 
 import dspy
 from dspy.utils import DummyLM
-from mcp import ClientSession, StdioServerParameters
-from mcp.client.stdio import stdio_client
 
+import oghidra_workflows.server as server_module
 from oghidra_workflows.config import AppConfig
 from oghidra_workflows.connections import connect
 from oghidra_workflows.workflow import GatherEvidence
+
+
+async def test_mcp_apply_contract_preserves_existing_defaults(monkeypatch):
+    observed = []
+
+    @asynccontextmanager
+    async def fake_connect(servers):
+        yield {"ghidra": object()}, {"ghidra": {}}, []
+
+    async def fake_rename_current(session, catalog, program, apply):
+        observed.append(apply)
+        return SimpleNamespace(status="renamed" if apply else "proposed", detail="")
+
+    monkeypatch.setattr(server_module, "connect", fake_connect)
+    monkeypatch.setattr(server_module, "rename_current", fake_rename_current)
+    monkeypatch.setattr(dspy, "LM", lambda **kwargs: DummyLM([]))
+    config = AppConfig.model_validate(
+        {
+            "lm": {"model": "fixture"},
+            "mcp_servers": {
+                "ghidra": {"transport": "stdio", "command": sys.executable}
+            },
+        }
+    )
+    tool = server_module.build_server(config)._tool_manager._tools[
+        "rename_current_function"
+    ]
+
+    await tool.run({})
+    await tool.run({"apply": False})
+
+    assert tool.parameters["properties"]["apply"]["default"] is True
+    assert observed == [True, False]
 
 
 async def test_dspy_react_calls_native_mcp_tool():
