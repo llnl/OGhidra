@@ -11,13 +11,11 @@ This module provides structured, type-safe models for managing:
 Using Pydantic ensures data validation, clear structure, and easier maintenance.
 """
 
-from typing import List, Dict, Optional, Any, Set
-from pydantic import BaseModel, Field, field_validator
 from datetime import datetime
 from enum import Enum
 from typing import Any, ClassVar
 
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 
 
 class MessageRole(str, Enum):

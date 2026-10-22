@@ -2,13 +2,10 @@
 Configuration module for the Ollama-GhidraMCP Bridge.
 """
 
-from pydantic import BaseModel, Field, field_validator, AnyHttpUrl
-from pydantic_settings import BaseSettings
-from typing import Optional, Dict, Any, List, ClassVar
 import re
 from typing import Any, ClassVar
 
-from pydantic import AnyHttpUrl, BaseModel, Field, validator
+from pydantic import AnyHttpUrl, BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings
 
 
