@@ -59,8 +59,19 @@ provider examples, model-ID details, and non-Codex MCP hosts.
 ### 3. Start Ghidra and PyGhidra-MCP
 
 #### New Ghidra Project
-In terminal 1, provide your Ghidra installation and the native PyGhidra-MCP
-arguments for a new project and program:
+In terminal 1, set `GHIDRA_INSTALL_DIR` to the Ghidra installation directory,
+then provide the native PyGhidra-MCP project arguments:
+
+- `--project-path` is the directory that will contain the project. It is
+  created if it does not exist.
+- `--project-name` is the project name and the base name of its `.gpr` and
+  `.rep` files. For example, `research` creates `research.gpr` and
+  `research.rep` under the project path.
+- The final program path is optional. When present, it must name an existing
+  binary and PyGhidra-MCP imports it into the project. Quote paths containing
+  spaces. You can provide more than one program path.
+
+Create the project and import a program immediately:
 
 ```bash
 export GHIDRA_INSTALL_DIR=/absolute/path/to/ghidra
@@ -70,8 +81,23 @@ export GHIDRA_INSTALL_DIR=/absolute/path/to/ghidra
   /absolute/path/to/program
 ```
 
+To start with an empty project, omit the final program path:
+
+```bash
+export GHIDRA_INSTALL_DIR=/absolute/path/to/ghidra
+./scripts/run-ghidra.sh \
+  --project-path /absolute/path/to/projects \
+  --project-name research
+```
+
+This still creates or opens the `research` project and launches Ghidra. It
+does not import or analyze a program until you import one later through Ghidra
+or PyGhidra-MCP.
+
 #### Existing Ghidra Project
-For an existing project, omit the binary and pass its `.gpr` file:
+For an existing project, pass its `.gpr` file as `--project-path`. The project
+name is derived from the filename, so omit `--project-name`. Omit the program
+path unless you also want to import another program:
 
 ```bash
 export GHIDRA_INSTALL_DIR=/absolute/path/to/ghidra
