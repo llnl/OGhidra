@@ -1,18 +1,27 @@
 """Regression tests for Pydantic v2 validator behavior."""
 
+import json
 import unittest
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from pydantic import ValidationError
 
-from src.config import BridgeConfig, GhidraMCPConfig, OllamaConfig, SessionHistoryConfig
+from src.config import (
+    BridgeConfig,
+    CustomAPIConfig,
+    ExternalConfig,
+    GhidraMCPConfig,
+    GoogleConfig,
+    OllamaConfig,
+    SessionHistoryConfig,
+)
 from src.memory_models import SessionRecord
-from src.models.memory import StructuredPrompt
+from src.models.memory import AnalysisState, PromptSection, SessionMemory, StructuredPrompt
 
 
 class TestSessionRecordValidators(unittest.TestCase):
     def setUp(self):
-        self.start_time = datetime(2025, 1, 1, 12, 0, 0)
+        self.start_time = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
 
     def test_end_time_after_start_time_is_accepted(self):
         end_time = self.start_time + timedelta(hours=1)
@@ -43,6 +52,21 @@ class TestSessionRecordValidators(unittest.TestCase):
 
 
 class TestConfigurationValidators(unittest.TestCase):
+    def test_environment_metadata_is_preserved_in_json_schemas(self):
+        expected_metadata = (
+            (OllamaConfig, "base_url", "OLLAMA_BASE_URL"),
+            (GoogleConfig, "api_key", "GOOGLE_API_KEY"),
+            (ExternalConfig, "provider", "EXTERNAL_PROVIDER"),
+            (CustomAPIConfig, "api_url", "CUSTOM_API_URL"),
+            (GhidraMCPConfig, "base_url", "GHIDRA_BASE_URL"),
+            (BridgeConfig, "llm_provider", "LLM_PROVIDER"),
+        )
+
+        for model, field_name, environment_variable in expected_metadata:
+            with self.subTest(model=model.__name__, field=field_name):
+                field_schema = model.model_json_schema()["properties"][field_name]
+                self.assertEqual(field_schema["env"], environment_variable)
+
     def test_ollama_validators_normalize_and_reject_invalid_values(self):
         config = OllamaConfig(review_thoroughness="THOROUGH", model="valid-model:1", model_map={"planning": "model"})
 
@@ -92,3 +116,24 @@ class TestStructuredPromptValidator(unittest.TestCase):
         prompt = StructuredPrompt(conversation_history=conversation_history)
 
         self.assertEqual(prompt.conversation_history, conversation_history)
+
+
+class TestMemoryModelConfiguration(unittest.TestCase):
+    def test_prompt_section_remains_frozen(self):
+        section = PromptSection(name="goal", content="Analyze the sample", order=1)
+
+        with self.assertRaises(ValidationError):
+            section.name = "changed"
+
+    def test_session_memory_serializes_datetimes_and_sets(self):
+        start_time = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
+        memory = SessionMemory(
+            start_time=start_time,
+            analysis_state=AnalysisState(functions_decompiled={"alpha", "beta"}),
+        )
+
+        payload = json.loads(memory.model_dump_json())
+
+        serialized_start_time = datetime.fromisoformat(payload["start_time"])
+        self.assertEqual(serialized_start_time, start_time)
+        self.assertEqual(set(payload["analysis_state"]["functions_decompiled"]), {"alpha", "beta"})
