@@ -4,10 +4,6 @@ OGhidra connects language models to a live Ghidra session through MCP. It adds
 repeatable DSPy workflows to the inspection and editing tools exposed by
 [PyGhidra-MCP](https://github.com/clearbluejar/pyghidra-mcp).
 
-`rename_current_function` is the packaged workflow: it gathers evidence about
-the function selected in Ghidra, proposes a descriptive name, and can apply the
-rename after revalidating the target.
-
 ## Quick start
 
 This path uses the Bash helpers on Linux or macOS. Windows users can follow the
@@ -62,6 +58,7 @@ provider examples, model-ID details, and non-Codex MCP hosts.
 
 ### 3. Start Ghidra and PyGhidra-MCP
 
+#### New Ghidra Project
 In terminal 1, provide your Ghidra installation and the native PyGhidra-MCP
 arguments for a new project and program:
 
@@ -73,6 +70,7 @@ export GHIDRA_INSTALL_DIR=/absolute/path/to/ghidra
   /absolute/path/to/program
 ```
 
+#### Existing Ghidra Project
 For an existing project, omit the binary and pass its `.gpr` file:
 
 ```bash
@@ -95,13 +93,19 @@ In terminal 2, run the read-only doctor:
 .venv/bin/oghidra-doctor --config config.yaml
 ```
 
-Doctor validates local configuration, credentials, MCP connectivity, required
-tools, and the current Ghidra selection. It does not contact the model,
-decompile code, or modify Ghidra. A ready session reports `PASS` for the Ghidra
-selection; model connectivity remains a documented `WARN` until a workflow is
-invoked.
+`oghidra-doctor` is a launcher generated inside `.venv/bin` by the
+`pip install -e .` step. Calling it by that path does not require activating
+the environment. If `.venv` is activated, the shorter equivalent is
+`oghidra-doctor --config config.yaml`.
 
-### 5. Request a rename proposal
+Doctor validates local configuration, credentials, MCP connectivity, required
+tools, and the current Ghidra selection. By default it does not contact the
+model, decompile code, or modify Ghidra. Add `--check-model` to make a small,
+uncached inference request; this can incur a provider charge. A ready session
+reports `PASS` for both model connectivity and the Ghidra selection when that
+option is used.
+
+### 5. Example: Request a rename proposal
 
 Start a new Codex session after registering or changing MCP configuration. Use
 `/mcp` to confirm that `pyghidra` and `oghidra` are active, then ask:
@@ -127,7 +131,10 @@ before writing. Save the program in Ghidra when finished.
 These commands perform the same setup and launch steps without the Bash
 helpers.
 
-### Linux and macOS
+<details>
+<summary>Linux and macOS</summary>
+
+<a id="linux-and-macos"></a>
 
 Clone the repository, create both environments, and initialize the
 configuration:
@@ -181,7 +188,12 @@ Then run doctor in terminal 2:
 .venv/bin/oghidra-doctor --config config.yaml
 ```
 
-### Windows PowerShell
+</details>
+
+<details>
+<summary>Windows PowerShell</summary>
+
+<a id="windows-powershell"></a>
 
 Clone the repository, create both environments, and initialize the
 configuration:
@@ -235,10 +247,13 @@ Then run doctor in terminal 2:
 Codex CLI, the IDE extension, and the ChatGPT desktop app share the same local
 Codex MCP configuration. Start a new Codex session after changing it.
 
+</details>
+
 ## Troubleshooting first run
 
 | Observation | Meaning and next action |
 | --- | --- |
+| `.venv/bin/oghidra-doctor` does not exist | The environment predates the doctor command or setup did not finish. From the repository root, run `.venv/bin/python -m pip install -e .` (or rerun `./scripts/setup.sh`) to refresh the package metadata and launchers. |
 | Doctor cannot connect to `http://127.0.0.1:8001/mcp` | Start PyGhidra-MCP in terminal 1 and keep it running. |
 | Doctor reports a missing model placeholder or credential | Finish the `lm` section and expose the named credential to the Codex process. |
 | Doctor cannot find a function | Open a program in CodeBrowser and place the cursor inside a function. |

@@ -40,9 +40,11 @@ variable must be visible to the Codex process that launches OGhidra. Keep
 Supported LM fields are `model`, `api_base`, `api_key_env`, `cache`,
 `max_tokens`, `temperature`, `timeout`, `num_retries`, and `ssl_verify`.
 Configuration validation checks types and local requirements, not whether a
-remote model exists or accepts the selected parameters. Doctor deliberately
-does not query `/models`, perform inference, or make a billable model request,
-so it cannot detect an exact-ID mismatch of this kind.
+remote model exists or accepts the selected parameters. By default doctor does
+not query `/models`, perform inference, or make a billable model request. Run
+`oghidra-doctor --check-model` to make a small, uncached inference request that
+can detect an exact-ID mismatch and other provider, authentication, transport,
+or TLS failures. This optional request can incur a provider charge.
 
 ## Codex configuration scope
 

@@ -8,15 +8,26 @@ Run doctor after PyGhidra-MCP is listening and a function is selected:
 .venv/bin/oghidra-doctor --config config.yaml
 ```
 
-`--timeout` controls the total MCP connection and discovery deadline and
-defaults to 10 seconds. Doctor validates the config, credential-variable
-presence, compiled predictor path, MCP initialization, required tools, and GUI
-selection. It calls only `get_gui_context`; it never contacts the model,
-decompiles a function, or invokes `rename_function`.
+`--timeout` defaults to 10 seconds and applies independently to each requested
+model and MCP connectivity check. Doctor validates the config,
+credential-variable presence, compiled predictor path, MCP initialization,
+required tools, and GUI selection. It calls only `get_gui_context`; it never
+decompiles a function or invokes `rename_function`.
+
+Pass `--check-model` to make a small, uncached inference request through the
+configured DSPy/LiteLLM provider. The request can incur a provider charge. A
+successful provider response is sufficient; doctor does not require a
+particular response body.
+
+Model failures include a sanitized provider error and a troubleshooting hint.
+For certificate verification failures, OGhidra reports that Python is using the
+operating-system trust store through `truststore`; check the endpoint hostname,
+system clock, proxy or private CA installation, and operating-system trust
+configuration. Keep `ssl_verify: true`.
 
 Doctor returns exit status 0 when no checks fail, 1 when a check fails, and 2
-for invalid command arguments. A warning that model connectivity was not tested
-is expected.
+for invalid command arguments. Without `--check-model`, a warning that model
+connectivity was not tested is expected.
 
 ## First-run failures
 

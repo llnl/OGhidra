@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import math
 import os
+import ssl
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -16,9 +17,12 @@ from pydantic import ValidationError
 # Match the workflow server's operating-system trust configuration.
 truststore.inject_into_ssl()
 
+import dspy
+
 from .config import AppConfig, HttpServerConfig, StdioServerConfig, load_config
 from .connections import connect
 from .diagnostics import configure_logging, endpoint, redact, register_secret
+from .server import make_lm
 from .workflow import REQUIRED_GHIDRA_TOOLS, GuiContext, result_data
 
 MODEL_PLACEHOLDER = "replace/provider-and-model-id"
@@ -55,6 +59,9 @@ def _register_config_secrets(config: AppConfig) -> None:
 def _safe_error(exc: Exception, config: AppConfig | None = None) -> str:
     detail = str(exc).replace("\n", " ")
     if config is not None:
+        if config.lm.api_base is not None:
+            raw_url = str(config.lm.api_base)
+            detail = detail.replace(raw_url, endpoint(raw_url))
         for server in config.mcp_servers.values():
             if isinstance(server, HttpServerConfig):
                 raw_url = str(server.url)
@@ -64,6 +71,79 @@ def _safe_error(exc: Exception, config: AppConfig | None = None) -> str:
                     if argument:
                         detail = detail.replace(argument, "[ARG]")
     return f"{type(exc).__name__}: {redact(detail)}"
+
+
+def _exception_chain(exc: Exception):
+    """Yield a bounded, cycle-safe exception cause chain for diagnostics."""
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen and len(seen) < 8:
+        seen.add(id(current))
+        yield current
+        current = current.__cause__ or current.__context__
+
+
+def _tls_hint(exc: Exception) -> str | None:
+    chain = list(_exception_chain(exc))
+    messages = " ".join(str(item).lower() for item in chain)
+    if any(isinstance(item, ssl.SSLCertVerificationError) for item in chain) or any(
+        phrase in messages
+        for phrase in ("certificate verify failed", "certificate_verify_failed")
+    ):
+        return (
+            "certificate verification failed; OGhidra uses the operating-system "
+            "trust store through truststore; check the endpoint hostname, system "
+            "clock, proxy/private CA installation, and OS trust configuration"
+        )
+    if any(isinstance(item, ssl.SSLError) for item in chain) or any(
+        phrase in messages for phrase in ("ssl error", "tls handshake")
+    ):
+        return (
+            "TLS negotiation failed; check the endpoint hostname, protocol support, "
+            "proxy, and operating-system trust configuration"
+        )
+    return None
+
+
+def _model_error_hint(exc: Exception) -> str:
+    """Map structured DSPy failures to concise operator actions."""
+    if hint := _tls_hint(exc):
+        return hint
+    if isinstance(exc, (dspy.LMAuthError, dspy.LMNotConfiguredError)):
+        return (
+            "check that api_key_env names a populated, valid credential and that "
+            "the account can access this model"
+        )
+    if isinstance(exc, dspy.LMUnsupportedModelError):
+        return "verify the provider prefix and exact lm.model identifier"
+    if isinstance(exc, dspy.LMBillingError):
+        return "check provider billing and quota"
+    if isinstance(exc, dspy.LMRateLimitError):
+        return "the provider rate limit was reached; wait or check account limits"
+    if isinstance(exc, dspy.LMTimeoutError):
+        return "check endpoint availability and the configured model timeout"
+    if isinstance(exc, (dspy.LMInvalidRequestError, dspy.LMUnsupportedFeatureError)):
+        return "verify that the configured LM parameters are supported by the model"
+    if isinstance(exc, dspy.LMTransportError):
+        return "check lm.api_base, DNS, proxy, firewall, and endpoint availability"
+    if isinstance(exc, dspy.LMServerError):
+        return "check provider service health and retry later"
+    if isinstance(exc, dspy.LMProviderError):
+        return "check the provider response, service status, and account access"
+    return "check the model identifier, endpoint, credentials, and provider logs"
+
+
+def _model_failure_detail(exc: Exception, config: AppConfig) -> str:
+    """Format model failures with safe cause details and an actionable hint."""
+    causes = "; caused by ".join(
+        _safe_error(item, config) for item in _exception_chain(exc)
+    )
+    target = (
+        f"; endpoint={endpoint(config.lm.api_base)}"
+        if config.lm.api_base is not None
+        else ""
+    )
+    return f"{causes}{target}; hint: {_model_error_hint(exc)}"
 
 
 def _configuration_error(exc: Exception) -> str:
@@ -92,7 +172,9 @@ def _configured_targets(config: AppConfig) -> str:
     return ", ".join(targets)
 
 
-async def run_checks(config_path: Path, timeout: float = 10.0) -> list[Check]:
+async def run_checks(
+    config_path: Path, timeout: float = 10.0, check_model: bool = False
+) -> list[Check]:
     """Validate local settings and the read-only MCP/Ghidra preflight contract."""
     checks: list[Check] = []
     try:
@@ -103,7 +185,9 @@ async def run_checks(config_path: Path, timeout: float = 10.0) -> list[Check]:
     _register_config_secrets(config)
     checks.append(Check("PASS", "Configuration", str(config_path.resolve())))
 
+    model_ready = True
     if config.lm.model == MODEL_PLACEHOLDER:
+        model_ready = False
         checks.append(
             Check(
                 "FAIL",
@@ -133,6 +217,7 @@ async def run_checks(config_path: Path, timeout: float = 10.0) -> list[Check]:
             )
         )
     else:
+        model_ready = False
         checks.append(
             Check(
                 "FAIL",
@@ -154,13 +239,42 @@ async def run_checks(config_path: Path, timeout: float = 10.0) -> list[Check]:
             )
         )
 
-    checks.append(
-        Check(
-            "WARN",
-            "Model connectivity",
-            "not tested; doctor never invokes the model",
+    if not check_model:
+        checks.append(
+            Check(
+                "WARN",
+                "Model connectivity",
+                "not tested; pass --check-model to make a small inference request",
+            )
         )
-    )
+    elif not model_ready:
+        checks.append(
+            Check(
+                "WARN",
+                "Model connectivity",
+                "not attempted because model configuration or credentials failed",
+            )
+        )
+    else:
+        try:
+            async with asyncio.timeout(timeout):
+                lm = make_lm(config.lm)
+                await lm.acall(prompt="Reply with OK.", cache=False)
+            checks.append(
+                Check("PASS", "Model connectivity", "inference request completed")
+            )
+        except TimeoutError:
+            checks.append(
+                Check(
+                    "FAIL",
+                    "Model connectivity",
+                    f"timed out after {timeout:g} seconds",
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 - every LM failure is a doctor result
+            checks.append(
+                Check("FAIL", "Model connectivity", _model_failure_detail(exc, config))
+            )
 
     try:
         async with asyncio.timeout(timeout):
@@ -214,7 +328,16 @@ async def run_checks(config_path: Path, timeout: float = 10.0) -> list[Check]:
             )
         )
     except Exception as exc:  # noqa: BLE001 - every MCP failure is a doctor result
-        checks.append(Check("FAIL", "MCP connectivity", _safe_error(exc, config)))
+        checks.append(
+            Check(
+                "FAIL",
+                "MCP connectivity",
+                (
+                    f"{_safe_error(exc, config)} while checking "
+                    f"{_configured_targets(config)}"
+                ),
+            )
+        )
 
     return checks
 
@@ -223,11 +346,16 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=Path("./config.yaml"))
     parser.add_argument("--timeout", type=_positive_timeout, default=10.0)
+    parser.add_argument(
+        "--check-model",
+        action="store_true",
+        help="make a small, uncached model inference request",
+    )
     args = parser.parse_args(argv)
 
     # Suppress connection tracebacks while retaining redaction for unexpected logs.
     configure_logging("CRITICAL")
-    checks = asyncio.run(run_checks(args.config, args.timeout))
+    checks = asyncio.run(run_checks(args.config, args.timeout, args.check_model))
     for check in checks:
         print(f"[{check.status}] {check.label}: {check.detail}")
     return 1 if any(check.status == "FAIL" for check in checks) else 0
