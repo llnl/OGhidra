@@ -24,7 +24,7 @@ class APIHealthTests(unittest.TestCase):
                 request = build_health_request("https://example.test" + suffix, "secret", "alias", False)
                 self.assertEqual(request["url"], "https://example.test/v1/chat/completions")
                 self.assertEqual(request["json"]["max_completion_tokens"], 4096)
-                self.assertEqual(request["timeout"], (10, 60))
+                self.assertEqual(request["timeout"], (10, 30))
                 self.assertFalse(request["verify"])
                 self.assertNotIn("temperature", request["json"])
                 self.assertNotIn("reasoning_effort", request["json"])
