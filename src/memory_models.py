@@ -6,7 +6,7 @@ import datetime
 import uuid
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, ValidationInfo, field_validator
 
 
 class ToolCallRecord(BaseModel):
@@ -19,6 +19,7 @@ class ToolCallRecord(BaseModel):
     result_preview: str | None = Field(default=None, max_length=1000, description="Brief summary of the tool's output")
 
     @field_validator("tool_name")
+    @classmethod
     def validate_tool_name(cls, v):
         """Validate tool name format."""
         if not v.strip():
@@ -52,6 +53,7 @@ class SessionRecord(BaseModel):
     )
 
     @field_validator("user_task_description")
+    @classmethod
     def validate_task_description(cls, v):
         """Ensure task description is meaningful."""
         if not v.strip():
@@ -59,10 +61,11 @@ class SessionRecord(BaseModel):
         return v.strip()
 
     @field_validator("end_time")
-    def validate_end_time(cls, v, values):
+    @classmethod
+    def validate_end_time(cls, v, info: ValidationInfo):
         """Ensure end_time is after start_time."""
-        if v and "start_time" in values:
-            start_time = values["start_time"]
+        if v and info.data and "start_time" in info.data:
+            start_time = info.data["start_time"]
             if v < start_time:
                 raise ValueError("end_time cannot be before start_time")
             # Reasonable session duration limit (24 hours)
