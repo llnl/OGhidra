@@ -311,3 +311,12 @@ uv.lock
 
 # Codex
 .codex
+
+VALIDATION.md
+
+# Local development files.
+/.venv-ghidra/
+/.vscode/launch.json
+/.vscode/settings.json
+/config.yaml
+/mcp.json
