@@ -49,7 +49,9 @@ class FailedHttpExecutionTests(unittest.TestCase):
         bridge.current_loop_number = 1
         bridge.executed_tools = set()
         bridge.step_result_map = {}
-        bridge.cache_stats = {"hits": 0, "misses": 0}
+        bridge.cache_stats = {"hits": 0, "misses": 0, "cache_size": 0}
+        bridge.decompilation_cache = {}
+        bridge.function_cache = {}
         bridge.enable_cag = False
         bridge.cag_manager = None
         bridge.context_manager = None
@@ -64,8 +66,6 @@ class FailedHttpExecutionTests(unittest.TestCase):
         bridge.execution_gate.check_after_execution.return_value = ExecutionSignal.CONTINUE
         bridge._build_execution_loop_prompt = Mock(return_value=("system", "user"))
         bridge._get_max_result_chars = Mock(return_value=10000)
-        bridge._get_cached_result = Mock(return_value=None)
-        bridge._cache_result = Mock()
         bridge._update_analysis_state = Mock()
         bridge._display_tool_result = Mock()
         bridge._emit_cot = Mock()
@@ -86,7 +86,7 @@ class FailedHttpExecutionTests(unittest.TestCase):
         self.assertFalse(result.tool_executions[0].success)
         self.assertIn("503", result.tool_executions[0].error)
         self.assertFalse(bridge.coverage_tracker.areas["network_comms"].covered)
-        bridge._cache_result.assert_not_called()
+        self.assertEqual(bridge.decompilation_cache, {})
 
     def test_timeout_is_not_successful_or_covered(self):
         bridge, _ = self.make_bridge(
@@ -96,7 +96,7 @@ class FailedHttpExecutionTests(unittest.TestCase):
         result = self.execute(bridge)
         self.assertFalse(result.tool_executions[0].success)
         self.assertFalse(bridge.coverage_tracker.areas["service_management"].covered)
-        bridge._cache_result.assert_not_called()
+        self.assertEqual(bridge.decompilation_cache, {})
 
     def test_identical_call_can_be_retried_after_transport_recovers(self):
         bridge, requests = self.make_bridge(
@@ -111,7 +111,7 @@ class FailedHttpExecutionTests(unittest.TestCase):
         self.assertEqual(len(requests), 2)
         self.assertEqual([entry.success for entry in result.tool_executions], [False, True])
         self.assertTrue(bridge.coverage_tracker.areas["network_comms"].covered)
-        self.assertEqual(bridge._cache_result.call_count, 1)
+        self.assertEqual(len(bridge.decompilation_cache), 1)
 
     def test_error_looking_binary_content_on_http_200_remains_data(self):
         text = "Error 503: this text is evidence from the binary"
@@ -123,7 +123,7 @@ class FailedHttpExecutionTests(unittest.TestCase):
         self.assertTrue(result.tool_executions[0].success)
         self.assertEqual(result.tool_executions[0].result, text)
         self.assertTrue(bridge.coverage_tracker.areas["network_comms"].covered)
-        self.assertEqual(bridge._cache_result.call_count, 1)
+        self.assertEqual(len(bridge.decompilation_cache), 1)
 
 
 if __name__ == "__main__":
