@@ -18,6 +18,14 @@ from src.config import GhidraMCPConfig
 logger = logging.getLogger("ollama-ghidra-bridge.ghidra")
 
 
+class GhidraErrorResult(str):
+    """An HTTP/backend failure, kept string-compatible for existing UI consumers.
+
+    Successful binary content is always plain text, even if it starts with
+    "Error". Consumers must use this type rather than inspecting the content.
+    """
+
+
 class AbstractGhidraClient(ABC):
     """Abstract base class for Ghidra clients.
 
@@ -873,17 +881,17 @@ class GhidraMCPClient(AbstractGhidraClient):
         except Exception as exc:  # noqa: BLE001 intentional defensive recovery boundary
             error_msg = f"Request failed: {exc}"
             logger.error(error_msg)
-            return error_msg
+            return GhidraErrorResult(error_msg)
 
         response.encoding = "utf-8"
         if response.status_code == 200:
             return response.text if method.upper() == "GET" else response.text.strip()
-        return f"Error {response.status_code}: {response.text.strip()}"
+        return GhidraErrorResult(f"Error {response.status_code}: {response.text.strip()}")
 
     def _http_get_lines(self, endpoint: str, params: dict[str, Any] | None = None) -> list[str]:
         """GET an endpoint and return split text lines."""
         text = self._http_request_text("GET", endpoint, params=params)
-        return text.splitlines()
+        return [text] if isinstance(text, GhidraErrorResult) else text.splitlines()
 
     def _http_post_text(
         self,
