@@ -28,6 +28,72 @@ def is_retryable_exception(e):
     return isinstance(e, (requests.exceptions.ConnectionError, requests.exceptions.Timeout))
 
 
+_REASONING_BLOCK_TYPES = {"reasoning", "reasoning.text", "thinking", "thought"}
+_REASONING_KEYS = ("reasoning_content", "reasoning", "thinking", "reasoning_details")
+
+
+def _join_blocks(blocks: list[Any], *, reasoning_filter: bool | None = None) -> str:
+    """Join non-empty text from a list of OpenAI-compatible message or reasoning blocks."""
+    parts: list[str] = []
+    for block in blocks:
+        if isinstance(block, str) and block.strip():
+            if reasoning_filter is not True:
+                parts.append(block)
+        elif isinstance(block, dict):
+            if reasoning_filter is not None:
+                is_reasoning = str(block.get("type") or "").lower() in _REASONING_BLOCK_TYPES
+                if is_reasoning != reasoning_filter:
+                    continue
+            for key in ("text", "reasoning_content", "reasoning", "thinking", "summary"):
+                val = block.get(key)
+                if isinstance(val, str) and val.strip():
+                    parts.append(val)
+                    break
+    return "\n".join(parts)
+
+
+def extract_chat_completion_text(data: Any) -> tuple[str, str]:
+    """Extract (text, source) from a chat completion payload without returning None."""
+    if not isinstance(data, dict):
+        return "", "empty"
+    choices = data.get("choices")
+    if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+        return "", "empty"
+
+    choice = choices[0]
+    message = choice.get("message")
+    if not isinstance(message, dict):
+        return "", "empty"
+
+    finish_reason = str(choice.get("finish_reason") or "").lower()
+
+    content = message.get("content")
+    if isinstance(content, str) and content.strip():
+        return content, "content"
+    if isinstance(content, list):
+        text = _join_blocks(content, reasoning_filter=False)
+        if text:
+            return text, "content"
+        if finish_reason != "length":
+            reasoning_blocks = _join_blocks(content, reasoning_filter=True)
+            if reasoning_blocks:
+                return reasoning_blocks, "reasoning"
+
+    if finish_reason != "length":
+        for container in (message, choice):
+            for key in _REASONING_KEYS:
+                raw = container.get(key)
+                text = raw if isinstance(raw, str) else (_join_blocks(raw) if isinstance(raw, list) else "")
+                if text.strip():
+                    return text, "reasoning"
+
+    refusal = message.get("refusal")
+    if isinstance(refusal, str) and refusal.strip():
+        return refusal, "refusal"
+
+    return "", "empty"
+
+
 class CustomAPIClient:
     """Client for interacting with OpenAI-compatible Custom APIs."""
 
@@ -539,17 +605,25 @@ class CustomAPIClient:
             response = retryer(do_post)
             data = response.json()
 
-            # Extract response
-            if "choices" in data and len(data["choices"]) > 0:
-                response_text = data["choices"][0].get("message", {}).get("content", "")
-            else:
-                self.logger.warning("Unexpected Custom API response format")
-                response_text = ""
+            # Extract response across content and reasoning fields (never None)
+            response_text, response_source = extract_chat_completion_text(data)
+            if response_source == "reasoning":
+                self.logger.info(
+                    f"[Custom API] Response 'content' was empty; extracted {len(response_text)} chars from reasoning field"
+                )
+            elif not response_text:
+                choices = data.get("choices") if isinstance(data, dict) else None
+                finish_reason = (
+                    choices[0].get("finish_reason")
+                    if isinstance(choices, list) and choices and isinstance(choices[0], dict)
+                    else None
+                )
+                self.logger.warning(f"[Custom API] Empty text in chat completion response (finish_reason={finish_reason})")
 
             # Log success
             if self.llm_logging_enabled:
                 duration_ms = (time.time() - start_time) * 1000 if start_time else 0
-                usage = data.get("usage", {})
+                usage = data.get("usage", {}) if isinstance(data, dict) else {}
                 self._log_llm_interaction(
                     "generate_response",
                     {
@@ -558,6 +632,7 @@ class CustomAPIClient:
                         "phase": phase,
                         "status": "success",
                         "response": response_text if self.llm_log_responses else "[REDACTED]",
+                        "response_source": response_source,
                         "tokens": usage if self.llm_log_tokens else None,
                         "duration_ms": duration_ms if self.llm_log_timing else None,
                     },
