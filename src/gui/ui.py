@@ -1052,7 +1052,22 @@ class OGhidraUI:
     def _configure_servers(self):
         """Open server configuration dialog."""
         try:
-            dialog = ServerConfigDialog(self.root, self.config)
+
+            def _ghidra_settings(cfg):
+                return (
+                    getattr(cfg, "backend", "http"),
+                    str(getattr(cfg, "base_url", "")).rstrip("/"),
+                    getattr(cfg, "pyghidra_project_path", None),
+                    getattr(cfg, "pyghidra_program", None),
+                    getattr(cfg, "pyghidra_binary", None),
+                )
+
+            prev_ghidra = _ghidra_settings(self.config.ghidra)
+            dialog = ServerConfigDialog(
+                self.root,
+                self.config,
+                ghidra_client=getattr(self.bridge, "ghidra_client", None),
+            )
             if dialog.result:
                 # Configuration was saved successfully
 
@@ -1064,9 +1079,15 @@ class OGhidraUI:
                     self.bridge.ollama.base_url = str(self.config.ollama.base_url).rstrip("/")
                     self.bridge.ollama.default_model = self.config.ollama.model
 
-                # Update Ghidra client configuration (always manual update as it's less complex)
-                if hasattr(self.bridge, "ghidra_client") and self.bridge.ghidra_client:
-                    self.bridge.ghidra_client.config.base_url = str(self.config.ghidra.base_url).rstrip("/")
+                # Recreate Ghidra client if backend, URL, or PyGhidra target changed
+                if _ghidra_settings(self.config.ghidra) != prev_ghidra:
+                    from ..bridge import select_ghidra_client_class
+
+                    old_client = getattr(self.bridge, "ghidra_client", None)
+                    if old_client is not None and hasattr(old_client, "close"):
+                        old_client.close()
+                    ghidra_cls, _ = select_ghidra_client_class(self.config)
+                    self.bridge.ghidra_client = ghidra_cls(config=self.config.ghidra, ollama_client=self.bridge.ollama)
 
                 messagebox.showinfo(
                     "Configuration Updated",
