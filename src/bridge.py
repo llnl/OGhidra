@@ -23,7 +23,7 @@ from src.coverage_tracker import CoverageTracker
 from src.custom_api_client import CustomAPIClient
 from src.execution_gate import ExecutionGatekeeper
 from src.external_client import ExternalClient
-from src.ghidra_client import AbstractGhidraClient, GhidraMCPClient, PyGhidraClient
+from src.ghidra_client import AbstractGhidraClient, GhidraErrorResult, GhidraMCPClient, PyGhidraClient
 from src.lead_tracker import LeadTracker
 from src.models.memory import (
     CAGContext,
@@ -1812,6 +1812,10 @@ You can help analyze binary files by executing commands through GhidraMCP."""
             self.logger.info(f"💫 Cache MISS for {normalized_command} (key: {cache_key}) - Executing...")
 
             result = command_func(**params)
+            if isinstance(result, GhidraErrorResult):
+                raise RuntimeError(str(result))  # noqa: TRY004 transport failure, not invalid argument type
+            if isinstance(result, list) and len(result) == 1 and isinstance(result[0], GhidraErrorResult):
+                raise RuntimeError(str(result[0]))
 
             # --- IMPROVEMENT: Auto-fallback for Import XREFs ---
             # if get_function_xrefs returns nothing, it might be an import thunk (e.g. LoadLibraryW)
@@ -3133,9 +3137,6 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
                         exec_results.add_execution(tool_exec)
                         continue
 
-                    # Track this execution
-                    self.executed_tools.add(cmd_signature)
-
                     self.logger.info(f"🔧 Executing: {cmd_name}({cmd_params})")
 
                     # Emit tool execution to UI
@@ -3144,6 +3145,8 @@ If investigation is incomplete or name is too generic, use EXECUTE to call tools
 
                     # Execute the tool
                     result = self.execute_command(cmd_name, cmd_params)
+                    # Failed calls are retryable; only suppress successful duplicates.
+                    self.executed_tools.add(cmd_signature)
 
                     # AUTOMATIC CONTINUATION: Fetch remaining lines for truncated decompilation
                     # If decompilation shows "[Total Lines: X] [Showing Lines: 1-Y]" where Y < X,
