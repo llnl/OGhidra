@@ -13,9 +13,9 @@ Using Pydantic ensures data validation, clear structure, and easier maintenance.
 
 from datetime import datetime
 from enum import Enum
-from typing import Any, ClassVar
+from typing import Any
 
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class MessageRole(str, Enum):
@@ -39,9 +39,8 @@ class ConversationMessage(BaseModel):
     timestamp: datetime | None = Field(default_factory=datetime.now)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
-    class Config:
-        # Don't use use_enum_values - keep as enum for type safety
-        arbitrary_types_allowed = True
+    # Don't use use_enum_values - keep as enum for type safety
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     def format_for_prompt(self) -> str:
         """Format this message for inclusion in a prompt."""
@@ -99,9 +98,8 @@ class AnalysisState(BaseModel):
     cached_results: dict[str, Any] = Field(default_factory=dict)
     pattern_detections: dict[str, list[str]] = Field(default_factory=dict)  # address -> pattern names (HIGH severity)
 
-    class Config:
-        # Allow sets in Pydantic model
-        arbitrary_types_allowed = True
+    # Allow sets in Pydantic model
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     def format_for_prompt(self) -> str | None:
         """Format analysis state for inclusion in a prompt."""
@@ -166,8 +164,7 @@ class PromptSection(BaseModel):
     order: int  # Lower numbers appear first
     required: bool = True  # If False, can be omitted if empty
 
-    class Config:
-        frozen = True  # Make immutable for consistent ordering
+    model_config = ConfigDict(frozen=True)  # Make immutable for consistent ordering
 
 
 class StructuredPrompt(BaseModel):
@@ -253,7 +250,7 @@ class StructuredPrompt(BaseModel):
 
         return "\n\n".join(sections)
 
-    @validator("conversation_history")
+    @field_validator("conversation_history")
     def validate_history_not_too_long(cls, v):
         """Warn if conversation history is getting very long."""
         if len(v) > 100:
@@ -551,6 +548,3 @@ class SessionMemory(BaseModel):
             conversation_history=self.get_recent_messages(limit=10),
             phase_specific_instructions=phase_instructions,
         )
-
-    class Config:
-        json_encoders: ClassVar = {datetime: lambda v: v.isoformat(), set: lambda v: list(v)}
