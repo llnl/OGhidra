@@ -6,7 +6,7 @@ import datetime
 import uuid
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, ValidationInfo, field_validator
 
 
 class ToolCallRecord(BaseModel):
@@ -59,10 +59,10 @@ class SessionRecord(BaseModel):
         return v.strip()
 
     @field_validator("end_time")
-    def validate_end_time(cls, v, values):
+    def validate_end_time(cls, v, info: ValidationInfo):
         """Ensure end_time is after start_time."""
-        if v and "start_time" in values:
-            start_time = values["start_time"]
+        start_time = info.data.get("start_time")
+        if v and start_time:
             if v < start_time:
                 raise ValueError("end_time cannot be before start_time")
             # Reasonable session duration limit (24 hours)
