@@ -515,13 +515,12 @@ class CommandParser:
                     f"or the new name is invalid or already in use. "
                     f"Try using get_function_by_address(address='{addr}') to verify the function exists."
                 )
-        elif command_name.startswith("decompile_"):
-            if "not found" in error.lower() or "does not exist" in error.lower():
-                return (
-                    f"ERROR: {error}. "
-                    f"The function may not exist or may not be a valid target for decompilation. "
-                    f"Try list_functions() to see available functions."
-                )
+        elif command_name.startswith("decompile_") and ("not found" in error.lower() or "does not exist" in error.lower()):
+            return (
+                f"ERROR: {error}. "
+                f"The function may not exist or may not be a valid target for decompilation. "
+                f"Try list_functions() to see available functions."
+            )
 
         # Check for camelCase vs snake_case errors in the command name
         if re.search(r"[a-z][A-Z]", command_name):
