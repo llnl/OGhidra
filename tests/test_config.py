@@ -128,8 +128,10 @@ def test_examples_and_generated_schema_are_current():
     if saved_schema != generated_schema:
         # Show helpful diff output
         def find_differences(path, old, new, diffs):
-            if type(old) != type(new):
-                diffs.append(f"{path}: type mismatch ({type(old).__name__} vs {type(new).__name__})")
+            if not isinstance(old, type(new)):
+                diffs.append(
+                    f"{path}: type mismatch ({type(old).__name__} vs {type(new).__name__})"
+                )
                 return
             if isinstance(old, dict):
                 all_keys = set(old.keys()) | set(new.keys())
@@ -137,27 +139,35 @@ def test_examples_and_generated_schema_are_current():
                     if key not in old:
                         diffs.append(f"{path}.{key}: missing in saved schema")
                     elif key not in new:
-                        diffs.append(f"{path}.{key}: extra in saved schema (should be removed)")
+                        diffs.append(
+                            f"{path}.{key}: extra in saved schema (should be removed)"
+                        )
                     elif old[key] != new[key]:
                         find_differences(f"{path}.{key}", old[key], new[key], diffs)
             elif isinstance(old, list):
                 if len(old) != len(new):
-                    diffs.append(f"{path}: length mismatch (saved={len(old)}, generated={len(new)})")
+                    diffs.append(
+                        f"{path}: length mismatch (saved={len(old)}, generated={len(new)})"
+                    )
                 else:
                     for i, (old_val, new_val) in enumerate(zip(old, new)):
                         if old_val != new_val:
                             find_differences(f"{path}[{i}]", old_val, new_val, diffs)
             else:
-                diffs.append(f"{path}:\n  saved:     {repr(old)}\n  generated: {repr(new)}")
+                diffs.append(
+                    f"{path}:\n  saved:     {repr(old)}\n  generated: {repr(new)}"
+                )
 
         differences = []
         find_differences("schema", saved_schema, generated_schema, differences)
 
-        error_msg = "\n".join([
-            "\nSchema mismatch!",
-            "\nDifferences found:",
-            *[f"  {diff}" for diff in differences]
-        ])
+        error_msg = "\n".join(
+            [
+                "\nSchema mismatch!",
+                "\nDifferences found:",
+                *[f"  {diff}" for diff in differences],
+            ]
+        )
         pytest.fail(error_msg)
 
     assert saved_schema == generated_schema

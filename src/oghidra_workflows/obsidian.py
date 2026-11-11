@@ -13,6 +13,7 @@ from .workflow import Proposal, result_data
 
 class FunctionLink(BaseModel):
     """A link to another function with stable address-based reference."""
+
     address: str
     name: str
 
@@ -51,7 +52,7 @@ def sanitize_filename(name: str) -> str:
     # Remove or replace characters that are invalid in filenames
     invalid_chars = '<>:"/\\|?*'
     for char in invalid_chars:
-        name = name.replace(char, '_')
+        name = name.replace(char, "_")
     return name
 
 
@@ -132,7 +133,9 @@ def format_function_note(
     note = FunctionNote(
         address=format_address(address),
         binary_name=binary_name,
-        entry_point=format_address(entry_point) if entry_point else format_address(address),
+        entry_point=format_address(entry_point)
+        if entry_point
+        else format_address(address),
         original_name=original_name,
         current_name=current_name,
         signature=signature or "// Signature unknown",
@@ -323,30 +326,44 @@ async def read_function_note(
     note_filename = make_note_filename(function_name)
     note_path = f"functions/{note_filename}"
 
-    with operation("obsidian.read_note", function_name=function_name, address=formatted_addr):
+    with operation(
+        "obsidian.read_note", function_name=function_name, address=formatted_addr
+    ):
         # Try direct read by function name
         try:
             read_result = await session.call_tool("vault_read", {"path": note_path})
             if not read_result.isError:
                 content = result_data(read_result)
-                content_str = content.get("content", "") if isinstance(content, dict) else str(content)
+                content_str = (
+                    content.get("content", "")
+                    if isinstance(content, dict)
+                    else str(content)
+                )
                 return content_str, note_path
         except Exception:
             pass
 
         # Search by address in frontmatter if name-based lookup failed
         try:
-            search_result = await session.call_tool("search_simple", {"query": formatted_addr})
+            search_result = await session.call_tool(
+                "search_simple", {"query": formatted_addr}
+            )
             if not search_result.isError:
                 data = result_data(search_result)
                 if isinstance(data, list) and len(data) > 0:
                     for item in data:
                         filename = item.get("filename", "")
                         if filename and filename.startswith("functions/"):
-                            read_result = await session.call_tool("vault_read", {"path": filename})
+                            read_result = await session.call_tool(
+                                "vault_read", {"path": filename}
+                            )
                             if not read_result.isError:
                                 content = result_data(read_result)
-                                content_str = content.get("content", "") if isinstance(content, dict) else str(content)
+                                content_str = (
+                                    content.get("content", "")
+                                    if isinstance(content, dict)
+                                    else str(content)
+                                )
                                 return content_str, filename
         except Exception as e:
             logger.debug("obsidian.search_failed", extra={"error": str(e)})
@@ -380,17 +397,22 @@ async def write_function_note(
     if existing_content:
         note_content = merge_with_user_notes(existing_content, note_content)
 
-    with operation("obsidian.write_note", function_name=new_name, address=formatted_addr, path=new_path):
+    with operation(
+        "obsidian.write_note",
+        function_name=new_name,
+        address=formatted_addr,
+        path=new_path,
+    ):
         try:
             # If function was renamed and no existing note found, create stub with old name first
             if old_name != new_name and not existing_path:
                 old_filename = make_note_filename(old_name)
                 old_path = f"functions/{old_filename}"
 
-                logger.info("obsidian.creating_stub_for_rename", extra={
-                    "old_name": old_name,
-                    "new_name": new_name
-                })
+                logger.info(
+                    "obsidian.creating_stub_for_rename",
+                    extra={"old_name": old_name, "new_name": new_name},
+                )
 
                 # Create stub with old name
                 stub_result = await session.call_tool(
@@ -410,20 +432,20 @@ async def write_function_note(
                         {
                             "path": existing_path,
                             "destination": new_path,
-                            "allowOverwrite": True
-                        }
+                            "allowOverwrite": True,
+                        },
                     )
                     if not move_result.isError:
-                        logger.info("obsidian.note_renamed", extra={
-                            "old_path": existing_path,
-                            "new_path": new_path
-                        })
+                        logger.info(
+                            "obsidian.note_renamed",
+                            extra={"old_path": existing_path, "new_path": new_path},
+                        )
                         return  # Successfully renamed, content already written
                 except Exception as e:
-                    logger.warning("obsidian.rename_failed", extra={
-                        "error": str(e),
-                        "falling_back_to_write": True
-                    })
+                    logger.warning(
+                        "obsidian.rename_failed",
+                        extra={"error": str(e), "falling_back_to_write": True},
+                    )
 
             # Write/update content (fallback or direct write if no rename)
             result = await session.call_tool(
@@ -439,7 +461,10 @@ async def write_function_note(
                 )
             else:
                 action = "updated" if existing_content else "created"
-                logger.info(f"obsidian.note_{action}", extra={"path": new_path, "function": new_name})
+                logger.info(
+                    f"obsidian.note_{action}",
+                    extra={"path": new_path, "function": new_name},
+                )
         except Exception as e:
             logger.error(
                 "obsidian.write_error", extra={"path": new_path, "error": str(e)}

@@ -65,6 +65,8 @@ async def calculate_confidence(
         },
     )
     return assessment.confidence
+
+
 REQUIRED_GHIDRA_TOOLS = frozenset(
     {"get_gui_context", "decompile_function", "rename_function"}
 )

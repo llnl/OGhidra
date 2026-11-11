@@ -53,7 +53,13 @@ async def connect(
                     for key, value in config.headers.items():
                         if any(
                             word in key.lower()
-                            for word in ("authorization", "key", "token", "secret", "password")
+                            for word in (
+                                "authorization",
+                                "key",
+                                "token",
+                                "secret",
+                                "password",
+                            )
                         ):
                             register_secret(value)
                     factory = (

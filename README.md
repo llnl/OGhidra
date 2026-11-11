@@ -279,15 +279,15 @@ OGhidra can integrate with an Obsidian vault to provide persistent, human-editab
          - search_notes
          - read_note
    ```
-   
+
    Get your API key from Settings → Local REST API in Obsidian. The API key authenticates via the `Authorization: Bearer` header.
-   
+
    **Important**: The current MCP Python SDK (v1.30.0) does not support passing custom HTTP headers for streamable-http or SSE transports. The `headers` field is included in the config for documentation purposes and future SDK support. For now, OGhidra stores the configuration but cannot authenticate to the Obsidian MCP server. Your Claude client (mcp.json) can connect successfully using headers.
-   
+
    **Note**: The HTTP endpoint (port 27123) avoids certificate validation issues. If you prefer HTTPS (port 27124), download and trust the certificate from `https://127.0.0.1:27124/obsidian-local-rest-api.crt`.
 
 4. **Configure your Claude client** (optional, for direct vault access):
-   
+
    In your `mcp.json` or Claude client config:
    ```json
    {

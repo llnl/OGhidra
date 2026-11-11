@@ -19,7 +19,9 @@ async def test_mcp_apply_contract_preserves_existing_defaults(monkeypatch):
     async def fake_connect(servers):
         yield {"ghidra": object()}, {"ghidra": {}}, []
 
-    async def fake_rename_current(session, catalog, program, apply):
+    async def fake_rename_current(
+        session, catalog, program, apply, obsidian_session=None, vault_path=None
+    ):
         observed.append(apply)
         return SimpleNamespace(status="renamed" if apply else "proposed", detail="")
 

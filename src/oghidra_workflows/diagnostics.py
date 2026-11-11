@@ -149,6 +149,7 @@ def resolve_log_file(config_path: Path, template: str | None) -> Path | None:
     if template is None:
         return None
     from datetime import datetime, timezone
+
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     path_str = template.replace("{timestamp}", timestamp)
     path = Path(path_str)
