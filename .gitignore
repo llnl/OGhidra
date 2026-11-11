@@ -238,6 +238,8 @@ pyrightconfig.json
 !.vscode/tasks.json
 !.vscode/launch.json
 !.vscode/extensions.json
+
+VALIDATION.md
 !.vscode/*.code-snippets
 
 # Local History for Visual Studio Code
@@ -309,6 +311,12 @@ gradle-app.setting
 # Project-specific artifacts.
 logs/*
 uv.lock
+.venv-ghidra/
+.vscode/
+
+# Local configuration; copy from the corresponding example files.
+config.yaml
+mcp.json
 
 # Gradle project files for GhidraMCP caught by python's gitignore above.
 !OGhidraMCP/Module.manifest

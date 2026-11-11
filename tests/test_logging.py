@@ -1,7 +1,6 @@
 import asyncio
 import json
 import logging
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -54,21 +53,21 @@ def test_structured_exception_group_is_redacted_and_stdout_empty(
     monkeypatch.setenv("EXAMPLE_API_KEY", "secret-for-test-123")
     path = tmp_path / "events.jsonl"
     configure_logging("DEBUG", path)
-    with request_context() as request_id:
-        with pytest.raises(ExceptionGroup):
-            with operation(
-                "mcp.initialize",
-                endpoint=endpoint(
-                    "http://user:password@localhost:8001/mcp?key=private"
-                ),
-            ):
-                raise ExceptionGroup(
-                    "connection errors",
-                    [
-                        ConnectionRefusedError("upstream refused connection"),
-                        ValueError("api_key=secret-for-test-123"),
-                    ],
-                )
+    with (
+        request_context() as request_id,
+        pytest.raises(ExceptionGroup),
+        operation(
+            "mcp.initialize",
+            endpoint=endpoint("http://user:password@localhost:8001/mcp?key=private"),
+        ),
+    ):
+        raise ExceptionGroup(
+            "connection errors",
+            [
+                ConnectionRefusedError("upstream refused connection"),
+                ValueError("api_key=secret-for-test-123"),
+            ],
+        )
     captured = capsys.readouterr()
     assert captured.out == ""
     assert "secret-for-test-123" not in captured.err + path.read_text()
@@ -107,11 +106,10 @@ async def test_request_context_isolated_across_async_tasks(tmp_path):
     configure_logging("DEBUG", path)
 
     async def task(label):
-        with request_context() as request_id:
-            with operation(label):
-                await asyncio.sleep(0)
-                logger.info(label)
-                return request_id
+        with request_context() as request_id, operation(label):
+            await asyncio.sleep(0)
+            logger.info(label)
+            return request_id
 
     first, second = await asyncio.gather(task("first"), task("second"))
     assert first != second
@@ -132,6 +130,7 @@ def test_invalid_config_has_durable_startup_traceback(tmp_path):
     result = subprocess.run(
         [sys.executable, str(main), "--config", str(config)],
         capture_output=True,
+        check=False,
         text=True,
         timeout=20,
     )
@@ -155,14 +154,14 @@ async def test_model_failure_logged_before_mcp_converts_error(tmp_path):
             str(tmp_path / "failure.jsonl"),
         ],
     )
-    async with stdio_client(params) as (read, write):
-        async with ClientSession(read, write) as session:
-            await session.initialize()
-            response = await session.call_tool(
-                "rename_current_function", {"apply": False}
-            )
-            assert response.isError
-            assert "request_id=" in response.content[0].text
+    async with (
+        stdio_client(params) as (read, write),
+        ClientSession(read, write) as session,
+    ):
+        await session.initialize()
+        response = await session.call_tool("rename_current_function", {"apply": False})
+        assert response.isError
+        assert "request_id=" in response.content[0].text
     entries = records(tmp_path / "failure.jsonl")
     failure = next(
         r
@@ -179,6 +178,7 @@ async def test_native_dspy_callback_reports_errors_even_when_caller_handles_them
     tmp_path,
 ):
     import dspy
+
     from oghidra_workflows.diagnostics import DSPyLoggingCallback
 
     path = tmp_path / "callbacks.jsonl"
@@ -187,10 +187,12 @@ async def test_native_dspy_callback_reports_errors_even_when_caller_handles_them
     def fail():
         raise RuntimeError("tool unavailable")
 
-    with request_context():
-        with dspy.context(callbacks=[DSPyLoggingCallback()]):
-            with pytest.raises(RuntimeError):
-                await dspy.Tool(fail).acall()
+    with (
+        request_context(),
+        dspy.context(callbacks=[DSPyLoggingCallback()]),
+        pytest.raises(RuntimeError),
+    ):
+        await dspy.Tool(fail).acall()
     assert any(
         r["message"] == "dspy.tool.failed" and "tool unavailable" in r["exc_info"]
         for r in records(path)

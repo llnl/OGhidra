@@ -1,172 +1,245 @@
-# OGhidra workflows — PyGhidra backend
+# OGhidra — AI-powered reverse engineering with Ghidra
 
-AI-assisted reverse engineering with DSPy, Ghidra, and optional Obsidian vault integration.
+OGhidra connects language models to a live Ghidra session through MCP. It adds
+repeatable DSPy workflows to the inspection and editing tools exposed by
+[PyGhidra-MCP](https://github.com/clearbluejar/pyghidra-mcp).
 
-**📖 Quick Start:** See [Obsidian Integration Guide](docs/OBSIDIAN-QUICKSTART.md) for vault setup
+## Quick start
 
-## Start Ghidra and its MCP server
+This path uses the Bash helpers on Linux or macOS. Windows users can follow the
+[manual PowerShell commands](#windows-powershell) below.
 
-Use a separate environment for the upstream server so its dependencies and the workflow's dependencies can evolve independently. Install Ghidra and the JDK required by your Ghidra release first.
+### Prerequisites
 
-Windows PowerShell (paths are examples):
+- Python 3.12 or later.
+- [Ghidra](https://ghidra-sre.org/) and the JDK required by that Ghidra release.
+- [Codex CLI or another local Codex client](https://developers.openai.com/codex/mcp/).
+- Access to a hosted model API, Ollama, or a vLLM-compatible endpoint.
 
-```powershell
-python -m venv .venv-ghidra
-.\.venv-ghidra\Scripts\python.exe -m pip install uv
-.\.venv-ghidra\Scripts\python.exe -m uv pip "pyghidra-mcp==0.2.7"
-$env:GHIDRA_INSTALL_DIR = 'C:\path\to\ghidra\installation'
-.\.venv-ghidra\Scripts\pyghidra-mcp.exe --gui --transport streamable-http --host 127.0.0.1 --port 8001 --project-path 'C:\path\to\your\project.gpr'
-```
+OGhidra does not install Ghidra, a JDK, or a model.
 
-On Linux/macOS, activate the backend environment, set `GHIDRA_INSTALL_DIR`, and launch Ghidra GUI with pyghidra MCP enabled with something like this:
-
-```bash
-pyghidra-mcp --gui --transport streamable-http --host 127.0.0.1 --port 8001 --project-path /absolute/path/to/research.gpr
-```
-
-This launches Ghidra. Open the desired program in its CodeBrowser, wait for analysis to finish, and select a location within a function. Keep this process running. Save/close any other Ghidra instance using the same project before starting this one; the backend cannot attach to an independently launched GUI. Ghidra/MCP run in the same JVM here, so changes are live in that GUI.
-
-The MCP endpoint is `http://127.0.0.1:8001/mcp`. This is actual MCP over Streamable HTTP, with no intermediate REST bridge. Port 8001 avoids the example LM service on port 8000.
-
-## Configure OGhidra
-
-Python 3.12 or later, from this project's root:
+### 1. Clone and set up
 
 ```bash
-python -m venv .venv
-# Activate .venv using the command for your shell.
-python -m pip install uv
-uv pip install -e '.[test]'
+git clone https://github.com/llnl/OGhidra.git
+cd OGhidra
+./scripts/setup.sh --register-codex
 ```
 
-Copy `config.example.yaml` to `config.yaml` and set the actual model name/endpoint. Keep this backend entry:
+The setup script creates two intentionally separate environments:
 
-```yaml
-mcp_servers:
-  ghidra:
-    transport: streamable-http
-    url: http://127.0.0.1:8001/mcp
-    evidence_tools:
-      - decompile_function
-      - list_xrefs
-```
+- `.venv-ghidra` contains PyGhidra-MCP and its Ghidra/JVM dependencies.
+- `.venv` contains the OGhidra workflow server.
 
-### Model connection: provider prefix, model ID, and URL
+It also creates `config.yaml` from the example when that file is missing. It
+never overwrites an existing configuration. With `--register-codex`, it adds
+the `pyghidra` and `oghidra` MCP servers; registrations that already exist are
+reported and left unchanged. Omit the flag if you use another MCP host or want
+to register Codex manually.
 
-The `lm` section configures DSPy's own model connection; it does not inherit the
-host client's model. OGhidra passes `lm.model` directly to `dspy.LM` without
-aliases, automatic prefix insertion/removal, or provider-specific parsing.
-There is no separate `provider` configuration field.
+### 2. Configure the model
 
-Use DSPy/LiteLLM's format:
+Edit the `lm` section of `config.yaml` and replace
+`replace/provider-and-model-id`. Build the value as:
 
 ```text
-<LiteLLM provider>/<exact model identifier>
+<LiteLLM integration>/<exact endpoint model ID>
 ```
 
-The first prefix selects the API integration, not necessarily the model's
-publisher. The remainder is the model ID and can itself contain slashes.
-`model` is not a URL; `api_base` is the separate API base URL. An ID returned by
-`/v1/models` is not necessarily a complete DSPy model string.
+For example, use `openai/gpt-4o` for the literal OpenAI model ID `gpt-4o`, or
+`ollama_chat/llama3.2` with `api_base: http://127.0.0.1:11434` for a local
+Ollama model. Preserve any slashes that are part of the endpoint's exact model
+ID.
 
-For example, if your server returns `"id": "openai/gpt-oss-120b"`, configure:
+If authentication is required, set `api_key_env` to an environment-variable
+name and expose that variable to the Codex process. Never put the secret itself
+in `config.yaml`. See [Model and host setup](docs/model-and-host-setup.md) for
+provider examples, model-ID details, and non-Codex MCP hosts.
 
-```yaml
-lm:
-  model: hosted_vllm/openai/gpt-oss-120b
-  api_base: https://your-model-server.example/v1
-  ssl_verify: true
-  # Uncomment when the endpoint requires authentication:
-  # api_key_env: OGHIDRA_MODEL_API_KEY
+### 3. Start Ghidra and PyGhidra-MCP
+
+#### New Ghidra Project
+In terminal 1, set `GHIDRA_INSTALL_DIR` to the Ghidra installation directory,
+then provide the native PyGhidra-MCP project arguments:
+
+- `--project-path` is the directory that will contain the project. It is
+  created if it does not exist.
+- `--project-name` is the project name and the base name of its `.gpr` and
+  `.rep` files. For example, `research` creates `research.gpr` and
+  `research.rep` under the project path.
+- The final program path is optional. When present, it must name an existing
+  binary and PyGhidra-MCP imports it into the project. Quote paths containing
+  spaces. You can provide more than one program path.
+
+Create the project and import a program immediately:
+
+```bash
+export GHIDRA_INSTALL_DIR=/absolute/path/to/ghidra
+./scripts/run-ghidra.sh \
+  --project-path /absolute/path/to/projects \
+  --project-name research \
+  /absolute/path/to/program
 ```
 
-`hosted_vllm/` selects LiteLLM's hosted vLLM integration. Use this prefix for
-hosted vLLM; `vllm/` is the deprecated local SDK integration. The generic
-OpenAI-compatible integration also works with this server: set
-`model: openai/openai/gpt-oss-120b`. The first `openai/` selects the integration;
-the second is part of the server's literal ID. Do not deduplicate them.
+To start with an empty project, omit the final program path:
 
-| API integration | Exact model ID (example) | `lm.model` | `lm.api_base` |
-| --- | --- | --- | --- |
-| OpenAI directly | `gpt-4o` | `openai/gpt-4o` | Omit |
-| Anthropic directly | `claude-sonnet-4-5-20250929` | `anthropic/claude-sonnet-4-5-20250929` | Omit |
-| Native Ollama chat | `llama3.2` | `ollama_chat/llama3.2` | `http://127.0.0.1:11434` |
-| Hosted vLLM | `openai/gpt-oss-120b` | `hosted_vllm/openai/gpt-oss-120b` | `http://127.0.0.1:8000/v1` |
-| Generic OpenAI-compatible API | `openai/gpt-oss-120b` | `openai/openai/gpt-oss-120b` | `http://127.0.0.1:8000/v1` |
-| Generic OpenAI-compatible API | `mistralai/Devstral-2-123B-Instruct-2512` | `openai/mistralai/Devstral-2-123B-Instruct-2512` | Your server's API base |
+```bash
+export GHIDRA_INSTALL_DIR=/absolute/path/to/ghidra
+./scripts/run-ghidra.sh \
+  --project-path /absolute/path/to/projects \
+  --project-name research
+```
 
-Model IDs above are examples, not availability guarantees. Use the exact ID
-provided by your service. Other LiteLLM integrations use their documented
-prefixes and endpoint settings; no OGhidra alias list is needed. Keep all parts
-of the server model ID, including organization names and tags.
+This still creates or opens the `research` project and launches Ghidra. It
+does not import or analyze a program until you import one later through Ghidra
+or PyGhidra-MCP.
 
-For OpenAI-compatible services, `api_base` typically ends in `/v1`. Do not
-append `/models` or `/chat/completions`; the client adds the request endpoint.
-For native Ollama, use its base URL without `/v1` as shown above.
+#### Existing Ghidra Project
+For an existing project, pass its `.gpr` file as `--project-path`. The project
+name is derived from the filename, so omit `--project-name`. Omit the program
+path unless you also want to import another program:
 
-`api_key_env` is an environment variable **name**, not the secret value. For
-an authenticated endpoint, set it explicitly and make sure that variable is
-available to the MCP server launched by your client. For example, use
-`api_key_env: ANTHROPIC_API_KEY` for a direct Anthropic connection. Omit it for
-an endpoint that needs no key. When comparing curl with OGhidra, use the same
-base URL and credentials. Restart the workflow MCP server after config changes.
+```bash
+export GHIDRA_INSTALL_DIR=/absolute/path/to/ghidra
+./scripts/run-ghidra.sh --project-path /absolute/path/to/project.gpr
+```
 
-Keep `ssl_verify: true`, including on internal HTTPS endpoints. When the server
-entry point initializes `truststore` before importing DSPy and HTTP clients,
-verification uses system trust on Windows and Linux. Setting this flag alone
-does not initialize truststore. Certificates must be trusted in the account
-and environment running the process; WSL and containers have separate trust
-configuration from the Windows host.
+The run script launches PyGhidra-MCP and the Ghidra GUI on the required local
+MCP endpoint. It does not launch Codex, doctor, or a workflow. Codex launches
+the separate OGhidra stdio server when a client session starts.
 
-If a request fails with "Invalid model name", compare the model ID in the
-server's error with the exact `/v1/models` ID. For the example above, an error
-showing only `gpt-oss-120b` means the model namespace was consumed as the routing
-prefix: use `hosted_vllm/openai/gpt-oss-120b` or
-`openai/openai/gpt-oss-120b`. A successful `/models` request alone does not test
-chat completion access.
+Keep terminal 1 and the Ghidra GUI open. In CodeBrowser, wait for analysis to
+finish and place the cursor inside the target function.
 
-Supported LM fields: `model`, `api_base`, `api_key_env`, `cache`, `max_tokens`,
-`temperature`, `timeout`, `num_retries`, and `ssl_verify`. Add explicit typed
-fields when more settings are needed; arbitrary options are rejected. Config
-validation checks field types, not whether a remote model exists or accepts
-the selected generation parameters.
+### 4. Check the session
 
-## Connect Your Client
+In terminal 2, run the read-only doctor:
 
-Claude (or any host) launches the OGhidra workflow server over stdio. Both your client and OGhidra connects to the existing PyGhidra-MCP HTTP endpoint.
+```bash
+.venv/bin/oghidra-doctor --config config.yaml
+```
 
-```json
-{
-  "mcpServers": {
-    "pyghidra": {
-      "command": "cmd",
-      "args": [
-        "/c",
-        "npx",
-        "-y",
-        "mcp-remote",
-        "http://127.0.0.1:8001/mcp",
-        "--transport",
-        "http-only",
-        "--allow-http"
-      ]
-    },
-    "oghidra-workflows": {
-      "command": "C:/path/to/oghidra-workflows/.venv/Scripts/python.exe",
-      "args": [
-        "C:/path/to/oghidra-workflows/main.py",
-        "--config",
-        "C:/path/to/oghidra-workflows/config.yaml"
-      ],
-      "env": {
-        "OGHIDRA_MODEL_API_KEY": "your-model-api-key"
-      }
-    }
-  }
+`oghidra-doctor` is a launcher generated inside `.venv/bin` by the
+`pip install -e .` step. Calling it by that path does not require activating
+the environment. If `.venv` is activated, the shorter equivalent is
+`oghidra-doctor --config config.yaml`.
+
+Doctor validates local configuration, credentials, MCP connectivity, required
+tools, and the current Ghidra selection. By default it does not contact the
+model, decompile code, or modify Ghidra. Add `--check-model` to make a small,
+uncached inference request; this can incur a provider charge. A ready session
+reports `PASS` for both model connectivity and the Ghidra selection when that
+option is used.
+
+### 5. Example: Request a rename proposal
+
+Start a new Codex session after registering or changing MCP configuration. Use
+`/mcp` to confirm that `pyghidra` and `oghidra` are active, then ask:
+
+```text
+Use the oghidra MCP server's rename_current_function tool with apply set to
+false for the function currently selected in Ghidra.
+```
+
+The result should include:
+
+```text
+status: proposed
+```
+
+`apply: false` never writes. If `apply` is omitted, the tool defaults to `true`
+and may rename the selected function. To apply a rename deliberately, request
+`apply: true`; OGhidra performs a fresh analysis and revalidates the live target
+before writing. Save the program in Ghidra when finished.
+
+## Manual setup and launch
+
+These commands perform the same setup and launch steps without the Bash
+helpers.
+
+<details>
+<summary>Linux and macOS</summary>
+
+<a id="linux-and-macos"></a>
+
+Clone the repository, create both environments, and initialize the
+configuration:
+
+```bash
+git clone https://github.com/llnl/OGhidra.git
+cd OGhidra
+OGHIDRA_ROOT="$(pwd -P)"
+
+python3.12 -m venv .venv-ghidra
+.venv-ghidra/bin/python -m pip install "pyghidra-mcp==0.2.7"
+
+python3.12 -m venv .venv
+.venv/bin/python -m pip install -e .
+test -e config.yaml || cp config.example.yaml config.yaml
+```
+
+After editing `config.yaml`, register both MCP servers:
+
+```bash
+OGHIDRA_ROOT="$(pwd -P)"
+codex mcp add pyghidra --url http://127.0.0.1:8001/mcp
+codex mcp add oghidra -- \
+  "$OGHIDRA_ROOT/.venv/bin/oghidra-workflows" \
+  --config "$OGHIDRA_ROOT/config.yaml"
+codex mcp list
+```
+
+Launch a new project and program in terminal 1:
+
+```bash
+export GHIDRA_INSTALL_DIR=/absolute/path/to/ghidra
+.venv-ghidra/bin/pyghidra-mcp \
+  --gui --transport streamable-http --host 127.0.0.1 --port 8001 \
+  --project-path /absolute/path/to/projects --project-name research \
+  /absolute/path/to/program
+```
+
+Or launch an existing project:
+
+```bash
+export GHIDRA_INSTALL_DIR=/absolute/path/to/ghidra
+.venv-ghidra/bin/pyghidra-mcp \
+  --gui --transport streamable-http --host 127.0.0.1 --port 8001 \
+  --project-path /absolute/path/to/project.gpr
+```
+
+Then run doctor in terminal 2:
+
+```bash
+.venv/bin/oghidra-doctor --config config.yaml
+```
+
+</details>
+
+<details>
+<summary>Windows PowerShell</summary>
+
+<a id="windows-powershell"></a>
+
+Clone the repository, create both environments, and initialize the
+configuration:
+
+```powershell
+git clone https://github.com/llnl/OGhidra.git
+Set-Location OGhidra
+$OghidraRoot = (Resolve-Path .).Path
+
+py -3.12 -m venv .venv-ghidra
+.\.venv-ghidra\Scripts\python.exe -m pip install 'pyghidra-mcp==0.2.7'
+
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e .
+if (-not (Test-Path config.yaml)) {
+  Copy-Item config.example.yaml config.yaml
 }
 ```
 
-Omit `env` if the process already inherits the needed key or no key is configured. Restart the host after editing its configuration. Starting `main.py` manually with no check flag leaves it waiting for stdio MCP input; it does not expose another HTTP port.
+After editing `config.yaml`, register both MCP servers:
 
 For ease of use, a copy of this configuration for your claude client is found in `dsp.json` and can be loaded with a command such as `claude --mcp-config ./mcp.json`.
 
@@ -264,42 +337,74 @@ The upstream tools do not offer an atomic compare-and-rename operation. Pre-writ
 
 ```bash
 python main.py --schema > config.schema.json
+```powershell
+$OghidraRoot = (Resolve-Path .).Path
+codex mcp add pyghidra --url http://127.0.0.1:8001/mcp
+codex mcp add oghidra -- `
+  "$OghidraRoot\.venv\Scripts\oghidra-workflows.exe" `
+  --config "$OghidraRoot\config.yaml"
+codex mcp list
 ```
 
-The YAML example links this generated schema for editor validation. The Python models remain the single source of truth. Static types help Python callers; validation of external YAML values still happens at load time.
+Launch a new project and program in terminal 1:
 
-Additional MCP servers can be added to `mcp_servers`. `evidence_tools` lists their trusted read-only tools available to the DSPy investigation; upstream discovery supplies descriptions and parameter schemas. Internal DSPy names are `server__tool` to avoid collisions. The list is not a sandbox: tools have the effects their upstream implementation provides. Workflow writes are deterministic, outside ReAct.
-
-## DSPy optimization
-
-`examples/optimize.py` compiles the naming predictor using `BootstrapFewShot` and analyst-reviewed JSONL. Each row contains `function_name`, `decompiled_code`, `related_context`, and a `proposal` object with `suggested_name`, `analysis`, `behavior_summary`, and `rationale`. Use held-out binaries to avoid duplicate leakage:
-
-```bash
-python examples/optimize.py config.yaml train.jsonl heldout.jsonl predictor.json
+```powershell
+$env:GHIDRA_INSTALL_DIR = 'C:\absolute\path\to\ghidra'
+.\.venv-ghidra\Scripts\pyghidra-mcp.exe --gui --transport streamable-http --host 127.0.0.1 --port 8001 --project-path 'C:\absolute\path\to\projects' --project-name research 'C:\absolute\path\to\program.exe'
 ```
 
-Set `compiled_predictor` to the saved JSON path, relative to the config file. The script evaluates exact accepted-name matches; extend the metric for multiple acceptable names. This trains naming from supplied evidence, not evidence gathering. No trained artifact or naming-quality claim is bundled.
+Or launch an existing project:
 
-## Scope, dependencies, and validation
-
-Runtime source consists of typed configuration, standard MCP connections, the DSPy workflow, and MCP entry points. There is no GUI implementation, provider wrapper, custom agent loop, RAG, or Ghidra backend in this repository. Upstream pyghidra-mcp itself includes ChromaDB/indexing dependencies; using this backend does not eliminate those third-party dependencies. Keep it in its own environment. For enclaves, stage approved dependencies and upstream model/indexing assets and configure internal endpoints; the workflow is not a claim that all third-party dependencies are network-free.
-
-The backend contract was inspected in the published **pyghidra-mcp 0.2.7 wheel**, specifically `mcp_tools.py`, `models.py`, `tools.py`, and `gui_context.py`. The README's abbreviated API listing can lag the code (for example, `get_gui_context`). The decompiler's `name` field is a filename-like label, so the workflow uses GUI context for the real function name; it also rejects code/error responses lacking a successful signature.
-
-```bash
-pytest -q
+```powershell
+$env:GHIDRA_INSTALL_DIR = 'C:\absolute\path\to\ghidra'
+.\.venv-ghidra\Scripts\pyghidra-mcp.exe --gui --transport streamable-http --host 127.0.0.1 --port 8001 --project-path 'C:\absolute\path\to\project.gpr'
 ```
 
-Tests cover strict config, typed DSPy outputs, MCP discovery, native ReAct tool calls, and both stdio and Streamable HTTP backend sessions. The full host → workflow stdio → simulated PyGhidra-MCP HTTP path is tested. Ghidra behavior and LM responses are fixtures. Actual JVM/GUI integration and naming quality still require a live test in your environment. DSPy 3.3.1 and MCP Python SDK 1.30.0 are pinned; `constraints-tested.txt` records the workflow test environment, not the separately installed backend.
+Then run doctor in terminal 2:
 
-## Sources and license
+```powershell
+.\.venv\Scripts\oghidra-doctor.exe --config config.yaml
+```
 
-- PyGhidra-MCP: https://github.com/clearbluejar/pyghidra-mcp
-- Inspected release: https://pypi.org/project/pyghidra-mcp/0.2.7/
-- DSPy MCP: https://dspy.ai/learn/programming/mcp/
-- DSPy language models: https://dspy.ai/learn/programming/language_models/
-- LiteLLM hosted vLLM: https://docs.litellm.ai/docs/providers/vllm
-- LiteLLM OpenAI-compatible endpoints: https://docs.litellm.ai/docs/providers/openai_compatible
-- Official MCP Python SDK v1: https://github.com/modelcontextprotocol/python-sdk/tree/v1.x
+Codex CLI, the IDE extension, and the ChatGPT desktop app share the same local
+Codex MCP configuration. Start a new Codex session after changing it.
 
-The rename product derives from the supplied OGhidra archive's GUI rename workflow and typed `AnalyzeFunction` signature. `LICENSE` is retained verbatim from that archive, including its commercial-use terms. No upstream backend source is bundled.
+</details>
+
+## Troubleshooting first run
+
+| Observation | Meaning and next action |
+| --- | --- |
+| Doctor cannot connect to `http://127.0.0.1:8001/mcp` | Start PyGhidra-MCP in terminal 1 and keep it running. |
+| Doctor reports a missing model placeholder or credential | Finish the `lm` section and expose the named credential to the Codex process. |
+| Doctor cannot find a function | Open a program in CodeBrowser and place the cursor inside a function. |
+| `/mcp` does not show both servers | Check `codex mcp list`, verify the captured repository path, and start a new Codex session. |
+| No `logs/oghidra-*.jsonl` appears | The host did not launch the OGhidra stdio process; recheck registration paths. |
+| `/rename_current_function` is unknown | It is an MCP tool, not a slash command. Request it in normal language. |
+
+See [Operations and diagnostics](docs/operations.md) for logs, failure modes,
+and workflow safety details.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    Host["Codex / MCP host"] -->|"stdio: workflow tools"| OG["OGhidra workflows"]
+    OG -->|"Ghidra evidence and actions"| Py["PyGhidra-MCP"]
+    Host -->|"direct Ghidra tools"| Py
+    Py <--> GUI["Ghidra GUI / CodeBrowser"]
+```
+
+Both MCP servers are passive. PyGhidra-MCP owns the Ghidra process and GUI;
+OGhidra adds higher-level workflows. Opening a project or program does not run
+a workflow automatically.
+
+## Development and license
+
+See [Development](docs/development.md) for tests, optional UV usage,
+configuration extension points, and repository scope.
+
+The workflow derives from the supplied OGhidra archive's GUI rename workflow
+and typed `AnalyzeFunction` signature. [`LICENSE`](LICENSE) is retained from
+that archive, including its commercial-use terms. No upstream backend source
+is bundled.
