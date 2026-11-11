@@ -1,7 +1,6 @@
 """MCP entry point. No provider-specific clients or Ghidra proxy endpoints."""
 
 # Import ordering below intentionally initializes the system trust store first.
-# ruff: noqa: E402
 
 import truststore
 
@@ -22,6 +21,7 @@ from pathlib import Path
 import dspy
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
+from pydantic import Field
 
 from .config import AppConfig, LMConfig, load_config
 from .connections import connect
@@ -33,11 +33,18 @@ from .diagnostics import (
     install_exception_hooks,
     logger,
     operation,
+    redact,
     register_secret,
     request_context,
     resolve_log_file,
 )
-from .workflow import RenameProgram, RenameResult, rename_current
+from .workflow import (
+    BulkRenameResult,
+    RenameProgram,
+    RenameResult,
+    rename_all,
+    rename_current,
+)
 
 
 def make_lm(config: LMConfig) -> dspy.LM:
@@ -161,6 +168,70 @@ def build_server(config: AppConfig) -> FastMCP:
                 # this exception into an MCP error. Return its correlation ID too.
                 raise RuntimeError(
                     f"OGhidra workflow failed [request_id={request_id}]: {exc}"
+                ) from exc
+
+    @server.tool(
+        annotations=ToolAnnotations(
+            readOnlyHint=False,
+            destructiveHint=True,
+            idempotentHint=False,
+            openWorldHint=True,
+        )
+    )
+    async def rename_all_functions(
+        apply: bool = False,
+        limit: int = Field(default=5, ge=1, le=25),
+        cursor: str | None = None,
+    ) -> BulkRenameResult:
+        """Preview or rename one batch of generic functions in the active program.
+
+        Use next_cursor in the following call to continue. apply=True performs
+        fresh analysis and writes; a preview is never committed directly.
+        """
+        with request_context() as request_id:
+            logger.info(
+                "workflow.started",
+                extra={"tool": "rename_all_functions", "apply": apply, "limit": limit},
+            )
+            try:
+                with operation("workflow.rename_all", apply=apply):
+                    with operation("workflow.wait_for_lock"):
+                        await lock.acquire()
+                    try:
+                        async with connect(config.mcp_servers) as (
+                            sessions,
+                            catalogs,
+                            tools,
+                        ):
+                            program = RenameProgram(tools, max_iters=config.max_iters)
+                            if artifact := config.compiled_predictor:
+                                with operation("predictor.load", artifact=artifact):
+                                    program.analyze.load(artifact)
+                            with dspy.context(lm=lm, callbacks=[DSPyLoggingCallback()]):
+                                result = await rename_all(
+                                    sessions["ghidra"],
+                                    catalogs["ghidra"],
+                                    program,
+                                    apply=apply,
+                                    limit=limit,
+                                    cursor=cursor,
+                                )
+                    finally:
+                        lock.release()
+                if result.status in {"partial", "aborted"}:
+                    result.detail += f" [request_id={request_id}]"
+                logger.info(
+                    "workflow.completed",
+                    extra={
+                        "tool": "rename_all_functions",
+                        "status": result.status,
+                        "counts": result.counts,
+                    },
+                )
+                return result
+            except Exception as exc:
+                raise RuntimeError(
+                    f"OGhidra bulk workflow failed [request_id={request_id}]: {redact(str(exc))}"
                 ) from exc
 
     return server

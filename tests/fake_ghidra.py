@@ -1,6 +1,7 @@
 """pyghidra-mcp 0.2.7 protocol fixture; no JVM or Ghidra emulation."""
 
 import argparse
+import re
 
 from mcp.server.fastmcp import FastMCP
 from pydantic import BaseModel
@@ -50,7 +51,7 @@ def decompile_function(
     timeout_sec: int = 30,
 ) -> list[DecompiledFunction]:
     assert binary_name == "/app.exe"
-    assert name_or_address == "00401008"
+    assert name_or_address in ("00401008", "00401000")
     return [
         DecompiledFunction(
             name=f"{name}-00401000",
@@ -66,11 +67,40 @@ def rename_function(
 ) -> RenameResponse:
     global name
     assert binary_name == "/app.exe"
-    assert name_or_address == "00401008"
+    assert name_or_address in ("00401008", "00401000")
     old_name, name = name, new_name
     return RenameResponse(
         binary_name=binary_name, address="00401000", old_name=old_name, new_name=name
     )
+
+
+@mcp.tool()
+def search_symbols_by_name(
+    binary_name: str,
+    query: str,
+    functions_only: bool = False,
+    offset: int = 0,
+    limit: int = 25,
+) -> dict:
+    assert binary_name == "/app.exe"
+    assert functions_only
+    symbols = (
+        [
+            {
+                "name": name,
+                "address": "00401000",
+                "type": "Function",
+                "namespace": "Global",
+                "source": "DEFAULT" if name.startswith("FUN_") else "USER_DEFINED",
+                "refcount": 0,
+                "external": False,
+                "is_thunk": False,
+            }
+        ]
+        if re.search(query, name, re.IGNORECASE)
+        else []
+    )
+    return {"symbols": symbols[offset : offset + limit]}
 
 
 @mcp.tool()

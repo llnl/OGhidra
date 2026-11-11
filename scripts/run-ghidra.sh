@@ -17,6 +17,9 @@ if [[ ! -x "$pyghidra_executable" ]]; then
     exit 1
 fi
 
+# Ghidra must find its ghidra: URL handler while restoring saved open programs.
+export JAVA_TOOL_OPTIONS="${JAVA_TOOL_OPTIONS:+$JAVA_TOOL_OPTIONS }-Djava.protocol.handler.pkgs=ghidra.framework.protocol"
+
 exec "$pyghidra_executable" \
     --gui \
     --transport streamable-http \

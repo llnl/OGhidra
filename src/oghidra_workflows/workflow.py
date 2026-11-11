@@ -1,6 +1,9 @@
 """The rename product: capture, investigate, propose, apply, verify."""
 
+import base64
+import binascii
 import json
+import re
 from typing import Literal
 
 import dspy
@@ -8,7 +11,7 @@ from mcp import ClientSession
 from mcp.types import CallToolResult, Tool
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
-from .diagnostics import logger, operation
+from .diagnostics import logger, operation, redact
 
 REQUIRED_GHIDRA_TOOLS = frozenset(
     {"get_gui_context", "decompile_function", "rename_function"}
@@ -113,6 +116,40 @@ class RenameReceipt(BaseModel):
     address: str = Field(min_length=1)
     old_name: str
     new_name: str
+
+
+class ProgramContext(BaseModel):
+    model_config = ConfigDict(strict=True, hide_input_in_errors=True)
+    active_program: str = Field(min_length=1)
+
+
+class FunctionSymbol(BaseModel):
+    model_config = ConfigDict(strict=True, hide_input_in_errors=True)
+    name: str = Field(min_length=1)
+    address: str = Field(min_length=1)
+    source: str
+    external: bool
+    is_thunk: bool
+
+
+class BulkRenameItem(BaseModel):
+    status: Literal[
+        "proposed", "renamed", "unchanged", "failed", "stale", "verification_failed"
+    ]
+    address: str
+    old_name: str
+    proposal: Proposal | None = None
+    observed_name: str | None = None
+    detail: str = ""
+
+
+class BulkRenameResult(BaseModel):
+    status: Literal["previewed", "completed", "partial", "aborted"]
+    binary_name: str
+    items: list[BulkRenameItem]
+    counts: dict[str, int]
+    next_cursor: str | None = None
+    detail: str = ""
 
 
 def result_data(result: CallToolResult) -> object:
@@ -258,3 +295,255 @@ async def rename_current(
             f"Write outcome uncertain; inspect Ghidra before retrying: {exc}"
         )
     return result
+
+
+GENERIC_FUNCTION_QUERY = r"^(?:FUN_|sub_|loc_|unk_|j_)"
+BULK_REQUIRED_TOOLS = REQUIRED_GHIDRA_TOOLS | {"search_symbols_by_name"}
+
+
+async def _search_function_symbols(
+    session: ClientSession, binary_name: str, query: str
+) -> list[FunctionSymbol]:
+    """Read every page before any rename changes the upstream search ordering."""
+    symbols: list[FunctionSymbol] = []
+    offset = 0
+    while True:
+        data = result_data(
+            await session.call_tool(
+                "search_symbols_by_name",
+                {
+                    "binary_name": binary_name,
+                    "query": query,
+                    "functions_only": True,
+                    "offset": offset,
+                    "limit": 100,
+                },
+            )
+        )
+        page = TypeAdapter(list[FunctionSymbol]).validate_python(data["symbols"])
+        symbols.extend(page)
+        if len(page) < 100:
+            return symbols
+        offset += 100
+
+
+def _bulk_cursor(binary_name: str, address: str) -> str:
+    payload = json.dumps(
+        {"program": binary_name, "after": address}, separators=(",", ":")
+    )
+    return base64.urlsafe_b64encode(payload.encode()).decode()
+
+
+def _cursor_address(cursor: str | None, binary_name: str) -> str | None:
+    if cursor is None:
+        return None
+    if not isinstance(cursor, str) or len(cursor) > 4096:
+        raise ValueError("Invalid bulk cursor")
+    try:
+        data = json.loads(base64.b64decode(cursor, altchars=b"-_", validate=True))
+    except (ValueError, UnicodeDecodeError, binascii.Error) as exc:
+        raise ValueError("Invalid bulk cursor") from exc
+    if (
+        not isinstance(data, dict)
+        or set(data) != {"program", "after"}
+        or not isinstance(data["program"], str)
+        or not isinstance(data["after"], str)
+        or not data["after"]
+        or len(data["after"]) > 256
+    ):
+        raise ValueError("Invalid bulk cursor")
+    if data["program"] != binary_name:
+        raise ValueError("Bulk cursor belongs to a different program")
+    return data["after"]
+
+
+def _finish_bulk(
+    result: BulkRenameResult, last_address: str | None, more: bool
+) -> BulkRenameResult:
+    counts: dict[str, int] = {}
+    for item in result.items:
+        counts[item.status] = counts.get(item.status, 0) + 1
+    result.counts = counts
+    if last_address is not None and more:
+        result.next_cursor = _bulk_cursor(result.binary_name, last_address)
+    if result.status != "aborted" and any(
+        item.status in {"failed", "stale", "verification_failed"}
+        for item in result.items
+    ):
+        result.status = "partial"
+    return result
+
+
+async def rename_all(
+    session: ClientSession,
+    catalog: dict[str, Tool],
+    program: RenameProgram,
+    apply: bool = False,
+    limit: int = 5,
+    cursor: str | None = None,
+) -> BulkRenameResult:
+    """Process one address-ordered batch of generic functions in the active program."""
+    if missing := BULK_REQUIRED_TOOLS - catalog.keys():
+        raise ValueError(f"pyghidra-mcp missing required tools: {sorted(missing)}")
+    if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 25:
+        raise ValueError("limit must be between 1 and 25")
+    context = ProgramContext.model_validate(
+        result_data(await session.call_tool("get_gui_context", {}))
+    )
+    binary_name = context.active_program
+    after = _cursor_address(cursor, binary_name)
+    found = await _search_function_symbols(session, binary_name, GENERIC_FUNCTION_QUERY)
+    by_address: dict[str, FunctionSymbol] = {}
+    for symbol in found:
+        if (
+            re.match(GENERIC_FUNCTION_QUERY, symbol.name, re.IGNORECASE)
+            and not symbol.external
+            and not symbol.is_thunk
+            and symbol.source.upper() != "USER_DEFINED"
+        ):
+            if symbol.address in by_address:
+                raise ValueError(
+                    f"Duplicate function address in symbol search: {symbol.address}"
+                )
+            by_address[symbol.address] = symbol
+    targets = [
+        symbol
+        for address, symbol in sorted(by_address.items())
+        if after is None or address > after
+    ]
+    batch = targets[:limit]
+    result = BulkRenameResult(
+        status="completed" if apply else "previewed",
+        binary_name=binary_name,
+        items=[],
+        counts={},
+    )
+    last_address = after
+    for target in batch:
+        try:
+            live = ProgramContext.model_validate(
+                result_data(await session.call_tool("get_gui_context", {}))
+            )
+        except Exception as exc:  # noqa: BLE001 - a lost session stops the batch.
+            result.status, result.detail = (
+                "aborted",
+                f"Could not verify active program: {redact(str(exc))}",
+            )
+            return _finish_bulk(result, last_address, True)
+        if live.active_program != binary_name:
+            result.status, result.detail = (
+                "aborted",
+                "Active Ghidra program changed during bulk rename",
+            )
+            return _finish_bulk(result, last_address, True)
+        arguments = {"binary_name": binary_name, "name_or_address": target.address}
+        item = BulkRenameItem(
+            status="failed", address=target.address, old_name=target.name
+        )
+        try:
+            data = result_data(await session.call_tool("decompile_function", arguments))
+            if isinstance(data, dict) and "result" in data:
+                data = data["result"]
+            functions = TypeAdapter(list[Decompilation]).validate_python(data)
+            if (
+                len(functions) != 1
+                or functions[0].error
+                or not functions[0].code.strip()
+                or not functions[0].signature
+            ):
+                raise ValueError(
+                    "Decompilation failed or returned an unexpected function count"
+                )
+            prediction = await program.acall(
+                function_name=target.name,
+                address=target.address,
+                binary_name=binary_name,
+                decompiled_code=functions[0].code,
+            )
+            item.proposal = Proposal.model_validate(prediction.proposal)
+        except Exception as exc:  # noqa: BLE001 - one target must not stop the batch.
+            item.detail = redact(str(exc))
+            result.items.append(item)
+            last_address = target.address
+            continue
+        if not apply:
+            item.status = "proposed"
+        else:
+            try:
+                live = ProgramContext.model_validate(
+                    result_data(await session.call_tool("get_gui_context", {}))
+                )
+            except Exception as exc:  # noqa: BLE001 - cannot safely continue writes.
+                result.status, result.detail = (
+                    "aborted",
+                    f"Could not verify active program: {redact(str(exc))}",
+                )
+                return _finish_bulk(result, last_address, True)
+            if live.active_program != binary_name:
+                result.status, result.detail = (
+                    "aborted",
+                    "Active Ghidra program changed during bulk rename",
+                )
+                return _finish_bulk(result, last_address, True)
+            try:
+                current = [
+                    symbol
+                    for symbol in await _search_function_symbols(
+                        session, binary_name, f"^{re.escape(target.name)}$"
+                    )
+                    if symbol.address == target.address
+                ]
+                if len(current) != 1 or current[0] != target:
+                    item.status = "stale"
+                    item.observed_name = current[0].name if len(current) == 1 else None
+                    item.detail = "Function changed during analysis; no write was made"
+                elif item.proposal.suggested_name == target.name:
+                    item.status = "unchanged"
+                    item.observed_name = target.name
+                else:
+                    item.status = "verification_failed"
+                    try:
+                        receipt = RenameReceipt.model_validate(
+                            result_data(
+                                await session.call_tool(
+                                    "rename_function",
+                                    {
+                                        **arguments,
+                                        "new_name": item.proposal.suggested_name,
+                                    },
+                                )
+                            )
+                        )
+                        observed = [
+                            symbol
+                            for symbol in await _search_function_symbols(
+                                session,
+                                binary_name,
+                                f"^{re.escape(item.proposal.suggested_name)}$",
+                            )
+                            if symbol.address == target.address
+                        ]
+                        item.observed_name = (
+                            observed[0].name if len(observed) == 1 else None
+                        )
+                        if (
+                            receipt.binary_name == binary_name
+                            and receipt.address == target.address
+                            and receipt.old_name == target.name
+                            and receipt.new_name == item.proposal.suggested_name
+                            and len(observed) == 1
+                            and observed[0].name == item.proposal.suggested_name
+                        ):
+                            item.status = "renamed"
+                        else:
+                            item.detail = "Rename receipt or symbol read-back did not match; inspect Ghidra"
+                    except Exception as exc:  # noqa: BLE001 - a write might already have happened.
+                        item.detail = (
+                            "Write outcome uncertain; inspect Ghidra before retrying: "
+                            f"{redact(str(exc))}"
+                        )
+            except Exception as exc:  # noqa: BLE001 - read/validation failure affects this target.
+                item.detail = redact(str(exc))
+        result.items.append(item)
+        last_address = target.address
+    return _finish_bulk(result, last_address, len(targets) > len(batch))

@@ -163,9 +163,15 @@ fi
 
 
 def run_ghidra(
-    repository: Path, *arguments: str, ghidra_install_dir: str | None = "/opt/ghidra"
+    repository: Path,
+    *arguments: str,
+    ghidra_install_dir: str | None = "/opt/ghidra",
+    java_tool_options: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     environment = os.environ.copy()
+    environment.pop("JAVA_TOOL_OPTIONS", None)
+    if java_tool_options is not None:
+        environment["JAVA_TOOL_OPTIONS"] = java_tool_options
     if ghidra_install_dir is None:
         environment.pop("GHIDRA_INSTALL_DIR", None)
     else:
@@ -178,6 +184,24 @@ def run_ghidra(
         text=True,
         check=False,
     )
+
+
+@pytest.mark.parametrize("prior_options", [None, "-Dexample.setting=keep"])
+def test_runner_registers_ghidra_url_handler_before_jvm_start(tmp_path, prior_options):
+    repository = make_script_repository(tmp_path)
+    executable = repository / ".venv-ghidra" / "bin" / "pyghidra-mcp"
+    executable.parent.mkdir(parents=True)
+    write_executable(
+        executable,
+        "#!/usr/bin/env bash\nprintf '%s\\n' \"$JAVA_TOOL_OPTIONS\"\n",
+    )
+
+    result = run_ghidra(repository, java_tool_options=prior_options)
+
+    assert result.returncode == 0, result.stderr
+    assert "-Djava.protocol.handler.pkgs=ghidra.framework.protocol" in result.stdout
+    if prior_options is not None:
+        assert prior_options in result.stdout
 
 
 def test_runner_requires_ghidra_install_dir(tmp_path):
