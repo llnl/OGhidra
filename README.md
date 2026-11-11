@@ -1,90 +1,8 @@
 # OGhidra workflows — PyGhidra backend
 
-## Diagnostics and crash logs
+AI-assisted reverse engineering with DSPy, Ghidra, and optional Obsidian vault integration.
 
-
-```yaml
-log_level: DEBUG
-log_file: logs/oghidra-{pid}.jsonl
-log_max_bytes: 5000000
-log_backup_count: 3
-```
-
-Paths are relative to the directory containing `config.yaml`, regardless of the
-client's working directory. `{pid}` expands to the workflow process ID, avoiding
-rotation conflicts between separate client-launched processes. Each process's
-file rotates at 5 MB with three backups by default. Files from older processes
-remain until removed; rotation is per process, not global retention. Set
-`log_file: null` for stderr only. Malformed/unreadable configuration gets a
-fallback startup error log at `logs/oghidra-PID.jsonl` if that folder is writable.
-If a requested log file cannot be opened, startup fails visibly on stderr.
-
-Normal logging never writes to stdout: stdout belongs to the stdio MCP protocol.
-Human-readable stderr logs appear in the launching client's server logs and in
-the terminal when run directly. JSON files include UTC timestamp, process,
-logger, request ID, stage, timing, and event-specific metadata. Each workflow
-request has its own correlation ID, also returned in tool errors and uncertain
-rename results.
-
-At INFO, look for `server.starting`, `server.ready`, `workflow.started`,
-`mcp.initialized`, `workflow.target_selected`, and `workflow.completed`. At DEBUG,
-`stage.started` / `stage.completed` identify connect, initialize, discovery,
-decompile, DSPy evidence/naming, pre-write checks, rename, verification, and
-cleanup. DSPy's native callbacks record LM/tool call IDs and durations; tool
-errors are logged even when ReAct handles them and continues. `stage.failed`
-records the original traceback, including chained exceptions and nested
-ExceptionGroup causes. An error from the rename phase that becomes
-`verification_failed` is also logged with its traceback.
-
-To diagnose a failure:
-
-1. Find the `request_id` in the client's tool error.
-2. Open the newest `logs/oghidra-*.jsonl` file beside the configuration.
-3. Find that request ID and inspect the first `stage.failed` or
-   `dspy.*.failed` event and its `exc_info`. Later session cleanup failures may
-   repeat or wrap the same cause.
-4. If the client cannot launch the process, inspect its stderr log. Import
-   failures before configured logging initializes appear there. The root
-   `main.py` launcher retains a bootstrap traceback.
-
-PowerShell tail:
-
-```powershell
-$log = Get-ChildItem .\logs\oghidra-*.jsonl | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-Get-Content $log.FullName -Tail 40 -Wait
-```
-
-The startup event records the interpreter, Python/library versions, CWD, absolute
-config path, and log path. This helps distinguish the VSCode environment from the
-one the agent client launches. `server.exited` indicates that the stdio transport
-returned (for example, the client closed stdin), rather than a recorded Python
-exception. `server.failed`, `process.uncaught`, `thread.uncaught`, and
-`async.unhandled` preserve corresponding unhandled exception tracebacks.
-
-Prompts, decompiled code, complete model responses, tool arguments/results,
-subprocess arguments, and environment dictionaries are not deliberately logged.
-Known credential environment values and common credential patterns are redacted;
-endpoint metadata excludes URL userinfo, query parameters, and fragments.
-Pydantic errors omit input-value representations. Provider/HTTP payload debug
-logging stays disabled even at OGhidra DEBUG level. Exceptions still contain
-upstream error messages, which may contain sensitive application data not covered
-by redaction; review logs before sharing them.
-
-Native faults handled by Python's `faulthandler` write thread stacks to stderr,
-not the rotating JSON file. A forced kill, power loss, or a crash in the separate
-PyGhidra-MCP process cannot be given an in-process Python traceback here; use the
-upstream process's logs alongside the last OGhidra stage. This implementation
-uses standard `logging`, `RotatingFileHandler`, `python-json-logger`, and DSPy's
-callback API, with no external logging service.
-
-A client-side configuration error can prevent OGhidra from being launched at all;
-in that case there will be no new OGhidra log. For model identifier and endpoint
-configuration, see the model connection instructions below.
-
-
-One product: `rename_current_function(apply=True)`, implemented with DSPy and exposed through MCP. This version uses **clearbluejar/pyghidra-mcp 0.2.7** to launch the Ghidra GUI and serve MCP over Streamable HTTP. LaurieWired's extension and Python bridge are not used.
-
-PyGhidra supplies Python access to Ghidra APIs. The separate upstream **pyghidra-mcp** project supplies the MCP tools and GUI lifecycle. OGhidra contains neither a copied backend nor its own Ghidra API wrapper.
+**📖 Quick Start:** See [Obsidian Integration Guide](docs/OBSIDIAN-QUICKSTART.md) for vault setup
 
 ## Start Ghidra and its MCP server
 
@@ -252,14 +170,87 @@ Omit `env` if the process already inherits the needed key or no key is configure
 
 For ease of use, a copy of this configuration for your claude client is found in `dsp.json` and can be loaded with a command such as `claude --mcp-config ./mcp.json`.
 
+## Obsidian Vault Integration
+
+OGhidra can integrate with an Obsidian vault to provide persistent, human-editable function analysis. When configured, the workflow:
+
+1. **Reads existing notes** from the vault before analysis, providing context from previous work
+2. **Writes comprehensive analysis** back to the vault after successful renames
+3. **Preserves human annotations** by merging automated updates with user notes
+4. **Links functions together** using Obsidian wikilinks for natural navigation
+
+### Setting up the Vault
+
+1. **Create a vault directory** for your Ghidra project:
+   ```bash
+   mkdir -p /path/to/ghidra-vault/functions
+   ```
+
+2. **Install the Local REST API plugin in Obsidian**:
+   - Open Obsidian Settings → Community plugins
+   - Browse for "Local REST API with MCP"
+   - Click Install, then Enable
+   - Go to Settings → Local REST API and note your API key
+   - Enable HTTP server: Settings → Local REST API → Enable HTTP server
+
+3. **Configure in config.yaml**:
+   ```yaml
+   mcp_servers:
+     obsidian:
+       transport: streamable-http
+       url: http://127.0.0.1:27123/mcp
+       headers:
+         Authorization: "Bearer your-api-key-from-settings"
+       vault_path: "/path/to/ghidra-vault"
+       evidence_tools:
+         - search_notes
+         - read_note
+   ```
+   
+   Get your API key from Settings → Local REST API in Obsidian. The API key authenticates via the `Authorization: Bearer` header.
+   
+   **Important**: The current MCP Python SDK (v1.30.0) does not support passing custom HTTP headers for streamable-http or SSE transports. The `headers` field is included in the config for documentation purposes and future SDK support. For now, OGhidra stores the configuration but cannot authenticate to the Obsidian MCP server. Your Claude client (mcp.json) can connect successfully using headers.
+   
+   **Note**: The HTTP endpoint (port 27123) avoids certificate validation issues. If you prefer HTTPS (port 27124), download and trust the certificate from `https://127.0.0.1:27124/obsidian-local-rest-api.crt`.
+
+4. **Configure your Claude client** (optional, for direct vault access):
+   
+   In your `mcp.json` or Claude client config:
+   ```json
+   {
+     "mcpServers": {
+       "obsidian": {
+         "type": "http",
+         "url": "http://127.0.0.1:27123/mcp",
+         "headers": {
+           "Authorization": "Bearer your-api-key-from-settings"
+         }
+       }
+     }
+   }
+   ```
+
+5. **Open the vault in Obsidian** to view and edit notes with full Obsidian features (graph view, search, tags, etc.)
+
+### Workflow with Obsidian
+
+The DSPy ReAct agent can:
+- **Search for similar functions** using `search_notes`
+- **Read prior analysis** to learn from past work
+- **Reference existing patterns** discovered in other functions
+
+This creates a **knowledge-building loop**: each analysis improves future analyses by contributing to the shared vault.
+
 ## What the workflow does
 
 1. Calls upstream `get_gui_context()` and captures the active program path, cursor address, and function name.
-2. Calls upstream `decompile_function(binary_name, name_or_address)` with the captured program and address. Addresses within functions are supported by upstream's containing-function lookup.
-3. Uses typed DSPy prediction for a name, analysis, behavioral summary, and rationale. Optional `dspy.ReAct` gathers additional evidence through `dspy.Tool.from_mcp_tool`, using the program/address in its task context.
-4. Rechecks the active program, cursor, and old name before writing.
-5. Calls upstream `rename_function(binary_name, name_or_address, new_name)` exactly once.
-6. Validates the structured rename receipt and reads the GUI context again. Only matching receipt and read-back return `status="renamed"`.
+2. **[If Obsidian configured]** Searches vault for existing analysis of this function.
+3. Calls upstream `decompile_function(binary_name, name_or_address)` with the captured program and address. Addresses within functions are supported by upstream's containing-function lookup.
+4. Uses typed DSPy prediction for a name, analysis, behavioral summary, and rationale. Optional `dspy.ReAct` gathers additional evidence through `dspy.Tool.from_mcp_tool`, including Obsidian search tools if configured.
+5. Rechecks the active program, cursor, and old name before writing.
+6. Calls upstream `rename_function(binary_name, name_or_address, new_name)` exactly once.
+7. Validates the structured rename receipt and reads the GUI context again. Only matching receipt and read-back return `status="renamed"`.
+8. **[If Obsidian configured]** Writes comprehensive analysis note to vault, preserving user annotations.
 
 The result includes the captured `binary_name` and `address` (cursor address, not necessarily the entry point). After a rename receipt, `function_entry_address` contains the entry point reported by upstream. Structured response models validate the required fields. There is no parsing of old `Function: NAME at ADDRESS` text, no invented function identity, and no compatibility layer for LaurieWired tools.
 

@@ -17,6 +17,14 @@
           "title": "Url",
           "type": "string"
         },
+        "headers": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "HTTP headers to send with requests. For Obsidian Local REST API, use: {\"Authorization\": \"Bearer <your-api-key>\"}",
+          "title": "Headers",
+          "type": "object"
+        },
         "evidence_tools": {
           "items": {
             "minLength": 1,
@@ -24,6 +32,20 @@
           },
           "title": "Evidence Tools",
           "type": "array"
+        },
+        "vault_path": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Path to Obsidian vault directory for storing function analysis notes. Only used for obsidian MCP servers. If set, OGhidra will read existing notes as context and write analysis results back.",
+          "title": "Vault Path"
         }
       },
       "required": [
@@ -35,7 +57,7 @@
     },
     "LMConfig": {
       "additionalProperties": false,
-      "description": "DSPy/LiteLLM settings; model is passed through without rewriting.",
+      "description": "DSPy/LiteLLM settings.",
       "properties": {
         "model": {
           "description": "DSPy/LiteLLM identifier: <provider>/<exact model ID>. The first prefix selects the API integration; the remaining ID may contain slashes. This is not a URL. No aliases or prefix rewriting are applied. For a server ID openai/gpt-oss-120b, use hosted_vllm/openai/gpt-oss-120b or openai/openai/gpt-oss-120b.",
@@ -232,7 +254,8 @@
           "type": "null"
         }
       ],
-      "default": "logs/oghidra-{pid}.jsonl",
+      "default": "logs/oghidra-{timestamp}.jsonl",
+      "description": "Log file path template. Supports {timestamp} placeholder (ISO 8601: YYYYMMDDTHHMMSSZ).",
       "title": "Log File"
     },
     "log_max_bytes": {

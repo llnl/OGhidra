@@ -46,8 +46,24 @@ mcp_servers:
       - decompile_function
       - list_xrefs
 
+  # Optional: Obsidian vault integration for persistent function analysis.
+  # Install the "Local REST API with MCP" plugin in Obsidian:
+  # https://community.obsidian.md/plugins/obsidian-local-rest-api
+  # Get your API key from Settings → Local REST API in Obsidian.
+  # Note: Use HTTP endpoint (port 27123) to avoid certificate validation issues.
+  obsidian:
+    transport: streamable-http
+    url: http://127.0.0.1:27123/mcp
+    # OR use HTTPS after trusting the certificate: https://127.0.0.1:27124/mcp
+    headers:
+      Authorization: "Bearer your-api-key-from-obsidian-settings"
+    vault_path: "C:/path/to/your/ghidra-vault"
+    evidence_tools:
+      - search_simple
+      - vault_read
+
 # Application and MCP workflow diagnostics (stderr + rotating JSON file).
 log_level: DEBUG
-log_file: logs/oghidra-{pid}.jsonl
+log_file: logs/oghidra-{timestamp}.jsonl
 log_max_bytes: 5000000
 log_backup_count: 3

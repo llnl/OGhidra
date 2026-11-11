@@ -9,7 +9,7 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.sse import sse_client
 from mcp.client.stdio import stdio_client
 from mcp.client.streamable_http import streamablehttp_client
-from mcp.types import Tool
+from mcp.types import PaginatedRequestParams, Tool
 
 from .config import MCPServerConfig, StdioServerConfig
 from .diagnostics import endpoint, logger, operation, register_secret
@@ -49,14 +49,22 @@ async def connect(
                         )
                 else:
                     fields["endpoint"] = endpoint(config.url)
+                    # Register secrets from HTTP server headers
+                    for key, value in config.headers.items():
+                        if any(
+                            word in key.lower()
+                            for word in ("authorization", "key", "token", "secret", "password")
+                        ):
+                            register_secret(value)
                     factory = (
                         sse_client
                         if config.transport == "sse"
                         else streamablehttp_client
                     )
                     with operation("mcp.connect", **fields):
+                        # Pass custom headers for authentication
                         streams = await stack.enter_async_context(
-                            factory(str(config.url))
+                            factory(str(config.url), headers=config.headers or None)
                         )
                 with operation("mcp.initialize", **fields):
                     session = await stack.enter_async_context(
@@ -73,13 +81,14 @@ async def connect(
                         },
                     )
                 with operation("mcp.discover_tools", **fields):
-                    catalog, cursor = {}, None
+                    catalog = {}
+                    params = None
                     while True:
-                        page = await session.list_tools(cursor=cursor)
+                        page = await session.list_tools(params=params)
                         catalog.update({tool.name: tool for tool in page.tools})
-                        cursor = page.nextCursor
-                        if not cursor:
+                        if not page.nextCursor:
                             break
+                        params = PaginatedRequestParams(cursor=page.nextCursor)
                     logger.debug(
                         "mcp.tools_discovered",
                         extra={**fields, "tools": sorted(catalog)},

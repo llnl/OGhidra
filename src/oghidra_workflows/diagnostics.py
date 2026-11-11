@@ -148,7 +148,10 @@ def configure_logging(
 def resolve_log_file(config_path: Path, template: str | None) -> Path | None:
     if template is None:
         return None
-    path = Path(template.replace("{pid}", str(os.getpid())))
+    from datetime import datetime, timezone
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    path_str = template.replace("{timestamp}", timestamp)
+    path = Path(path_str)
     return (config_path.parent / path).resolve()
 
 

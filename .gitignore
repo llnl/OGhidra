@@ -316,3 +316,6 @@ uv.lock
 
 # Codex
 .codex
+
+# Claude
+.claude/

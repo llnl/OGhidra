@@ -132,12 +132,19 @@ def build_server(config: AppConfig) -> FastMCP:
                             if artifact := config.compiled_predictor:
                                 with operation("predictor.load", artifact=artifact):
                                     program.analyze.load(artifact)
+                            # Get Obsidian session and vault path if configured
+                            obsidian_session = sessions.get("obsidian")
+                            obsidian_config = config.mcp_servers.get("obsidian")
+                            vault_path = obsidian_config.vault_path if obsidian_config else None
+
                             with dspy.context(lm=lm, callbacks=[DSPyLoggingCallback()]):
                                 result = await rename_current(
                                     sessions["ghidra"],
                                     catalogs["ghidra"],
                                     program,
                                     apply,
+                                    obsidian_session=obsidian_session,
+                                    vault_path=vault_path,
                                 )
                     finally:
                         lock.release()
@@ -207,7 +214,7 @@ def main():
         if config is None:
             try:
                 configure_logging(
-                    log_file=resolve_log_file(config_path, "logs/oghidra-{pid}.jsonl")
+                    log_file=resolve_log_file(config_path, "logs/oghidra-{timestamp}.jsonl")
                 )
             except OSError:
                 logger.exception("logging.bootstrap_file_unavailable")
