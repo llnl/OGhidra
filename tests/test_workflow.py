@@ -9,12 +9,12 @@ from pydantic import ValidationError
 
 from oghidra_workflows.workflow import RenameProgram, rename_current, result_data
 
-PROPOSAL = dict(
-    suggested_name="incrementValue",
-    analysis="Adds one to its input.",
-    behavior_summary="Returns the input plus one.",
-    rationale="Names the observed arithmetic.",
-)
+PROPOSAL = {
+    "suggested_name": "incrementValue",
+    "analysis": "Adds one to its input.",
+    "behavior_summary": "Returns the input plus one.",
+    "rationale": "Names the observed arithmetic.",
+}
 
 
 class Session:
@@ -46,29 +46,29 @@ class Session:
             old_name = self.name
             if not self.verify_wrong:
                 self.name = arguments["new_name"]
-            data = dict(
-                binary_name=arguments["binary_name"],
-                address="00401000",
-                old_name=old_name,
-                new_name=arguments["new_name"],
-            )
+            data = {
+                "binary_name": arguments["binary_name"],
+                "address": "00401000",
+                "old_name": old_name,
+                "new_name": arguments["new_name"],
+            }
         elif name == "decompile_function":
             data = {
                 "result": [
-                    dict(
-                        name="FUN_00401000-00401000",
-                        code="" if self.empty else "int f(int x) { return x + 1; }",
-                        signature=None if self.decompile_error else "int f(int x)",
-                        error=None,
-                    )
+                    {
+                        "name": "FUN_00401000-00401000",
+                        "code": "" if self.empty else "int f(int x) { return x + 1; }",
+                        "signature": None if self.decompile_error else "int f(int x)",
+                        "error": None,
+                    }
                 ]
             }
         else:
-            data = dict(
-                active_program="/app.exe",
-                active_address="00401008",
-                active_function=self.name,
-            )
+            data = {
+                "active_program": "/app.exe",
+                "active_address": "00401008",
+                "active_function": self.name,
+            }
             if self.no_function:
                 data["active_function"] = None
             if self.changed and len(self.calls) > 2:

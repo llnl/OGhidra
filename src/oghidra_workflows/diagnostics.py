@@ -22,8 +22,8 @@ from dspy.utils.callback import BaseCallback
 from pythonjsonlogger.json import JsonFormatter
 
 logger = logging.getLogger("oghidra_workflows")
-_context: contextvars.ContextVar[dict] = contextvars.ContextVar(
-    "log_context", default={}
+_context: contextvars.ContextVar[dict | None] = contextvars.ContextVar(
+    "log_context", default=None
 )
 _secrets: set[str] = set()
 
@@ -60,7 +60,7 @@ def endpoint(url: object) -> str:
 
 class ContextFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
-        for key, value in _context.get().items():
+        for key, value in (_context.get() or {}).items():
             if not hasattr(record, key):
                 setattr(record, key, value)
         record.request_id = getattr(record, "request_id", "-")
@@ -154,7 +154,7 @@ def resolve_log_file(config_path: Path, template: str | None) -> Path | None:
 
 @contextmanager
 def log_context(**fields):
-    token = _context.set({**_context.get(), **fields})
+    token = _context.set({**(_context.get() or {}), **fields})
     try:
         yield
     finally:
@@ -191,7 +191,7 @@ def operation(stage: str, **fields):
 @contextmanager
 def request_context():
     with log_context(request_id=uuid4().hex):
-        yield _context.get()["request_id"]
+        yield (_context.get() or {})["request_id"]
 
 
 def install_exception_hooks() -> None:

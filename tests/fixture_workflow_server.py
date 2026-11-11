@@ -5,15 +5,16 @@ from pathlib import Path
 
 import dspy
 from dspy.utils import DummyLM
-from oghidra_workflows.server import build_server
-from oghidra_workflows.config import AppConfig
 
-proposal = dict(
-    suggested_name="incrementValue",
-    analysis="Adds one.",
-    behavior_summary="Returns input plus one.",
-    rationale="Observed operation.",
-)
+from oghidra_workflows.config import AppConfig
+from oghidra_workflows.server import build_server
+
+proposal = {
+    "suggested_name": "incrementValue",
+    "analysis": "Adds one.",
+    "behavior_summary": "Returns input plus one.",
+    "rationale": "Observed operation.",
+}
 dspy.LM = lambda **kwargs: DummyLM([{"proposal": proposal}])
 build_server(
     AppConfig.model_validate(

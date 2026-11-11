@@ -10,6 +10,10 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 from .diagnostics import logger, operation
 
+REQUIRED_GHIDRA_TOOLS = frozenset(
+    {"get_gui_context", "decompile_function", "rename_function"}
+)
+
 
 class Proposal(BaseModel):
     model_config = ConfigDict(hide_input_in_errors=True)
@@ -129,8 +133,7 @@ async def rename_current(
     program: RenameProgram,
     apply: bool = True,
 ) -> RenameResult:
-    required = {"get_gui_context", "decompile_function", "rename_function"}
-    if missing := required - catalog.keys():
+    if missing := REQUIRED_GHIDRA_TOOLS - catalog.keys():
         raise ValueError(
             f"pyghidra-mcp missing required tools: {sorted(missing)}. "
             "Use pyghidra-mcp 0.2.7 with --gui --transport streamable-http."
@@ -249,7 +252,7 @@ async def rename_current(
                 },
             )
             result.detail = "Rename receipt or GUI read-back did not match; inspect Ghidra before retrying."
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - any post-write failure is uncertain.
         logger.exception("workflow.rename_outcome_uncertain")
         result.detail = (
             f"Write outcome uncertain; inspect Ghidra before retrying: {exc}"

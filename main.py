@@ -2,8 +2,8 @@
 
 if __name__ == "__main__":
     # Retain a visible traceback even if dependencies fail before logging setup.
-    import logging
     import faulthandler
+    import logging
     import sys
 
     try:
