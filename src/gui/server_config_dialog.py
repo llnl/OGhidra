@@ -1,3 +1,4 @@
+import copy
 import logging
 import os
 import threading
@@ -24,8 +25,9 @@ class _ValueProxy:
 class ServerConfigDialog:
     """Dialog for configuring server URLs."""
 
-    def __init__(self, parent, config: BridgeConfig):
+    def __init__(self, parent, config: BridgeConfig, ghidra_client=None):
         self.config = config
+        self.ghidra_client = ghidra_client
         self.result = None
 
         # Create the dialog window
@@ -183,24 +185,56 @@ class ServerConfigDialog:
 
         self.ollama_frame.columnconfigure(1, weight=1)
 
-        # GhidraMCP configuration
-        ghidra_frame = ttk.LabelFrame(main_frame, text="GhidraMCP Server", padding=10)
-        ghidra_frame.pack(fill="x", pady=(0, 10))
+        # --- Ghidra Interface Selection & Configuration ---
+        self.ghidra_section = ttk.Frame(main_frame)
+        self.ghidra_section.pack(fill="x", pady=(0, 10))
 
-        ttk.Label(ghidra_frame, text="Base URL:").grid(row=0, column=0, sticky="w", pady=5)
+        ghidra_backend_row = ttk.Frame(self.ghidra_section)
+        ghidra_backend_row.pack(fill="x", pady=(0, 10))
+
+        ttk.Label(ghidra_backend_row, text="Ghidra Interface:").pack(side="left", padx=(0, 10))
+        self.ghidra_backend_var = tk.StringVar(value=str(getattr(self.config.ghidra, "backend", "http") or "http").lower())
+        self.ghidra_backend_combo = ttk.Combobox(
+            ghidra_backend_row,
+            textvariable=self.ghidra_backend_var,
+            values=["http", "pyghidra"],
+            state="readonly",
+            width=20,
+        )
+        self.ghidra_backend_combo.pack(side="left")
+        self.ghidra_backend_combo.bind("<<ComboboxSelected>>", lambda _e: self._toggle_ghidra_backend())
+
+        self.ghidra_http_frame = ttk.LabelFrame(self.ghidra_section, text="GhidraMCP Server", padding=10)
+        ttk.Label(self.ghidra_http_frame, text="Base URL:").grid(row=0, column=0, sticky="w", pady=5)
         self.ghidra_url_var = tk.StringVar(value=str(self.config.ghidra.base_url))
-        ghidra_entry = ttk.Entry(ghidra_frame, textvariable=self.ghidra_url_var, width=50)
+        ghidra_entry = ttk.Entry(self.ghidra_http_frame, textvariable=self.ghidra_url_var, width=50)
         ghidra_entry.grid(row=0, column=1, sticky="ew", padx=(10, 0), pady=5)
+        self.ghidra_http_frame.columnconfigure(1, weight=1)
 
-        ghidra_frame.columnconfigure(1, weight=1)
+        self.pyghidra_frame = ttk.LabelFrame(self.ghidra_section, text="PyGhidra (In-Process)", padding=10)
+        for row, (label, var_attr, cfg_attr) in enumerate(
+            (
+                ("Project Path:", "pyghidra_project_path_var", "pyghidra_project_path"),
+                ("Program:", "pyghidra_program_var", "pyghidra_program"),
+                ("Binary Path:", "pyghidra_binary_var", "pyghidra_binary"),
+            )
+        ):
+            ttk.Label(self.pyghidra_frame, text=label).grid(row=row, column=0, sticky="w", pady=5)
+            var = tk.StringVar(value=str(getattr(self.config.ghidra, cfg_attr, None) or ""))
+            setattr(self, var_attr, var)
+            ttk.Entry(self.pyghidra_frame, textvariable=var, width=50).grid(
+                row=row, column=1, sticky="ew", padx=(10, 0), pady=5
+            )
+        self.pyghidra_frame.columnconfigure(1, weight=1)
 
-        # Initial visibility toggle
+        # Initial visibility toggles
         self._toggle_provider()
+        self._toggle_ghidra_backend()
 
         # Help text
         help_text = ttk.Label(
             main_frame,
-            text="Configure connections to LLM and Ghidra backend.\nSelect provider from the dropdown.",
+            text="Configure connections to LLM and Ghidra backend.\nSelect provider and Ghidra interface from the dropdowns.",
             font=("TkDefaultFont", 9),
             foreground="gray",
         )
@@ -250,6 +284,27 @@ class ServerConfigDialog:
             # Ollama selected
             self.ollama_frame.pack(fill="x", pady=(0, 10), after=self.dialog.winfo_children()[0].winfo_children()[1])
 
+    def _var_text(self, attr_name: str, default: str = "") -> str:
+        """Read a stripped string from an optional Tk variable or proxy."""
+        var = getattr(self, attr_name, None)
+        return str((var.get() if var is not None else default) or "").strip()
+
+    def _ghidra_dialog_state(self) -> tuple[str, str | None, str | None, str | None]:
+        """Return (backend, project_path, program, binary) from dialog inputs or config."""
+        cfg = getattr(getattr(self, "config", None), "ghidra", None)
+        backend = (self._var_text("ghidra_backend_var", getattr(cfg, "backend", "http")) or "http").lower()
+        project_path = self._var_text("pyghidra_project_path_var", getattr(cfg, "pyghidra_project_path", "")) or None
+        program = self._var_text("pyghidra_program_var", getattr(cfg, "pyghidra_program", "")) or None
+        binary = self._var_text("pyghidra_binary_var", getattr(cfg, "pyghidra_binary", "")) or None
+        return backend, project_path, program, binary
+
+    def _toggle_ghidra_backend(self):
+        """Toggle visibility of GhidraMCP (HTTP) vs PyGhidra frames."""
+        backend, _, _, _ = self._ghidra_dialog_state()
+        self.ghidra_http_frame.pack_forget()
+        self.pyghidra_frame.pack_forget()
+        (self.pyghidra_frame if backend == "pyghidra" else self.ghidra_http_frame).pack(fill="x")
+
     def _custom_api_verify_ssl_enabled(self) -> bool:
         """Return the current verify_ssl setting for custom API requests."""
         return bool(getattr(self, "custom_api_verify_ssl_var", _ValueProxy(False)).get())
@@ -265,11 +320,16 @@ class ServerConfigDialog:
 
     def _build_env_updates(self, ollama_url, ghidra_url, provider: str) -> dict:
         """Build the .env updates for the current dialog state."""
+        backend, project_path, program, binary = self._ghidra_dialog_state()
         return {
             "OLLAMA_BASE_URL": str(ollama_url),
             "OLLAMA_MODEL": self.ollama_model_var.get(),
             "OLLAMA_EMBEDDING_MODEL": self.embedding_model_var.get(),
             "GHIDRA_BASE_URL": str(ghidra_url),
+            "GHIDRA_BACKEND": backend,
+            "PYGHIDRA_PROJECT_PATH": project_path or "",
+            "PYGHIDRA_PROGRAM": program or "",
+            "PYGHIDRA_BINARY": binary or "",
             "EXTERNAL_PROVIDER": self.ext_provider_var.get(),
             "EXTERNAL_API_KEY": self.ext_key_var.get(),
             "EXTERNAL_MODEL": self.ext_model_var.get(),
@@ -352,7 +412,8 @@ class ServerConfigDialog:
                     import requests
 
                     auth = (self.config.ollama.username, self.config.ollama.password)
-                    response = requests.get(f"{self.ollama_url_var.get()}/api/tags", timeout=5, auth=auth)
+                    ollama_url = self.ollama_url_var.get().rstrip("/")
+                    response = requests.get(f"{ollama_url}/api/tags", timeout=5, auth=auth)
                     if response.status_code == 200:
                         results.append("Ollama: [OK] Connected")
 
@@ -363,7 +424,7 @@ class ServerConfigDialog:
                             # Try new API (/api/embed) first
                             try:
                                 embed_response = requests.post(
-                                    f"{self.ollama_url_var.get()}/api/embed",
+                                    f"{ollama_url}/api/embed",
                                     json={"model": embedding_model, "input": "test"},
                                     timeout=10,
                                     auth=auth,
@@ -378,7 +439,7 @@ class ServerConfigDialog:
                             if not embed_success:
                                 try:
                                     embed_response = requests.post(
-                                        f"{self.ollama_url_var.get()}/api/embeddings",
+                                        f"{ollama_url}/api/embeddings",
                                         json={"model": embedding_model, "prompt": "test"},
                                         timeout=10,
                                         auth=auth,
@@ -396,28 +457,44 @@ class ServerConfigDialog:
                 except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                     results.append(f"Ollama: [ERROR] {e!s}")
 
-            backend = getattr(self.config.ghidra, "backend", "http")
+            backend, project_path, program, binary = self._ghidra_dialog_state()
 
             if backend == "pyghidra":
                 try:
-                    from .ghidra_client import PyGhidraClient
+                    live = getattr(self, "ghidra_client", None)
+                    live_cfg = getattr(live, "config", None)
+                    if (
+                        live is not None
+                        and getattr(live_cfg, "backend", None) == "pyghidra"
+                        and (getattr(live_cfg, "pyghidra_project_path", None) or None) == project_path
+                        and (getattr(live_cfg, "pyghidra_program", None) or None) == program
+                        and (getattr(live_cfg, "pyghidra_binary", None) or None) == binary
+                    ):
+                        healthy = bool(live.check_health())
+                    else:
+                        from ..ghidra_client import PyGhidraClient
 
-                    client = PyGhidraClient(self.config.ghidra)
-                    try:
-                        if client.check_health():
-                            results.append("pyGhidra: [OK] Connected")
-                        else:
-                            results.append("pyGhidra: [ERROR] Health check failed")
-                    finally:
-                        client.close()
+                        probe_cfg = copy.copy(self.config.ghidra)
+                        probe_cfg.backend = "pyghidra"
+                        probe_cfg.pyghidra_project_path = project_path
+                        probe_cfg.pyghidra_program = program
+                        probe_cfg.pyghidra_binary = binary
+                        client = PyGhidraClient(probe_cfg)
+                        try:
+                            healthy = bool(client.check_health())
+                        finally:
+                            client.close()
+                    results.append("PyGhidra: [OK] Connected" if healthy else "PyGhidra: [ERROR] Health check failed")
                 except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
-                    results.append(f"pyGhidra: [ERROR] {e!s}")
+                    results.append(f"PyGhidra: [ERROR] {e!s}")
             else:
                 try:
                     import requests
 
+                    ghidra_url = self.ghidra_url_var.get().rstrip("/")
+                    api_path = str(getattr(self.config.ghidra, "api_path", "") or "").rstrip("/")
                     response = requests.get(
-                        f"{self.ghidra_url_var.get()}/methods",
+                        f"{ghidra_url}{api_path}/methods",
                         params={"offset": 0, "limit": 1},
                         timeout=5,
                     )
@@ -428,18 +505,6 @@ class ServerConfigDialog:
                 except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
                     results.append(f"GhidraMCP: [ERROR] {e!s}")
 
-            # Test GhidraMCP
-            try:
-                import requests
-
-                response = requests.get(f"{self.ghidra_url_var.get()}/methods", params={"offset": 0, "limit": 1}, timeout=5)
-                if response.status_code == 200:
-                    results.append("GhidraMCP: [OK] Connected")
-                else:
-                    results.append(f"GhidraMCP: [ERROR] HTTP {response.status_code}")
-            except Exception as e:  # noqa: BLE001 intentional defensive recovery boundary
-                results.append(f"GhidraMCP: [ERROR] {e!s}")
-
             # Show results (marshal the modal onto the Tk main thread)
             run_on_ui(lambda: messagebox.showinfo("Connection Test", "\n".join(results)))
 
@@ -448,19 +513,23 @@ class ServerConfigDialog:
     def _save(self):
         """Save the configuration."""
         try:
-            # Validate URLs
             from pydantic import AnyHttpUrl
 
-            # Test URL validation
+            backend, project_path, program, binary = self._ghidra_dialog_state()
             ollama_url = AnyHttpUrl(self.ollama_url_var.get())
-            ghidra_url = AnyHttpUrl(self.ghidra_url_var.get())
+            raw_ghidra_url = self.ghidra_url_var.get().strip()
+            ghidra_url = (
+                self.config.ghidra.base_url if (backend == "pyghidra" and not raw_ghidra_url) else AnyHttpUrl(raw_ghidra_url)
+            )
 
-            # Update config
-            # Update config
             self.config.ollama.base_url = ollama_url
             self.config.ollama.model = self.ollama_model_var.get()
             self.config.ollama.embedding_model = self.embedding_model_var.get()
             self.config.ghidra.base_url = ghidra_url
+            self.config.ghidra.backend = backend
+            self.config.ghidra.pyghidra_project_path = project_path
+            self.config.ghidra.pyghidra_program = program
+            self.config.ghidra.pyghidra_binary = binary
 
             # Google / External Config
             self.config.external.provider = self.ext_provider_var.get()
@@ -469,7 +538,6 @@ class ServerConfigDialog:
             self.config.external.embedding_model = self.ext_embed_var.get()
 
             # Custom API Config
-            from pydantic import AnyHttpUrl
 
             custom_api_url = AnyHttpUrl(self.custom_api_url_var.get())
             self.config.custom_api.api_url = custom_api_url
