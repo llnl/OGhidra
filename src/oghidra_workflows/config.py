@@ -21,7 +21,7 @@ class ConfigModel(BaseModel):
 
 
 class LMConfig(ConfigModel):
-    """DSPy/LiteLLM settings"""
+    """DSPy/LiteLLM settings."""
 
     model: NonemptyString = Field(
         description=(
@@ -82,7 +82,22 @@ class StdioServerConfig(ConfigModel):
 class HttpServerConfig(ConfigModel):
     transport: Literal["sse", "streamable-http"]
     url: AnyHttpUrl
+    headers: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "HTTP headers to send with requests. For Obsidian Local REST API, "
+            'use: {"Authorization": "Bearer <your-api-key>"}'
+        ),
+    )
     evidence_tools: list[NonemptyString] = Field(default_factory=list)
+    vault_path: NonemptyString | None = Field(
+        default=None,
+        description=(
+            "Path to Obsidian vault directory for storing function analysis notes. "
+            "Only used for obsidian MCP servers. If set, OGhidra will read existing "
+            "notes as context and write analysis results back."
+        ),
+    )
 
 
 MCPServerConfig = Annotated[
@@ -99,7 +114,10 @@ class AppConfig(ConfigModel):
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field(
         default="INFO"
     )
-    log_file: NonemptyString | None = "logs/oghidra-{pid}.jsonl"
+    log_file: NonemptyString | None = Field(
+        default="logs/oghidra-{timestamp}.jsonl",
+        description="Log file path template. Supports {timestamp} placeholder (ISO 8601: YYYYMMDDTHHMMSSZ).",
+    )
     log_max_bytes: int = Field(default=5_000_000, gt=0)
     log_backup_count: int = Field(default=3, ge=1)
     compiled_predictor: NonemptyString | None = None

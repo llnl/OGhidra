@@ -324,3 +324,6 @@ mcp.json
 
 # Codex
 .codex
+
+# Claude
+.claude/

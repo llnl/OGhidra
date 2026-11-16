@@ -5,6 +5,10 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.skipif(
+    os.name == "nt", reason="Bash script tests require a Unix-like environment"
+)
+
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
 

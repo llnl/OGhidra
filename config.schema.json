@@ -11,6 +11,14 @@
           "title": "Evidence Tools",
           "type": "array"
         },
+        "headers": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "HTTP headers to send with requests. For Obsidian Local REST API, use: {\"Authorization\": \"Bearer <your-api-key>\"}",
+          "title": "Headers",
+          "type": "object"
+        },
         "transport": {
           "enum": [
             "sse",
@@ -24,6 +32,20 @@
           "minLength": 1,
           "title": "Url",
           "type": "string"
+        },
+        "vault_path": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Path to Obsidian vault directory for storing function analysis notes. Only used for obsidian MCP servers. If set, OGhidra will read existing notes as context and write analysis results back.",
+          "title": "Vault Path"
         }
       },
       "required": [
@@ -35,7 +57,7 @@
     },
     "LMConfig": {
       "additionalProperties": false,
-      "description": "DSPy/LiteLLM settings",
+      "description": "DSPy/LiteLLM settings.",
       "properties": {
         "api_base": {
           "anyOf": [
@@ -206,7 +228,8 @@
           "type": "null"
         }
       ],
-      "default": "logs/oghidra-{pid}.jsonl",
+      "default": "logs/oghidra-{timestamp}.jsonl",
+      "description": "Log file path template. Supports {timestamp} placeholder (ISO 8601: YYYYMMDDTHHMMSSZ).",
       "title": "Log File"
     },
     "log_level": {

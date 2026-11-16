@@ -1,7 +1,6 @@
 """Read-only preflight checks for an OGhidra workflow configuration."""
 
 # Import ordering below intentionally initializes the system trust store first.
-
 from __future__ import annotations
 
 import argparse

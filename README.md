@@ -275,6 +275,105 @@ Codex MCP configuration. Start a new Codex session after changing it.
 
 </details>
 
+## Obsidian Vault Integration
+
+OGhidra can integrate with an Obsidian vault to provide persistent, human-editable function analysis. When configured, the workflow:
+
+1. **Reads existing notes** from the vault before analysis, providing context from previous work
+2. **Writes comprehensive analysis** back to the vault after successful renames
+3. **Preserves human annotations** by merging automated updates with user notes
+4. **Links functions together** using Obsidian wikilinks for natural navigation
+
+### Setting up the Vault
+
+1. **Create a vault directory** for your Ghidra project:
+   ```bash
+   mkdir -p /path/to/ghidra-vault/functions
+   ```
+
+2. **Install the Local REST API plugin in Obsidian**:
+   - Open Obsidian Settings → Community plugins
+   - Browse for "Local REST API with MCP"
+   - Click Install, then Enable
+   - Go to Settings → Local REST API and note your API key
+   - Enable HTTP server: Settings → Local REST API → Enable HTTP server
+
+3. **Configure in config.yaml**:
+   ```yaml
+   mcp_servers:
+     obsidian:
+       transport: streamable-http
+       url: http://127.0.0.1:27123/mcp
+       headers:
+         Authorization: "Bearer your-api-key-from-settings"
+       vault_path: "/path/to/ghidra-vault"
+       evidence_tools:
+         - search_simple
+         - vault_read
+   ```
+
+   Get your API key from Settings → Local REST API in Obsidian. The API key authenticates via the `Authorization: Bearer` header.
+
+   OGhidra passes the configured HTTP headers to the Obsidian MCP server when connecting over streamable HTTP or SSE.
+
+   **Note**: The HTTP endpoint (port 27123) avoids certificate validation issues. If you prefer HTTPS (port 27124), download and trust the certificate from `https://127.0.0.1:27124/obsidian-local-rest-api.crt`.
+
+4. **Configure your Claude client** (optional, for direct vault access):
+
+   In your `mcp.json` or Claude client config:
+   ```json
+   {
+     "mcpServers": {
+       "obsidian": {
+         "type": "http",
+         "url": "http://127.0.0.1:27123/mcp",
+         "headers": {
+           "Authorization": "Bearer your-api-key-from-settings"
+         }
+       }
+     }
+   }
+   ```
+
+5. **Open the vault in Obsidian** to view and edit notes with full Obsidian features (graph view, search, tags, etc.)
+
+If a note filename already belongs to another program or function, OGhidra
+skips that note instead of overwriting it. The Ghidra rename still completes.
+
+### Workflow with Obsidian
+
+The DSPy ReAct agent can:
+- **Search for similar functions** using `search_simple`
+- **Read prior analysis** to learn from past work
+- **Reference existing patterns** discovered in other functions
+
+This creates a **knowledge-building loop**: each analysis improves future analyses by contributing to the shared vault.
+
+## What the workflow does
+
+1. Calls upstream `get_gui_context()` and captures the active program path, cursor address, and function name.
+2. **[If Obsidian configured]** Searches vault for existing analysis of this function.
+3. Calls upstream `decompile_function(binary_name, name_or_address)` with the captured program and address. Addresses within functions are supported by upstream's containing-function lookup.
+4. Uses typed DSPy prediction for a name, analysis, behavioral summary, and rationale. Optional `dspy.ReAct` gathers additional evidence through `dspy.Tool.from_mcp_tool`, including Obsidian search tools if configured.
+5. Rechecks the active program, cursor, and old name before writing.
+6. Calls upstream `rename_function(binary_name, name_or_address, new_name)` exactly once.
+7. Validates the structured rename receipt and reads the GUI context again. Only matching receipt and read-back return `status="renamed"`.
+8. **[If Obsidian configured]** Writes comprehensive analysis note to vault, preserving user annotations.
+
+The result includes the captured `binary_name` and `address` (cursor address, not necessarily the entry point). After a rename receipt, `function_entry_address` contains the entry point reported by upstream. Structured response models validate the required fields. There is no parsing of old `Function: NAME at ADDRESS` text, no invented function identity, and no compatibility layer for LaurieWired tools.
+
+Return statuses are `proposed`, `unchanged`, `renamed`, and `verification_failed`. Pre-write errors are MCP tool errors. An uncertain write is never retried automatically. Keep the cursor on the selected function until the call finishes: moving after a successful write can prevent GUI read-back verification and therefore returns `verification_failed`. Inspect Ghidra before retrying. This is a live program edit; save the program through Ghidra as usual.
+
+The upstream tools do not offer an atomic compare-and-rename operation. Pre-write checks detect observed selection changes, but cannot prevent another client editing or replacing a program between calls. The program path is now explicitly part of every decompile/write request. Calls in one workflow process are serialized.
+
+## Typed configuration and tool extensibility
+
+`load_config(Path(...)) -> AppConfig` accepts YAML and JSON. Nested Pydantic models use `strict=True` and `extra="forbid"`; unknown fields and stringified numbers/booleans fail at startup. `config.lm.model` and `config.max_iters` are typed attributes. Transport is a discriminated union of stdio and HTTP settings. Models block field reassignment, but nested containers are not deeply immutable; treat config as read-only.
+
+```bash
+python main.py --schema > config.schema.json
+```
+
 ## Troubleshooting first run
 
 | Observation | Meaning and next action |
