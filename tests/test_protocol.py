@@ -1,3 +1,4 @@
+import asyncio
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -213,3 +214,57 @@ async def test_optional_obsidian_taskgroup_failure_keeps_ghidra_session(monkeypa
     with pytest.raises(ExceptionGroup):
         async with connect({"ghidra": config.mcp_servers["obsidian"]}):
             pass
+
+
+async def test_optional_connection_does_not_swallow_caller_timeout(monkeypatch):
+    @asynccontextmanager
+    async def ghidra_stream(*args, **kwargs):
+        yield "ghidra", object()
+
+    @asynccontextmanager
+    async def obsidian_stream(*args, **kwargs):
+        yield "obsidian", object()
+
+    class Session:
+        def __init__(self, peer):
+            self.peer = peer
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def initialize(self):
+            if self.peer == "obsidian":
+                await asyncio.sleep(1)
+            return SimpleNamespace(
+                serverInfo=SimpleNamespace(name="fixture", version="1"),
+                protocolVersion="1",
+            )
+
+        async def list_tools(self, params=None):
+            return SimpleNamespace(tools=[], nextCursor=None)
+
+    monkeypatch.setattr(connections_module, "stdio_client", ghidra_stream)
+    monkeypatch.setattr(connections_module, "streamablehttp_client", obsidian_stream)
+    monkeypatch.setattr(
+        connections_module, "ClientSession", lambda read, write: Session(read)
+    )
+    config = AppConfig.model_validate(
+        {
+            "lm": {"model": "fixture"},
+            "mcp_servers": {
+                "ghidra": {"transport": "stdio", "command": sys.executable},
+                "obsidian": {
+                    "transport": "streamable-http",
+                    "url": "http://127.0.0.1:1/mcp",
+                },
+            },
+        }
+    )
+
+    with pytest.raises(TimeoutError):
+        async with asyncio.timeout(0.01):
+            async with connect(config.mcp_servers):
+                pass

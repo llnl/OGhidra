@@ -1,5 +1,6 @@
 """Standard MCP sessions and DSPy's native tool conversion, for any MCP server."""
 
+import asyncio
 import os
 from collections.abc import AsyncIterator, Mapping
 from contextlib import AsyncExitStack, asynccontextmanager
@@ -126,10 +127,17 @@ async def connect(
                         stack.push_async_callback(_close_optional, peer_stack, name)
                     sessions[name], catalogs[name] = session, catalog
                     evidence_tools.extend(peer_tools)
-                except Exception as exc:
+                except (Exception, asyncio.CancelledError) as exc:
                     if not optional:
                         raise
                     await _close_optional(peer_stack, name)
+                    # MCP can cancel this task on connection failure; preserve
+                    # cancellation only when the caller still has one pending.
+                    if (
+                        isinstance(exc, asyncio.CancelledError)
+                        and asyncio.current_task().cancelling()
+                    ):
+                        raise
                     logger.warning(
                         "mcp.optional_unavailable",
                         extra={"mcp_server": name, "error": redact(str(exc))},

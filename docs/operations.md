@@ -150,3 +150,7 @@ renames. Each item reports `note_status` as `not_attempted`, `written`,
 These fields do not change the Ghidra rename status or `counts`. If Obsidian
 fails after a verified rename, inspect the vault before trying to write that
 note again.
+If another function already owns `{name}.md`, OGhidra gives the new note a
+stable program-and-address suffix and still checks ownership before writing.
+Previously failed notes are not created by later bulk runs once their functions
+no longer have generic names.

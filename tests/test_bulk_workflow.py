@@ -296,6 +296,65 @@ async def test_bulk_preview_uses_existing_note_context_without_vault_write(monke
     assert "Prior analysis" in seen[0]
 
 
+async def test_bulk_same_name_renames_write_distinct_notes(monkeypatch):
+    class VaultSession:
+        def __init__(self):
+            self.notes = {}
+
+        async def call_tool(self, name, arguments):
+            if name == "vault_read":
+                content = self.notes.get(arguments["path"])
+                if content is None:
+                    return CallToolResult(
+                        content=[TextContent(type="text", text="file not found")],
+                        isError=True,
+                    )
+                return CallToolResult(
+                    content=[], structuredContent={"content": content}
+                )
+            if name == "search_simple":
+                matches = [
+                    {"filename": path}
+                    for path, content in self.notes.items()
+                    if arguments["query"] in content
+                ]
+                return CallToolResult(
+                    content=[TextContent(type="text", text=json.dumps(matches))]
+                )
+            if name == "vault_write":
+                self.notes[arguments["path"]] = arguments["content"]
+            elif name == "vault_move":
+                source, destination = arguments["path"], arguments["destination"]
+                if destination in self.notes:
+                    raise AssertionError("destination was overwritten")
+                self.notes[destination] = self.notes.pop(source)
+            else:
+                raise AssertionError(name)
+            return CallToolResult(content=[TextContent(type="text", text="ok")])
+
+    async def confidence(**kwargs):
+        return "high"
+
+    monkeypatch.setattr(workflow_module, "calculate_confidence", confidence)
+    ghidra = Session([symbol("00000001", "FUN_1"), symbol("00000002", "FUN_2")])
+    vault = VaultSession()
+    program = Program({"00000001": "sharedName", "00000002": "sharedName"})
+
+    result = await rename_all(
+        ghidra,
+        CATALOG,
+        program,
+        apply=True,
+        obsidian_session=vault,
+        vault_path="/vault",
+    )
+
+    assert result.counts == {"renamed": 2}
+    assert [item.note_status for item in result.items] == ["written", "written"]
+    assert len(vault.notes) == 2
+    assert "functions/sharedName.md" in vault.notes
+
+
 async def test_stale_name_is_not_written_and_next_target_continues():
     session = Session([symbol("00000001", "FUN_1"), symbol("00000002", "FUN_2")])
     session.change_before_write = "changedByUser"

@@ -2,6 +2,7 @@
 
 import re
 from datetime import UTC, datetime
+from hashlib import sha256
 from typing import Any
 
 from mcp import ClientSession
@@ -68,6 +69,15 @@ def make_note_filename(function_name: str) -> str:
     """
     sanitized = sanitize_filename(function_name)
     return f"{sanitized}.md"
+
+
+def make_disambiguated_note_filename(
+    function_name: str, binary_name: str, address: str
+) -> str:
+    """Give a same-named function a stable filename tied to program and address."""
+    identity = f"{binary_name}\0{format_address(address)}".encode()
+    suffix = sha256(identity).hexdigest()[:24]
+    return f"{sanitize_filename(function_name)}__{suffix}.md"
 
 
 def format_frontmatter(note: FunctionNote) -> str:
@@ -347,37 +357,40 @@ async def read_function_note(
     Tries by function name first, then searches by address in frontmatter.
     """
     formatted_addr = format_address(address)
-    note_filename = make_note_filename(function_name)
-    note_path = f"functions/{note_filename}"
+    note_paths = (
+        f"functions/{make_note_filename(function_name)}",
+        f"functions/{make_disambiguated_note_filename(function_name, binary_name, address)}",
+    )
 
     with operation(
         "obsidian.read_note", function_name=function_name, address=formatted_addr
     ):
-        # Try direct read by function name
-        try:
-            read_result = await session.call_tool("vault_read", {"path": note_path})
-            if read_result.isError:
-                if not _note_missing(read_result):
-                    raise RuntimeError("Obsidian note read failed")
-            else:
+        for note_path in note_paths:
+            try:
+                read_result = await session.call_tool("vault_read", {"path": note_path})
+                if read_result.isError:
+                    if not _note_missing(read_result):
+                        raise RuntimeError("Obsidian note read failed")
+                    continue
                 content = result_data(read_result)
                 content_str = (
                     content.get("content", "")
                     if isinstance(content, dict)
                     else str(content)
                 )
-                if not note_matches_function(content_str, binary_name, address):
+                if note_matches_function(content_str, binary_name, address):
+                    return content_str, note_path
+                if note_path == note_paths[1]:
                     raise NoteCollisionError(
-                        "Existing note belongs to another function"
+                        "Disambiguated note belongs to another function"
                     )
-                return content_str, note_path
-        except (NoteCollisionError, RuntimeError):
-            raise
-        except Exception as exc:  # noqa: BLE001 - fall back to address lookup.
-            logger.debug(
-                "obsidian.direct_read_failed",
-                extra={"path": note_path, "error_type": type(exc).__name__},
-            )
+            except (NoteCollisionError, RuntimeError):
+                raise
+            except Exception as exc:  # noqa: BLE001 - fall back to address lookup.
+                logger.debug(
+                    "obsidian.direct_read_failed",
+                    extra={"path": note_path, "error_type": type(exc).__name__},
+                )
 
         # Search by address in frontmatter if name-based lookup failed
         try:
@@ -428,7 +441,8 @@ async def write_function_note(
 ) -> None:
     """Write or update function note in Obsidian vault.
 
-    Uses {name}.md filename. When name changes, vault_move triggers
+    Uses {name}.md when free, or a stable program/address suffix when another
+    function owns that filename. When name changes, vault_move triggers
     Obsidian's automatic link update. Creates functions/ directory if needed.
 
     If the function was renamed and no existing note exists, creates a stub
@@ -436,8 +450,7 @@ async def write_function_note(
     updates all existing links pointing to the old name.
     """
     formatted_addr = format_address(address)
-    new_filename = make_note_filename(new_name)
-    new_path = f"functions/{new_filename}"
+    new_path = f"functions/{make_note_filename(new_name)}"
 
     if existing_content and not note_matches_function(
         existing_content, binary_name, address
@@ -454,22 +467,41 @@ async def write_function_note(
         path=new_path,
     ):
         try:
-            if new_path != existing_path:
-                destination = await session.call_tool("vault_read", {"path": new_path})
+            candidates = (
+                new_path,
+                "functions/"
+                + make_disambiguated_note_filename(new_name, binary_name, address),
+            )
+            for candidate in candidates:
+                if candidate == existing_path:
+                    new_path = candidate
+                    break
+                destination = await session.call_tool("vault_read", {"path": candidate})
                 if destination.isError:
                     if not _note_missing(destination):
                         raise RuntimeError("Obsidian destination check failed")
-                else:
-                    content = result_data(destination)
-                    content_str = (
-                        content.get("content", "")
-                        if isinstance(content, dict)
-                        else str(content)
+                    new_path = candidate
+                    break
+                content = result_data(destination)
+                content_str = (
+                    content.get("content", "")
+                    if isinstance(content, dict)
+                    else str(content)
+                )
+                if note_matches_function(content_str, binary_name, address):
+                    new_path = candidate
+                    if existing_path is None:
+                        existing_path, existing_content = new_path, content_str
+                        note_content = merge_with_user_notes(content_str, note_content)
+                    break
+                if candidate == candidates[1]:
+                    raise NoteCollisionError(
+                        "Destination note belongs to another function"
                     )
-                    if not note_matches_function(content_str, binary_name, address):
-                        raise NoteCollisionError(
-                            "Destination note belongs to another function"
-                        )
+                logger.info(
+                    "obsidian.note_name_disambiguated",
+                    extra={"function_name": new_name, "address": formatted_addr},
+                )
 
             # If function was renamed and no existing note found, create stub with old name first
             if old_name != new_name and not existing_path:

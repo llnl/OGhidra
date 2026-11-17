@@ -342,6 +342,8 @@ skips that note instead of overwriting it. The Ghidra rename still completes.
 Obsidian is optional at runtime: if its MCP server is unavailable, both rename
 tools continue with Ghidra and report that the note was not written. After a
 verified rename, OGhidra creates a missing note or updates the matching one.
+If two functions receive the same name, their notes use distinct filenames;
+OGhidra preserves the first note and adds a stable identity suffix to later ones.
 
 ### Workflow with Obsidian
 
