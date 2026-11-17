@@ -28,6 +28,8 @@ configuration. Keep `ssl_verify: true`.
 Doctor returns exit status 0 when no checks fail, 1 when a check fails, and 2
 for invalid command arguments. Without `--check-model`, a warning that model
 connectivity was not tested is expected.
+An unavailable configured Obsidian server is reported as a warning; Ghidra
+checks continue and renames remain available without vault notes.
 
 ## First-run failures
 
@@ -36,6 +38,7 @@ connectivity was not tested is expected.
 | `Uvicorn running on http://127.0.0.1:8001` | PyGhidra-MCP is ready. Keep that terminal running. |
 | `GET / HTTP/1.1` returns `404` | Expected: the MCP endpoint is `/mcp`, not `/`. |
 | `Module.manifest` warnings or a Ghidra MCP server on port 8080 | An obsolete Ghidra extension is installed. Disable it through Ghidra's extension manager. |
+| `ProgramManagerPlugin` restore fails with `Unknown protocol: ghidra` | The JVM did not register Ghidra's URL handler before reopening saved programs. Launch through `scripts/run-ghidra.sh`, which supplies the required JVM option. |
 | Opening a program appears to do nothing | Expected: both servers wait for the host to invoke a tool. Run doctor, check `/mcp`, then request the workflow. |
 | The project is open but no function is found | Open a program in CodeBrowser and place the cursor inside a function. |
 | No new `logs/oghidra-*.jsonl` appears | The host did not launch OGhidra. Check its absolute registration path and restart the host session. |
@@ -117,3 +120,37 @@ The upstream tools do not provide an atomic compare-and-rename operation.
 Pre-write checks detect observed selection changes but cannot prevent another
 client from editing or replacing the program between calls. Calls within one
 workflow process are serialized.
+
+## Bulk function rename
+
+`rename_all_functions(apply=false, limit=5, cursor=null)` processes one batch
+of generic functions in the active Ghidra program. `limit` accepts 1–25. Only
+internal, non-thunk functions with `FUN_`, `sub_`, `loc_`, `unk_`, or `j_` names
+are eligible; user-defined names are preserved even if they have one of those
+prefixes. The GUI cursor does not need to be inside a function.
+
+The default call previews names without writing. Set `apply=true` to analyze
+and rename each function in the batch. Copy `next_cursor` into the next call's
+`cursor` to continue in address order. A cursor is tied to the active program;
+switching programs requires starting again without a cursor. To apply after a
+preview, start without that preview's cursor so the first batch is included.
+
+Each item reports its address, old name, proposal, status, and any error detail.
+`counts` summarizes the batch. Function-specific failures do not stop later
+functions. A stale target is skipped before writing; an uncertain write is
+marked `verification_failed` and is never retried automatically. If the active
+program changes, the batch aborts before the next write. A subsequent run from
+the beginning can revisit still-generic functions that failed earlier.
+
+When Obsidian is configured and available, a verified rename creates a note or
+updates the matching existing note while preserving human annotations. Notes
+are not written for previews, unchanged names, stale targets, or uncertain
+renames. Each item reports `note_status` as `not_attempted`, `written`,
+`unavailable`, or `failed`, with `note_detail` for a skipped or failed note.
+These fields do not change the Ghidra rename status or `counts`. If Obsidian
+fails after a verified rename, inspect the vault before trying to write that
+note again.
+If another function already owns `{name}.md`, OGhidra gives the new note a
+stable program-and-address suffix and still checks ownership before writing.
+Previously failed notes are not created by later bulk runs once their functions
+no longer have generic names.

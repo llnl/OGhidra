@@ -1,8 +1,6 @@
 """Read-only preflight checks for an OGhidra workflow configuration."""
 
 # Import ordering below intentionally initializes the system trust store first.
-# ruff: noqa: E402
-
 from __future__ import annotations
 
 import argparse
@@ -286,9 +284,21 @@ async def run_checks(
                     Check(
                         "PASS",
                         "MCP connectivity",
-                        f"connected to {len(sessions)} configured server(s)",
+                        "connected to required Ghidra server",
                     )
                 )
+                if "obsidian" in config.mcp_servers:
+                    checks.append(
+                        Check(
+                            "PASS" if "obsidian" in sessions else "WARN",
+                            "Obsidian connectivity",
+                            (
+                                "optional server connected"
+                                if "obsidian" in sessions
+                                else "optional server unavailable; notes will be skipped"
+                            ),
+                        )
+                    )
                 ghidra_catalog = catalogs["ghidra"]
                 missing = REQUIRED_GHIDRA_TOOLS - ghidra_catalog.keys()
                 if missing:
