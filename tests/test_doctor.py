@@ -83,6 +83,41 @@ async def test_doctor_connects_and_only_reads_gui_context(tmp_path, monkeypatch)
     )
 
 
+async def test_doctor_warns_when_optional_obsidian_is_unavailable(
+    tmp_path, monkeypatch
+):
+    import yaml
+
+    monkeypatch.setattr(
+        doctor_module,
+        "connect",
+        fake_connection(catalog=required_catalog(), calls=[]),
+    )
+    config = tmp_path / "config.yaml"
+    write_config(config, configured_server())
+    data = yaml.safe_load(config.read_text())
+    data["mcp_servers"]["obsidian"] = {
+        "transport": "streamable-http",
+        "url": "http://127.0.0.1:1/mcp",
+    }
+    config.write_text(yaml.safe_dump(data))
+
+    checks = await run_checks(config, timeout=5)
+
+    assert (
+        Check(
+            "WARN",
+            "Obsidian connectivity",
+            "optional server unavailable; notes will be skipped",
+        )
+        in checks
+    )
+    assert any(
+        check.label == "MCP connectivity" and check.status == "PASS" for check in checks
+    )
+    assert all(check.status != "FAIL" for check in checks)
+
+
 async def test_doctor_checks_model_only_when_requested(tmp_path, monkeypatch):
     mcp_calls = []
     model_calls = []

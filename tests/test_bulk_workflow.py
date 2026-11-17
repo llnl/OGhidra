@@ -5,6 +5,8 @@ from types import SimpleNamespace
 import pytest
 from mcp.types import CallToolResult, TextContent, Tool
 
+import oghidra_workflows.obsidian as obsidian_module
+import oghidra_workflows.workflow as workflow_module
 from oghidra_workflows.workflow import rename_all
 
 PROPOSAL = {
@@ -168,6 +170,130 @@ async def test_apply_uses_addresses_and_continues_after_renames():
         for name, args in session.calls
         if name == "rename_function"
     ] == [f"{i:08X}" for i in range(4)]
+
+
+async def test_verified_bulk_rename_creates_note_and_reports_outcome(monkeypatch):
+    writes = []
+
+    async def read_note(*args):
+        return None, None
+
+    async def write_note(*args):
+        writes.append(args)
+
+    async def confidence(**kwargs):
+        return "high"
+
+    monkeypatch.setattr(obsidian_module, "read_function_note", read_note)
+    monkeypatch.setattr(obsidian_module, "write_function_note", write_note)
+    monkeypatch.setattr(workflow_module, "calculate_confidence", confidence)
+    session = Session([symbol("00000001", "FUN_1")])
+
+    result = await rename_all(
+        session,
+        CATALOG,
+        Program(),
+        apply=True,
+        obsidian_session=object(),
+        vault_path="/vault",
+    )
+
+    assert result.items[0].status == "renamed"
+    assert result.items[0].note_status == "written"
+    assert writes and writes[0][4:6] == ("FUN_1", "increment00000001")
+
+
+async def test_note_failure_does_not_change_verified_bulk_rename(monkeypatch):
+    async def read_note(*args):
+        return None, None
+
+    async def write_note(*args):
+        raise TimeoutError("reply lost")
+
+    async def confidence(**kwargs):
+        return "high"
+
+    monkeypatch.setattr(obsidian_module, "read_function_note", read_note)
+    monkeypatch.setattr(obsidian_module, "write_function_note", write_note)
+    monkeypatch.setattr(workflow_module, "calculate_confidence", confidence)
+    session = Session([symbol("00000001", "FUN_1")])
+    result = await rename_all(
+        session,
+        CATALOG,
+        Program(),
+        apply=True,
+        obsidian_session=object(),
+        vault_path="/vault",
+    )
+
+    assert result.status == "completed"
+    assert result.counts == {"renamed": 1}
+    assert result.items[0].note_status == "failed"
+    assert "reply lost" in result.items[0].note_detail
+
+
+async def test_note_collision_skips_vault_write_but_keeps_rename(monkeypatch):
+    async def read_note(*args):
+        raise obsidian_module.NoteCollisionError("another function owns note")
+
+    async def write_note(*args):
+        pytest.fail("collision must not write a note")
+
+    monkeypatch.setattr(obsidian_module, "read_function_note", read_note)
+    monkeypatch.setattr(obsidian_module, "write_function_note", write_note)
+    result = await rename_all(
+        Session([symbol("00000001", "FUN_1")]),
+        CATALOG,
+        Program(),
+        apply=True,
+        obsidian_session=object(),
+        vault_path="/vault",
+    )
+
+    assert result.items[0].status == "renamed"
+    assert result.items[0].note_status == "failed"
+    assert "another function" in result.items[0].note_detail
+
+
+async def test_unavailable_obsidian_reports_note_status_on_verified_rename():
+    result = await rename_all(
+        Session([symbol("00000001", "FUN_1")]),
+        CATALOG,
+        Program(),
+        apply=True,
+        vault_path="/vault",
+    )
+    assert result.items[0].status == "renamed"
+    assert result.items[0].note_status == "unavailable"
+
+
+async def test_bulk_preview_uses_existing_note_context_without_vault_write(monkeypatch):
+    seen = []
+
+    async def read_note(*args):
+        return "Prior analysis with a human observation", "functions/FUN_1.md"
+
+    async def write_note(*args):
+        pytest.fail("preview must not write a note")
+
+    class RecordingProgram(Program):
+        async def acall(self, **kwargs):
+            seen.append(kwargs["existing_analysis"])
+            return await super().acall(**kwargs)
+
+    monkeypatch.setattr(obsidian_module, "read_function_note", read_note)
+    monkeypatch.setattr(obsidian_module, "write_function_note", write_note)
+    result = await rename_all(
+        Session([symbol("00000001", "FUN_1")]),
+        CATALOG,
+        RecordingProgram(),
+        obsidian_session=object(),
+        vault_path="/vault",
+    )
+
+    assert result.items[0].status == "proposed"
+    assert result.items[0].note_status == "not_attempted"
+    assert "Prior analysis" in seen[0]
 
 
 async def test_stale_name_is_not_written_and_next_target_continues():

@@ -216,6 +216,7 @@ def build_server(config: AppConfig) -> FastMCP:
                                 with operation("predictor.load", artifact=artifact):
                                     program.analyze.load(artifact)
                             with dspy.context(lm=lm, callbacks=[DSPyLoggingCallback()]):
+                                obsidian_config = config.mcp_servers.get("obsidian")
                                 result = await rename_all(
                                     sessions["ghidra"],
                                     catalogs["ghidra"],
@@ -223,6 +224,12 @@ def build_server(config: AppConfig) -> FastMCP:
                                     apply=apply,
                                     limit=limit,
                                     cursor=cursor,
+                                    obsidian_session=sessions.get("obsidian"),
+                                    vault_path=(
+                                        obsidian_config.vault_path
+                                        if obsidian_config
+                                        else None
+                                    ),
                                 )
                     finally:
                         lock.release()

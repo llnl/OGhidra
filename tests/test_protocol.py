@@ -4,8 +4,10 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import dspy
+import pytest
 from dspy.utils import DummyLM
 
+import oghidra_workflows.connections as connections_module
 import oghidra_workflows.server as server_module
 from oghidra_workflows.config import AppConfig
 from oghidra_workflows.connections import connect
@@ -19,7 +21,9 @@ async def test_bulk_mcp_contract_defaults_to_preview_and_exposes_cursor(monkeypa
     async def fake_connect(servers):
         yield {"ghidra": object()}, {"ghidra": {}}, []
 
-    async def fake_rename_all(session, catalog, program, apply, limit, cursor):
+    async def fake_rename_all(
+        session, catalog, program, apply, limit, cursor, obsidian_session, vault_path
+    ):
         observed.append((apply, limit, cursor))
         return SimpleNamespace(
             status="previewed", detail="", counts={}, next_cursor="next"
@@ -157,3 +161,55 @@ async def test_bulk_rename_uses_native_mcp_function_search_and_write():
     assert result.status == "completed"
     assert [item.status for item in result.items] == ["renamed"]
     assert result.items[0].observed_name == "incrementValue"
+
+
+async def test_optional_obsidian_taskgroup_failure_keeps_ghidra_session(monkeypatch):
+    @asynccontextmanager
+    async def ghidra_stream(*args, **kwargs):
+        yield object(), object()
+
+    @asynccontextmanager
+    async def failed_obsidian(*args, **kwargs):
+        raise ExceptionGroup(
+            "unhandled errors in a TaskGroup", [ConnectionError("down")]
+        )
+        yield  # pragma: no cover
+
+    class Session:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def initialize(self):
+            return SimpleNamespace(
+                serverInfo=SimpleNamespace(name="fixture", version="1"),
+                protocolVersion="1",
+            )
+
+        async def list_tools(self, params=None):
+            return SimpleNamespace(tools=[], nextCursor=None)
+
+    monkeypatch.setattr(connections_module, "stdio_client", ghidra_stream)
+    monkeypatch.setattr(connections_module, "streamablehttp_client", failed_obsidian)
+    monkeypatch.setattr(connections_module, "ClientSession", lambda *args: Session())
+    config = AppConfig.model_validate(
+        {
+            "lm": {"model": "fixture"},
+            "mcp_servers": {
+                "ghidra": {"transport": "stdio", "command": sys.executable},
+                "obsidian": {
+                    "transport": "streamable-http",
+                    "url": "http://127.0.0.1:1/mcp",
+                },
+            },
+        }
+    )
+
+    async with connect(config.mcp_servers) as (sessions, _, _):
+        assert list(sessions) == ["ghidra"]
+
+    with pytest.raises(ExceptionGroup):
+        async with connect({"ghidra": config.mcp_servers["obsidian"]}):
+            pass

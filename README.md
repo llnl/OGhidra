@@ -339,6 +339,9 @@ OGhidra can integrate with an Obsidian vault to provide persistent, human-editab
 
 If a note filename already belongs to another program or function, OGhidra
 skips that note instead of overwriting it. The Ghidra rename still completes.
+Obsidian is optional at runtime: if its MCP server is unavailable, both rename
+tools continue with Ghidra and report that the note was not written. After a
+verified rename, OGhidra creates a missing note or updates the matching one.
 
 ### Workflow with Obsidian
 

@@ -28,6 +28,8 @@ configuration. Keep `ssl_verify: true`.
 Doctor returns exit status 0 when no checks fail, 1 when a check fails, and 2
 for invalid command arguments. Without `--check-model`, a warning that model
 connectivity was not tested is expected.
+An unavailable configured Obsidian server is reported as a warning; Ghidra
+checks continue and renames remain available without vault notes.
 
 ## First-run failures
 
@@ -139,3 +141,12 @@ functions. A stale target is skipped before writing; an uncertain write is
 marked `verification_failed` and is never retried automatically. If the active
 program changes, the batch aborts before the next write. A subsequent run from
 the beginning can revisit still-generic functions that failed earlier.
+
+When Obsidian is configured and available, a verified rename creates a note or
+updates the matching existing note while preserving human annotations. Notes
+are not written for previews, unchanged names, stale targets, or uncertain
+renames. Each item reports `note_status` as `not_attempted`, `written`,
+`unavailable`, or `failed`, with `note_detail` for a skipped or failed note.
+These fields do not change the Ghidra rename status or `counts`. If Obsidian
+fails after a verified rename, inspect the vault before trying to write that
+note again.

@@ -117,6 +117,15 @@ async def test_preview_does_not_write():
     assert not session.wrote
 
 
+async def test_single_rename_reports_unavailable_optional_note():
+    with dspy.context(lm=DummyLM([{"proposal": PROPOSAL}])):
+        result = await rename_current(
+            Session(), CATALOG, RenameProgram(), True, vault_path="/vault"
+        )
+    assert result.status == "renamed"
+    assert "Obsidian unavailable" in result.detail
+
+
 async def test_no_improvement_does_not_write():
     session = Session()
     assert (
