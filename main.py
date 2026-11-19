@@ -3,8 +3,10 @@ Main entry point for the Ollama-GhidraMCP Bridge application.
 """
 
 import argparse
+import contextlib
 import json
 import sys
+from typing import Any
 
 from dotenv import load_dotenv
 
@@ -1293,6 +1295,33 @@ CRITICAL: You MUST include all four sections with the exact headers shown above.
             # break
 
 
+def format_query_json(query: str, result: Any = None, error: Exception | None = None) -> str:
+    """Serialize a single-query result as JSON for headless/automated use."""
+    payload: dict[str, Any] = {"query": query, "success": error is None}
+    if error is None:
+        payload["response"] = result
+    else:
+        payload["error"] = f"{type(error).__name__}: {error}"
+    return json.dumps(payload, indent=2, ensure_ascii=False, default=str)
+
+
+def run_json_query(bridge, query: str) -> int:
+    """Run one query and write only a JSON document to stdout.
+
+    Progress output printed while the query runs is sent to stderr so that
+    stdout can be parsed directly. Returns the process exit code.
+    """
+    error = None
+    result = None
+    with contextlib.redirect_stdout(sys.stderr):
+        try:
+            result = bridge.process_query(query)
+        except Exception as e:  # noqa: BLE001 - report any failure as JSON
+            error = e
+    print(format_query_json(query, result, error))
+    return 1 if error else 0
+
+
 def main():
     """Main entry point for the Ollama-GhidraMCP Bridge CLI."""
     # Initialize configuration from environment variables
@@ -1301,6 +1330,14 @@ def main():
     parser = argparse.ArgumentParser(description="Ollama-GhidraMCP Bridge")
     parser.add_argument("--interactive", "-i", action="store_true", help="Enable interactive mode")
     parser.add_argument("--query", "-q", type=str, help="Single query to execute (non-interactive mode)")
+    parser.add_argument(
+        "--output",
+        "-o",
+        type=str.lower,
+        choices=["text", "json"],
+        default="text",
+        help="Output format for --query: 'text' (default) or 'json' (machine-readable, for automation)",
+    )
     # UI now defaults to ON when no other mode flags are passed
     parser.add_argument(
         "--ui",
@@ -1368,6 +1405,10 @@ def main():
     if not args.interactive and not args.query and not args.ui:
         args.ui = True
 
+    json_output = args.output == "json"
+    if json_output and (args.ui or args.interactive or not args.query):
+        parser.error("--output json can only be used with --query")
+
     # Capabilities are ON by default unless explicitly disabled
     include_capabilities = not args.no_capabilities
 
@@ -1389,16 +1430,17 @@ def main():
     if getattr(args, "pyghidra_projects_dir", None):
         config.ghidra.pyghidra_projects_dir = args.pyghidra_projects_dir
 
-    # Create the bridge
-    bridge = Bridge(
-        config=config,
-        include_capabilities=include_capabilities,
-        max_agent_steps=config.max_steps,
-        enable_cag=config.cag_enabled,
-    )
+    # Create the bridge (in JSON mode, keep its startup output off stdout)
+    with contextlib.redirect_stdout(sys.stderr) if json_output else contextlib.nullcontext():
+        bridge = Bridge(
+            config=config,
+            include_capabilities=include_capabilities,
+            max_agent_steps=config.max_steps,
+            enable_cag=config.cag_enabled,
+        )
 
-    # Print header (only for non-UI modes)
-    if not args.ui:
+    # Print header (only for non-UI modes; keep stdout clean for JSON output)
+    if not args.ui and not json_output:
         print_header()
 
     if args.ui:
@@ -1418,6 +1460,8 @@ def main():
         run_interactive_mode(bridge, config)
     else:
         # Single query mode
+        if json_output:
+            return run_json_query(bridge, args.query)
         result = bridge.process_query(args.query)
         print(result)
 
