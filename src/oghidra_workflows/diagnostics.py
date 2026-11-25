@@ -13,7 +13,6 @@ import threading
 import time
 import traceback
 from contextlib import contextmanager
-from datetime import UTC
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
@@ -149,7 +148,7 @@ def configure_logging(
 def resolve_log_file(config_path: Path, template: str | None) -> Path | None:
     if template is None:
         return None
-    from datetime import datetime
+    from datetime import UTC, datetime
 
     timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     path_str = template.replace("{timestamp}", timestamp)

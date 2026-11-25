@@ -8,10 +8,8 @@ import dspy
 import pytest
 from dspy.utils import DummyLM
 
-import oghidra_workflows.connections as connections_module
-import oghidra_workflows.server as server_module
+from oghidra_workflows import connections, server
 from oghidra_workflows.config import AppConfig
-from oghidra_workflows.connections import connect
 from oghidra_workflows.workflow import GatherEvidence, rename_all
 
 
@@ -30,8 +28,8 @@ async def test_bulk_mcp_contract_defaults_to_preview_and_exposes_cursor(monkeypa
             status="previewed", detail="", counts={}, next_cursor="next"
         )
 
-    monkeypatch.setattr(server_module, "connect", fake_connect)
-    monkeypatch.setattr(server_module, "rename_all", fake_rename_all)
+    monkeypatch.setattr(server, "connect", fake_connect)
+    monkeypatch.setattr(server, "rename_all", fake_rename_all)
     monkeypatch.setattr(dspy, "LM", lambda **kwargs: DummyLM([]))
     config = AppConfig.model_validate(
         {
@@ -41,9 +39,7 @@ async def test_bulk_mcp_contract_defaults_to_preview_and_exposes_cursor(monkeypa
             },
         }
     )
-    tool = server_module.build_server(config)._tool_manager._tools[
-        "rename_all_functions"
-    ]
+    tool = server.build_server(config)._tool_manager._tools["rename_all_functions"]
 
     await tool.run({})
     await tool.run({"apply": True, "limit": 2, "cursor": "previous"})
@@ -69,8 +65,8 @@ async def test_mcp_apply_contract_preserves_existing_defaults(monkeypatch):
         observed.append(apply)
         return SimpleNamespace(status="renamed" if apply else "proposed", detail="")
 
-    monkeypatch.setattr(server_module, "connect", fake_connect)
-    monkeypatch.setattr(server_module, "rename_current", fake_rename_current)
+    monkeypatch.setattr(server, "connect", fake_connect)
+    monkeypatch.setattr(server, "rename_current", fake_rename_current)
     monkeypatch.setattr(dspy, "LM", lambda **kwargs: DummyLM([]))
     config = AppConfig.model_validate(
         {
@@ -80,9 +76,7 @@ async def test_mcp_apply_contract_preserves_existing_defaults(monkeypatch):
             },
         }
     )
-    tool = server_module.build_server(config)._tool_manager._tools[
-        "rename_current_function"
-    ]
+    tool = server.build_server(config)._tool_manager._tools["rename_current_function"]
 
     await tool.run({})
     await tool.run({"apply": False})
@@ -103,7 +97,7 @@ async def test_dspy_react_calls_native_mcp_tool():
     config = AppConfig.model_validate(
         {"lm": {"model": "fixture"}, "mcp_servers": config}
     )
-    async with connect(config.mcp_servers) as (_, _, tools):
+    async with connections.connect(config.mcp_servers) as (_, _, tools):
         lm = DummyLM(
             [
                 {
@@ -155,7 +149,7 @@ async def test_bulk_rename_uses_native_mcp_function_search_and_write():
                 }
             )
 
-    async with connect(config.mcp_servers) as (sessions, catalogs, _):
+    async with connections.connect(config.mcp_servers) as (sessions, catalogs, _):
         result = await rename_all(
             sessions["ghidra"], catalogs["ghidra"], Program(), apply=True
         )
@@ -192,9 +186,9 @@ async def test_optional_obsidian_taskgroup_failure_keeps_ghidra_session(monkeypa
         async def list_tools(self, params=None):
             return SimpleNamespace(tools=[], nextCursor=None)
 
-    monkeypatch.setattr(connections_module, "stdio_client", ghidra_stream)
-    monkeypatch.setattr(connections_module, "streamablehttp_client", failed_obsidian)
-    monkeypatch.setattr(connections_module, "ClientSession", lambda *args: Session())
+    monkeypatch.setattr(connections, "stdio_client", ghidra_stream)
+    monkeypatch.setattr(connections, "streamablehttp_client", failed_obsidian)
+    monkeypatch.setattr(connections, "ClientSession", lambda *args: Session())
     config = AppConfig.model_validate(
         {
             "lm": {"model": "fixture"},
@@ -208,11 +202,11 @@ async def test_optional_obsidian_taskgroup_failure_keeps_ghidra_session(monkeypa
         }
     )
 
-    async with connect(config.mcp_servers) as (sessions, _, _):
+    async with connections.connect(config.mcp_servers) as (sessions, _, _):
         assert list(sessions) == ["ghidra"]
 
     with pytest.raises(ExceptionGroup):
-        async with connect({"ghidra": config.mcp_servers["obsidian"]}):
+        async with connections.connect({"ghidra": config.mcp_servers["obsidian"]}):
             pass
 
 
@@ -246,11 +240,9 @@ async def test_optional_connection_does_not_swallow_caller_timeout(monkeypatch):
         async def list_tools(self, params=None):
             return SimpleNamespace(tools=[], nextCursor=None)
 
-    monkeypatch.setattr(connections_module, "stdio_client", ghidra_stream)
-    monkeypatch.setattr(connections_module, "streamablehttp_client", obsidian_stream)
-    monkeypatch.setattr(
-        connections_module, "ClientSession", lambda read, write: Session(read)
-    )
+    monkeypatch.setattr(connections, "stdio_client", ghidra_stream)
+    monkeypatch.setattr(connections, "streamablehttp_client", obsidian_stream)
+    monkeypatch.setattr(connections, "ClientSession", lambda read, write: Session(read))
     config = AppConfig.model_validate(
         {
             "lm": {"model": "fixture"},
@@ -266,5 +258,5 @@ async def test_optional_connection_does_not_swallow_caller_timeout(monkeypatch):
 
     with pytest.raises(TimeoutError):
         async with asyncio.timeout(0.01):
-            async with connect(config.mcp_servers):
+            async with connections.connect(config.mcp_servers):
                 pass
