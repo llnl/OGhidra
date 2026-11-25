@@ -241,7 +241,39 @@ if (-not (Test-Path config.yaml)) {
 
 After editing `config.yaml`, register both MCP servers:
 
-For ease of use, a copy of this configuration for your claude client is found in `dsp.json` and can be loaded with a command such as `claude --mcp-config ./mcp.json`.
+```powershell
+$OghidraRoot = (Resolve-Path .).Path
+codex mcp add pyghidra --url http://127.0.0.1:8001/mcp
+codex mcp add oghidra -- `
+  "$OghidraRoot\.venv\Scripts\oghidra-workflows.exe" `
+  --config "$OghidraRoot\config.yaml"
+codex mcp list
+```
+
+Launch a new project and program in terminal 1:
+
+```powershell
+$env:GHIDRA_INSTALL_DIR = 'C:\absolute\path\to\ghidra'
+.\.venv-ghidra\Scripts\pyghidra-mcp.exe --gui --transport streamable-http --host 127.0.0.1 --port 8001 --project-path 'C:\absolute\path\to\projects' --project-name research 'C:\absolute\path\to\program.exe'
+```
+
+Or launch an existing project:
+
+```powershell
+$env:GHIDRA_INSTALL_DIR = 'C:\absolute\path\to\ghidra'
+.\.venv-ghidra\Scripts\pyghidra-mcp.exe --gui --transport streamable-http --host 127.0.0.1 --port 8001 --project-path 'C:\absolute\path\to\project.gpr'
+```
+
+Then run doctor in terminal 2:
+
+```powershell
+.\.venv\Scripts\oghidra-doctor.exe --config config.yaml
+```
+
+Codex CLI, the IDE extension, and the ChatGPT desktop app share the same local
+Codex MCP configuration. Start a new Codex session after changing it.
+
+</details>
 
 ## Obsidian Vault Integration
 
@@ -276,13 +308,13 @@ OGhidra can integrate with an Obsidian vault to provide persistent, human-editab
          Authorization: "Bearer your-api-key-from-settings"
        vault_path: "/path/to/ghidra-vault"
        evidence_tools:
-         - search_notes
-         - read_note
+         - search_simple
+         - vault_read
    ```
 
    Get your API key from Settings → Local REST API in Obsidian. The API key authenticates via the `Authorization: Bearer` header.
 
-   **Important**: The current MCP Python SDK (v1.30.0) does not support passing custom HTTP headers for streamable-http or SSE transports. The `headers` field is included in the config for documentation purposes and future SDK support. For now, OGhidra stores the configuration but cannot authenticate to the Obsidian MCP server. Your Claude client (mcp.json) can connect successfully using headers.
+   OGhidra passes the configured HTTP headers to the Obsidian MCP server when connecting over streamable HTTP or SSE.
 
    **Note**: The HTTP endpoint (port 27123) avoids certificate validation issues. If you prefer HTTPS (port 27124), download and trust the certificate from `https://127.0.0.1:27124/obsidian-local-rest-api.crt`.
 
@@ -305,10 +337,18 @@ OGhidra can integrate with an Obsidian vault to provide persistent, human-editab
 
 5. **Open the vault in Obsidian** to view and edit notes with full Obsidian features (graph view, search, tags, etc.)
 
+If a note filename already belongs to another program or function, OGhidra
+skips that note instead of overwriting it. The Ghidra rename still completes.
+Obsidian is optional at runtime: if its MCP server is unavailable, both rename
+tools continue with Ghidra and report that the note was not written. After a
+verified rename, OGhidra creates a missing note or updates the matching one.
+If two functions receive the same name, their notes use distinct filenames;
+OGhidra preserves the first note and adds a stable identity suffix to later ones.
+
 ### Workflow with Obsidian
 
 The DSPy ReAct agent can:
-- **Search for similar functions** using `search_notes`
+- **Search for similar functions** using `search_simple`
 - **Read prior analysis** to learn from past work
 - **Reference existing patterns** discovered in other functions
 
@@ -337,39 +377,7 @@ The upstream tools do not offer an atomic compare-and-rename operation. Pre-writ
 
 ```bash
 python main.py --schema > config.schema.json
-```powershell
-$OghidraRoot = (Resolve-Path .).Path
-codex mcp add pyghidra --url http://127.0.0.1:8001/mcp
-codex mcp add oghidra -- `
-  "$OghidraRoot\.venv\Scripts\oghidra-workflows.exe" `
-  --config "$OghidraRoot\config.yaml"
-codex mcp list
 ```
-
-Launch a new project and program in terminal 1:
-
-```powershell
-$env:GHIDRA_INSTALL_DIR = 'C:\absolute\path\to\ghidra'
-.\.venv-ghidra\Scripts\pyghidra-mcp.exe --gui --transport streamable-http --host 127.0.0.1 --port 8001 --project-path 'C:\absolute\path\to\projects' --project-name research 'C:\absolute\path\to\program.exe'
-```
-
-Or launch an existing project:
-
-```powershell
-$env:GHIDRA_INSTALL_DIR = 'C:\absolute\path\to\ghidra'
-.\.venv-ghidra\Scripts\pyghidra-mcp.exe --gui --transport streamable-http --host 127.0.0.1 --port 8001 --project-path 'C:\absolute\path\to\project.gpr'
-```
-
-Then run doctor in terminal 2:
-
-```powershell
-.\.venv\Scripts\oghidra-doctor.exe --config config.yaml
-```
-
-Codex CLI, the IDE extension, and the ChatGPT desktop app share the same local
-Codex MCP configuration. Start a new Codex session after changing it.
-
-</details>
 
 ## Troubleshooting first run
 

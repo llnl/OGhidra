@@ -154,9 +154,7 @@ def test_examples_and_generated_schema_are_current():
                         if old_val != new_val:
                             find_differences(f"{path}[{i}]", old_val, new_val, diffs)
             else:
-                diffs.append(
-                    f"{path}:\n  saved:     {repr(old)}\n  generated: {repr(new)}"
-                )
+                diffs.append(f"{path}:\n  saved:     {old!r}\n  generated: {new!r}")
 
         differences = []
         find_differences("schema", saved_schema, generated_schema, differences)

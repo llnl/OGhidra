@@ -1,5 +1,7 @@
 """The rename product: capture, investigate, propose, apply, verify."""
 
+import base64
+import binascii
 import json
 import re
 from typing import Literal
@@ -9,7 +11,11 @@ from mcp import ClientSession
 from mcp.types import CallToolResult, Tool
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
-from .diagnostics import logger, operation
+from .diagnostics import logger, operation, redact
+
+REQUIRED_GHIDRA_TOOLS = frozenset(
+    {"get_gui_context", "decompile_function", "rename_function"}
+)
 
 ConfidenceLevel = Literal["low", "medium", "high"]
 
@@ -65,11 +71,6 @@ async def calculate_confidence(
         },
     )
     return assessment.confidence
-
-
-REQUIRED_GHIDRA_TOOLS = frozenset(
-    {"get_gui_context", "decompile_function", "rename_function"}
-)
 
 
 class Proposal(BaseModel):
@@ -223,6 +224,44 @@ class RenameReceipt(BaseModel):
     new_name: str
 
 
+class ProgramContext(BaseModel):
+    model_config = ConfigDict(strict=True, hide_input_in_errors=True)
+    active_program: str = Field(min_length=1)
+
+
+class FunctionSymbol(BaseModel):
+    model_config = ConfigDict(strict=True, hide_input_in_errors=True)
+    name: str = Field(min_length=1)
+    address: str = Field(min_length=1)
+    source: str
+    external: bool
+    is_thunk: bool
+
+
+class BulkRenameItem(BaseModel):
+    status: Literal[
+        "proposed", "renamed", "unchanged", "failed", "stale", "verification_failed"
+    ]
+    address: str
+    old_name: str
+    proposal: Proposal | None = None
+    observed_name: str | None = None
+    detail: str = ""
+    note_status: Literal["not_attempted", "written", "unavailable", "failed"] = (
+        "not_attempted"
+    )
+    note_detail: str = ""
+
+
+class BulkRenameResult(BaseModel):
+    status: Literal["previewed", "completed", "partial", "aborted"]
+    binary_name: str
+    items: list[BulkRenameItem]
+    counts: dict[str, int]
+    next_cursor: str | None = None
+    detail: str = ""
+
+
 def result_data(result: CallToolResult) -> object:
     """Decode the MCP envelope; this does not proxy or redefine upstream tools."""
     if result.isError:
@@ -233,6 +272,138 @@ def result_data(result: CallToolResult) -> object:
     # Older MCP peers can supply the same JSON in a text content block.
     text = "\n".join(b.text for b in result.content if b.type == "text")
     return json.loads(text)
+
+
+async def _read_analysis_note(
+    obsidian_session: ClientSession,
+    vault_path: str,
+    binary_name: str,
+    old_name: str,
+    address: str,
+) -> tuple[str | None, str | None, str]:
+    """Fetch a matching note, or record why note writing must be skipped."""
+    from .obsidian import read_function_note
+
+    try:
+        content, path = await read_function_note(
+            obsidian_session, vault_path, binary_name, old_name, address
+        )
+        return content, path, ""
+    except Exception as exc:  # noqa: BLE001 - optional vault read.
+        logger.warning(
+            "workflow.obsidian_read_failed", extra={"error": redact(str(exc))}
+        )
+        return None, None, f"Could not safely read matching note: {redact(str(exc))}"
+
+
+async def _write_analysis_note(
+    ghidra_session: ClientSession,
+    obsidian_session: ClientSession,
+    vault_path: str,
+    binary_name: str,
+    address: str,
+    old_name: str,
+    new_name: str,
+    entry_point: str | None,
+    function: Decompilation,
+    proposal: Proposal,
+    existing_content: str | None,
+    existing_path: str | None,
+) -> None:
+    """Build and write one verified rename's note using the shared note format."""
+    from .obsidian import (
+        FunctionLink,
+        extract_human_notes,
+        format_function_note,
+        write_function_note,
+    )
+
+    confidence = await calculate_confidence(
+        proposal=proposal,
+        function=function,
+        has_signature=bool(function.signature),
+        decompile_error=bool(function.error),
+    )
+    callees: list[FunctionLink] = []
+    try:
+        data = result_data(
+            await ghidra_session.call_tool(
+                "decompile_function",
+                {
+                    "binary_name": binary_name,
+                    "name_or_address": address,
+                    "include_callees": True,
+                },
+            )
+        )
+        if isinstance(data, dict) and "result" in data:
+            data = data["result"]
+        functions = TypeAdapter(list[Decompilation]).validate_python(data)
+        for callee_name in functions[0].callees or [] if functions else []:
+            if not callee_name or (
+                not callee_name.startswith("FUN_") and callee_name[0].isupper()
+            ):
+                continue
+            try:
+                symbols = result_data(
+                    await ghidra_session.call_tool(
+                        "search_symbols_by_name",
+                        {
+                            "binary_name": binary_name,
+                            "query": f"^{re.escape(callee_name)}$",
+                            "functions_only": True,
+                            "limit": 1,
+                        },
+                    )
+                )
+                matches = (
+                    symbols.get("symbols", []) if isinstance(symbols, dict) else []
+                )
+                if matches and matches[0].get("address"):
+                    callees.append(
+                        FunctionLink(address=matches[0]["address"], name=callee_name)
+                    )
+            except Exception as exc:  # noqa: BLE001 - optional link lookup.
+                logger.debug(
+                    "workflow.callee_resolution_failed",
+                    extra={"callee": callee_name, "error": redact(str(exc))},
+                )
+    except Exception as exc:  # noqa: BLE001 - callee links are optional.
+        logger.warning(
+            "workflow.callee_decompilation_failed", extra={"error": redact(str(exc))}
+        )
+
+    note_content = format_function_note(
+        address=address,
+        binary_name=binary_name,
+        original_name=old_name,
+        current_name=new_name,
+        proposal=proposal,
+        confidence=confidence,
+        signature=function.signature,
+        entry_point=entry_point,
+        callees=callees,
+        existing_human_notes=extract_human_notes(existing_content or ""),
+    )
+    await write_function_note(
+        obsidian_session,
+        vault_path,
+        binary_name,
+        address,
+        old_name,
+        new_name,
+        note_content,
+        existing_path,
+        existing_content,
+    )
+    logger.info(
+        "workflow.obsidian_note_written",
+        extra={
+            "old_name": old_name,
+            "new_name": new_name,
+            "callees_linked": len(callees),
+        },
+    )
 
 
 async def rename_current(
@@ -291,25 +462,20 @@ async def rename_current(
                 f"Decompilation failed: {function.error or function.code or 'empty response'}"
             )
 
-    # Read existing analysis from Obsidian vault if available
-    existing_content = ""
+    existing_content = None
     existing_path = None
+    note_error = ""
     existing_analysis = ""
     if obsidian_session and vault_path:
-        from .obsidian import read_function_note
-
-        existing_content, existing_path = await read_function_note(
+        existing_content, existing_path, note_error = await _read_analysis_note(
             obsidian_session,
             vault_path,
+            target.active_program,
             target.active_function,
             target.active_address,
         )
         if existing_content:
             existing_analysis = f"Prior analysis from vault:\n{existing_content[:2000]}"
-            logger.info(
-                "workflow.existing_note_found",
-                extra={"function": target.active_function, "path": existing_path},
-            )
 
     with operation("dspy.rename_program"):
         prediction = await program.acall(
@@ -390,158 +556,333 @@ async def rename_current(
             f"Write outcome uncertain; inspect Ghidra before retrying: {exc}"
         )
 
-    # Write analysis to Obsidian vault if available
-    if obsidian_session and vault_path and result.status in ("renamed", "unchanged"):
-        from .obsidian import (
-            FunctionLink,
-            extract_human_notes,
-            format_function_note,
-            write_function_note,
-        )
-
-        human_notes = extract_human_notes(existing_content) if existing_content else ""
-
-        # Assess the proposed name against the decompiled evidence
-        confidence = await calculate_confidence(
-            proposal=proposal,
-            function=function,
-            has_signature=bool(function.signature),
-            decompile_error=bool(function.error),
-        )
-
-        # Resolve callee names to addresses for stable linking
-        callees = []
-        with operation("ghidra.resolve_callees", binary_name=target.active_program):
-            # Re-decompile with callees to get the list
+    if result.status == "renamed" and obsidian_session and vault_path:
+        if note_error:
+            result.detail = note_error
+        else:
             try:
-                decompile_result = result_data(
-                    await session.call_tool(
-                        "decompile_function",
-                        {
-                            "binary_name": target.active_program,
-                            "name_or_address": target.active_address,
-                            "include_callees": True,
-                        },
-                    )
+                await _write_analysis_note(
+                    session,
+                    obsidian_session,
+                    vault_path,
+                    target.active_program,
+                    target.active_address,
+                    target.active_function,
+                    result.observed_name or proposal.suggested_name,
+                    result.function_entry_address,
+                    function,
+                    proposal,
+                    existing_content,
+                    existing_path,
                 )
-                if isinstance(decompile_result, dict) and "result" in decompile_result:
-                    decompile_result = decompile_result["result"]
+            except Exception as exc:  # noqa: BLE001 - note writes are best effort.
+                result.detail = f"Obsidian note failed: {redact(str(exc))}"
+                logger.warning(
+                    "workflow.obsidian_write_failed", extra={"error": redact(str(exc))}
+                )
+    elif result.status == "renamed" and vault_path and not obsidian_session:
+        result.detail = "Obsidian unavailable; note was not written"
 
-                functions_with_callees = TypeAdapter(
-                    list[Decompilation]
-                ).validate_python(decompile_result)
-                if functions_with_callees and functions_with_callees[0].callees:
-                    callee_names = functions_with_callees[0].callees
-                    logger.info(
-                        "workflow.callees_found",
-                        extra={"count": len(callee_names), "names": callee_names},
+    return result
+
+
+GENERIC_FUNCTION_QUERY = r"^(?:FUN_|sub_|loc_|unk_|j_)"
+BULK_REQUIRED_TOOLS = REQUIRED_GHIDRA_TOOLS | {"search_symbols_by_name"}
+
+
+async def _search_function_symbols(
+    session: ClientSession, binary_name: str, query: str
+) -> list[FunctionSymbol]:
+    """Read every page before any rename changes the upstream search ordering."""
+    symbols: list[FunctionSymbol] = []
+    offset = 0
+    while True:
+        data = result_data(
+            await session.call_tool(
+                "search_symbols_by_name",
+                {
+                    "binary_name": binary_name,
+                    "query": query,
+                    "functions_only": True,
+                    "offset": offset,
+                    "limit": 100,
+                },
+            )
+        )
+        page = TypeAdapter(list[FunctionSymbol]).validate_python(data["symbols"])
+        symbols.extend(page)
+        if len(page) < 100:
+            return symbols
+        offset += 100
+
+
+def _bulk_cursor(binary_name: str, address: str) -> str:
+    payload = json.dumps(
+        {"program": binary_name, "after": address}, separators=(",", ":")
+    )
+    return base64.urlsafe_b64encode(payload.encode()).decode()
+
+
+def _cursor_address(cursor: str | None, binary_name: str) -> str | None:
+    if cursor is None:
+        return None
+    if not isinstance(cursor, str) or len(cursor) > 4096:
+        raise ValueError("Invalid bulk cursor")
+    try:
+        data = json.loads(base64.b64decode(cursor, altchars=b"-_", validate=True))
+    except (ValueError, UnicodeDecodeError, binascii.Error) as exc:
+        raise ValueError("Invalid bulk cursor") from exc
+    if (
+        not isinstance(data, dict)
+        or set(data) != {"program", "after"}
+        or not isinstance(data["program"], str)
+        or not isinstance(data["after"], str)
+        or not data["after"]
+        or len(data["after"]) > 256
+    ):
+        raise ValueError("Invalid bulk cursor")
+    if data["program"] != binary_name:
+        raise ValueError("Bulk cursor belongs to a different program")
+    return data["after"]
+
+
+def _finish_bulk(
+    result: BulkRenameResult, last_address: str | None, more: bool
+) -> BulkRenameResult:
+    counts: dict[str, int] = {}
+    for item in result.items:
+        counts[item.status] = counts.get(item.status, 0) + 1
+    result.counts = counts
+    if last_address is not None and more:
+        result.next_cursor = _bulk_cursor(result.binary_name, last_address)
+    if result.status != "aborted" and any(
+        item.status in {"failed", "stale", "verification_failed"}
+        for item in result.items
+    ):
+        result.status = "partial"
+    return result
+
+
+async def rename_all(
+    session: ClientSession,
+    catalog: dict[str, Tool],
+    program: RenameProgram,
+    apply: bool = False,
+    limit: int = 5,
+    cursor: str | None = None,
+    obsidian_session: ClientSession | None = None,
+    vault_path: str | None = None,
+) -> BulkRenameResult:
+    """Process one address-ordered batch of generic functions in the active program."""
+    if missing := BULK_REQUIRED_TOOLS - catalog.keys():
+        raise ValueError(f"pyghidra-mcp missing required tools: {sorted(missing)}")
+    if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 25:
+        raise ValueError("limit must be between 1 and 25")
+    context = ProgramContext.model_validate(
+        result_data(await session.call_tool("get_gui_context", {}))
+    )
+    binary_name = context.active_program
+    after = _cursor_address(cursor, binary_name)
+    found = await _search_function_symbols(session, binary_name, GENERIC_FUNCTION_QUERY)
+    by_address: dict[str, FunctionSymbol] = {}
+    for symbol in found:
+        if (
+            re.match(GENERIC_FUNCTION_QUERY, symbol.name, re.IGNORECASE)
+            and not symbol.external
+            and not symbol.is_thunk
+            and symbol.source.upper() != "USER_DEFINED"
+        ):
+            if symbol.address in by_address:
+                raise ValueError(
+                    f"Duplicate function address in symbol search: {symbol.address}"
+                )
+            by_address[symbol.address] = symbol
+    targets = [
+        symbol
+        for address, symbol in sorted(by_address.items())
+        if after is None or address > after
+    ]
+    batch = targets[:limit]
+    result = BulkRenameResult(
+        status="completed" if apply else "previewed",
+        binary_name=binary_name,
+        items=[],
+        counts={},
+    )
+    last_address = after
+    for target in batch:
+        try:
+            live = ProgramContext.model_validate(
+                result_data(await session.call_tool("get_gui_context", {}))
+            )
+        except Exception as exc:  # noqa: BLE001 - a lost session stops the batch.
+            result.status, result.detail = (
+                "aborted",
+                f"Could not verify active program: {redact(str(exc))}",
+            )
+            return _finish_bulk(result, last_address, True)
+        if live.active_program != binary_name:
+            result.status, result.detail = (
+                "aborted",
+                "Active Ghidra program changed during bulk rename",
+            )
+            return _finish_bulk(result, last_address, True)
+        arguments = {"binary_name": binary_name, "name_or_address": target.address}
+        item = BulkRenameItem(
+            status="failed", address=target.address, old_name=target.name
+        )
+        existing_content = None
+        existing_path = None
+        note_error = ""
+        try:
+            data = result_data(await session.call_tool("decompile_function", arguments))
+            if isinstance(data, dict) and "result" in data:
+                data = data["result"]
+            functions = TypeAdapter(list[Decompilation]).validate_python(data)
+            if (
+                len(functions) != 1
+                or functions[0].error
+                or not functions[0].code.strip()
+                or not functions[0].signature
+            ):
+                raise ValueError(
+                    "Decompilation failed or returned an unexpected function count"
+                )
+            existing_analysis = ""
+            if obsidian_session and vault_path:
+                existing_content, existing_path, note_error = await _read_analysis_note(
+                    obsidian_session,
+                    vault_path,
+                    binary_name,
+                    target.name,
+                    target.address,
+                )
+                if existing_content:
+                    existing_analysis = (
+                        f"Prior analysis from vault:\n{existing_content[:2000]}"
                     )
-
-                    # Resolve each callee name to its address using symbol search
-                    for callee_name in callee_names:
-                        # Skip Windows API functions (heuristic: starts with capital letter, no FUN_ prefix)
-                        if (
-                            not callee_name.startswith("FUN_")
-                            and callee_name[0].isupper()
-                        ):
-                            logger.debug(
-                                "workflow.skipping_api_function",
-                                extra={"callee": callee_name},
-                            )
-                            continue
-
-                        try:
-                            search_result = result_data(
+            prediction = await program.acall(
+                function_name=target.name,
+                address=target.address,
+                binary_name=binary_name,
+                decompiled_code=functions[0].code,
+                existing_analysis=existing_analysis,
+            )
+            item.proposal = Proposal.model_validate(prediction.proposal)
+        except Exception as exc:  # noqa: BLE001 - one target must not stop the batch.
+            item.detail = redact(str(exc))
+            result.items.append(item)
+            last_address = target.address
+            continue
+        if not apply:
+            item.status = "proposed"
+        else:
+            try:
+                live = ProgramContext.model_validate(
+                    result_data(await session.call_tool("get_gui_context", {}))
+                )
+            except Exception as exc:  # noqa: BLE001 - cannot safely continue writes.
+                result.status, result.detail = (
+                    "aborted",
+                    f"Could not verify active program: {redact(str(exc))}",
+                )
+                return _finish_bulk(result, last_address, True)
+            if live.active_program != binary_name:
+                result.status, result.detail = (
+                    "aborted",
+                    "Active Ghidra program changed during bulk rename",
+                )
+                return _finish_bulk(result, last_address, True)
+            try:
+                current = [
+                    symbol
+                    for symbol in await _search_function_symbols(
+                        session, binary_name, f"^{re.escape(target.name)}$"
+                    )
+                    if symbol.address == target.address
+                ]
+                if len(current) != 1 or current[0] != target:
+                    item.status = "stale"
+                    item.observed_name = current[0].name if len(current) == 1 else None
+                    item.detail = "Function changed during analysis; no write was made"
+                elif item.proposal.suggested_name == target.name:
+                    item.status = "unchanged"
+                    item.observed_name = target.name
+                else:
+                    item.status = "verification_failed"
+                    try:
+                        receipt = RenameReceipt.model_validate(
+                            result_data(
                                 await session.call_tool(
-                                    "search_symbols_by_name",
+                                    "rename_function",
                                     {
-                                        "binary_name": target.active_program,
-                                        "query": f"^{re.escape(callee_name)}$",
-                                        "functions_only": True,
-                                        "limit": 1,
+                                        **arguments,
+                                        "new_name": item.proposal.suggested_name,
                                     },
                                 )
                             )
-                            # Result format: {"symbols": [...]}
-                            symbols = (
-                                search_result.get("symbols", [])
-                                if isinstance(search_result, dict)
-                                else []
+                        )
+                        observed = [
+                            symbol
+                            for symbol in await _search_function_symbols(
+                                session,
+                                binary_name,
+                                f"^{re.escape(item.proposal.suggested_name)}$",
                             )
-                            if symbols and len(symbols) > 0:
-                                callee_addr = symbols[0].get("address", "")
-                                if callee_addr:
-                                    callees.append(
-                                        FunctionLink(
-                                            address=callee_addr, name=callee_name
-                                        )
-                                    )
-                                    logger.debug(
-                                        "workflow.callee_resolved",
-                                        extra={
-                                            "name": callee_name,
-                                            "address": callee_addr,
-                                        },
-                                    )
-                        except Exception as e:
-                            logger.debug(
-                                "workflow.callee_resolution_failed",
-                                extra={"callee": callee_name, "error": str(e)},
-                            )
-                else:
-                    logger.warning(
-                        "workflow.no_callees_found",
-                        extra={
-                            "function": target.active_function,
-                            "has_result": bool(functions_with_callees),
-                            "has_callees_field": (
-                                bool(
-                                    functions_with_callees
-                                    and functions_with_callees[0].callees
-                                )
-                                if functions_with_callees
-                                else False
-                            ),
-                        },
+                            if symbol.address == target.address
+                        ]
+                        item.observed_name = (
+                            observed[0].name if len(observed) == 1 else None
+                        )
+                        if (
+                            receipt.binary_name == binary_name
+                            and receipt.address == target.address
+                            and receipt.old_name == target.name
+                            and receipt.new_name == item.proposal.suggested_name
+                            and len(observed) == 1
+                            and observed[0].name == item.proposal.suggested_name
+                        ):
+                            item.status = "renamed"
+                        else:
+                            item.detail = "Rename receipt or symbol read-back did not match; inspect Ghidra"
+                    except Exception as exc:  # noqa: BLE001 - a write might already have happened.
+                        item.detail = (
+                            "Write outcome uncertain; inspect Ghidra before retrying: "
+                            f"{redact(str(exc))}"
+                        )
+            except Exception as exc:  # noqa: BLE001 - read/validation failure affects this target.
+                item.detail = redact(str(exc))
+        if item.status == "renamed" and vault_path:
+            if not obsidian_session:
+                item.note_status = "unavailable"
+                item.note_detail = "Obsidian unavailable; note was not written"
+            elif note_error:
+                item.note_status = "failed"
+                item.note_detail = note_error
+            else:
+                try:
+                    await _write_analysis_note(
+                        session,
+                        obsidian_session,
+                        vault_path,
+                        binary_name,
+                        target.address,
+                        target.name,
+                        item.observed_name or item.proposal.suggested_name,
+                        target.address,
+                        functions[0],
+                        item.proposal,
+                        existing_content,
+                        existing_path,
                     )
-            except Exception as e:
-                logger.warning(
-                    "workflow.callee_decompilation_failed", extra={"error": str(e)}
-                )
-
-        note_content = format_function_note(
-            address=target.active_address,
-            binary_name=target.active_program,
-            original_name=target.active_function,
-            current_name=result.observed_name or proposal.suggested_name,
-            proposal=proposal,
-            confidence=confidence,
-            signature=function.signature,
-            entry_point=result.function_entry_address,
-            callees=callees,
-            existing_human_notes=human_notes,
-        )
-
-        try:
-            await write_function_note(
-                obsidian_session,
-                vault_path,
-                target.active_address,
-                target.active_function,  # old name
-                result.observed_name or proposal.suggested_name,  # new name
-                note_content,
-                existing_path,
-                existing_content,
-            )
-            logger.info(
-                "workflow.obsidian_note_written",
-                extra={
-                    "old_name": target.active_function,
-                    "new_name": result.observed_name or proposal.suggested_name,
-                    "callees_linked": len(callees),
-                },
-            )
-        except Exception as e:
-            logger.warning("workflow.obsidian_write_failed", extra={"error": str(e)})
-
-    return result
+                    item.note_status = "written"
+                except Exception as exc:  # noqa: BLE001 - verified rename remains valid.
+                    item.note_status = "failed"
+                    item.note_detail = f"Obsidian note failed: {redact(str(exc))}"
+                    logger.warning(
+                        "workflow.obsidian_write_failed",
+                        extra={"error": redact(str(exc))},
+                    )
+        result.items.append(item)
+        last_address = target.address
+    return _finish_bulk(result, last_address, len(targets) > len(batch))
